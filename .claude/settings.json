@@ -1,0 +1,56 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build*)",
+      "Bash(go test*)",
+      "Bash(go vet*)",
+      "Bash(gofmt*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(ls*)",
+      "Bash(cat*)",
+      "Bash(grep*)",
+      "Bash(kubectl get*)",
+      "Bash(kubectl describe*)",
+      "Bash(kubectl logs*)"
+    ],
+    "ask": [
+      "Bash(git push*)",
+      "Bash(kubectl apply*)",
+      "Bash(kubectl delete*)",
+      "Bash(helm*)",
+      "Bash(rm -rf*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./secrets/**)",
+      "Bash(curl * | sh*)",
+      "Bash(curl * | bash*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/scripts/kube-context-guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/scripts/post-edit-check.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
