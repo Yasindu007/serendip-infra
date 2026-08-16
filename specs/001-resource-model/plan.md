@@ -26,6 +26,15 @@ oss-researcher, 2026-08, summarized — not upstream docs pasted verbatim):
    building it now with no consumer violates constitution rule 10 (scope
    discipline). Explicitly listed under "Not done" below.
 
+   `resource.Validate` (T003) implements the full Kubernetes label-key
+   grammar, not just the single name/value regex T003's task text named:
+   `prefix/name` keys are supported, with the DNS-subdomain prefix
+   validated separately from the ≤63-char name segment (values use the
+   name-segment regex, empty values allowed). This is real Kubernetes
+   label-key semantics, already covered by `envelope_test.go`, not a
+   speculative addition — documented here because it's more than T003's
+   task text literally asked for, per contract-guardian review.
+
 SQLite driver decisions (modernc.org/sqlite, already locked by ADR 0003, not
 reopened): `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout` on connect;
 `SetMaxOpenConns(1)` — serializes all writes through one connection. This is
@@ -77,17 +86,18 @@ by construction: `SetDefault` is an ordinary `Update` call.
 func New() string // uuid.NewV7().String()
 
 // core/resource
+type Kind string // e.g. "Organization", "Application" — constants per kind file (T004-T008)
 type Metadata struct {
     ID, Name        string
-    Kind             string
+    Kind             Kind
     Labels           map[string]string
     OwnerRefs        []OwnerRef
     Relationships    []Relationship   // drives non-owns edges (runs-on, depends-on, provided-by)
     CreatedAt, UpdatedAt time.Time
     ResourceVersion  int64
 }
-type OwnerRef struct{ Kind, ID string }
-type Relationship struct{ Type EdgeType; TargetKind, TargetID string }
+type OwnerRef struct{ Kind Kind; ID string }
+type Relationship struct{ Type EdgeType; TargetKind Kind; TargetID string }
 type ConditionStatus string // True | False | Unknown
 type Condition struct{ Type string; Status ConditionStatus; Reason, Message string; LastTransitionTime time.Time }
 type Status struct{ Conditions []Condition } // embedded by every kind-specific Status
