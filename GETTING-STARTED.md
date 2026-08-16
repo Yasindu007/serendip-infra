@@ -31,9 +31,15 @@ installed -- one-time, browser-only, requires an org owner:
 3. If prompted, approve under org Settings -> Third-party access (org
    owner only).
 
-No API-driven install path exists -- this step can't be scripted. Once
-installed, every PR against `Serendip-Infra/serendip-infra` gets reviewed
-automatically per `.coderabbit.yaml`.
+No API-driven install path exists -- this step can't be scripted.
+
+Once installed, CodeRabbit only auto-reviews PRs from **outside the org**
+(`.coderabbit.yaml`'s `auto_review.labels` allowlist +
+`.github/workflows/label-external-contributions.yml`, which labels a PR
+`external-contribution` based on `author_association`). Org members' PRs
+aren't auto-reviewed -- internal review already covers those. Any
+maintainer can still request a review manually on any PR by commenting
+`@coderabbitai review`.
 
 ### Local review (advisory, WSL2)
 

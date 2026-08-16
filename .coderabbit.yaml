@@ -64,3 +64,12 @@ reviews:
 
   auto_review:
     enabled: true
+    # Allowlist: only PRs carrying this label get an automatic review.
+    # Org members already do internal review before merging (see
+    # GETTING-STARTED.md); this label is applied automatically by
+    # .github/workflows/label-external-contributions.yml based on
+    # author_association, so only outside contributors trigger CodeRabbit.
+    # Maintainers can still request a review manually any time by
+    # commenting `@coderabbitai review` on a PR regardless of this filter.
+    labels:
+      - external-contribution

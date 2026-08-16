@@ -1,0 +1,63 @@
+name: Label external contributions
+
+# Applies "external-contribution" to PRs from outside the org so
+# .coderabbit.yaml's reviews.auto_review.labels allowlist triggers a
+# CodeRabbit review for them. Org members' PRs are left unlabeled --
+# internal review already covers those (see GETTING-STARTED.md); a
+# maintainer can still request one manually with an `@coderabbitai review`
+# PR comment any time.
+#
+# pull_request_target (not pull_request): runs with base-repo permissions
+# even for fork PRs, and never checks out the PR's untrusted code -- this
+# workflow only reads event metadata and calls the Issues API.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label-if-external:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label PR if author is not an org member/owner/collaborator
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const external = new Set([
+              "CONTRIBUTOR",
+              "FIRST_TIME_CONTRIBUTOR",
+              "FIRST_TIMER",
+              "NONE",
+            ]);
+            const association = context.payload.pull_request.author_association;
+            if (!external.has(association)) {
+              core.info(`author_association=${association} -- internal, not labeling`);
+              return;
+            }
+
+            const label = "external-contribution";
+            const { owner, repo } = context.repo;
+
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: label });
+            } catch (err) {
+              if (err.status !== 404) throw err;
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: label,
+                color: "d93f0b",
+                description: "PR from outside the org -- triggers CodeRabbit auto-review",
+              });
+            }
+
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: context.payload.pull_request.number,
+              labels: [label],
+            });
+            core.info(`author_association=${association} -- labeled as external`);
