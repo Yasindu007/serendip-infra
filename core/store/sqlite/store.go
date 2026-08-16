@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
+	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/graph"
 	"github.com/serendip-infra/serendip-infra/core/id"
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -28,17 +29,28 @@ const timeLayout = time.RFC3339Nano
 // may span multiple resource kinds (e.g. deleting an Organization cascades
 // into Projects, Applications, ...), so it operates on raw table rows via
 // core/graph.ResourceRef rather than this type's own S, St -- see
-// cascadeDeleteChild below. Event publishing is added on top of this in
-// T014.
+// cascadeDeleteChild below. After a successful commit, one event.Event is
+// published per mutation if a Bus was set via SetBus -- publishing is
+// deliberately outside the transaction (an event about a mutation nobody
+// can prove committed yet is worse than a slightly-delayed one).
 type Store[S, St any] struct {
 	db   *sql.DB
 	kind resource.Kind
+	bus  event.Bus // nil is valid: Publish becomes a no-op
 }
 
 // NewStore returns a Store scoped to one resource kind, e.g.
 // NewStore[resource.OrganizationSpec, resource.OrganizationStatus](db, resource.KindOrganization).
+// No event.Bus is attached; call SetBus if you want mutation events.
 func NewStore[S, St any](db *sql.DB, kind resource.Kind) *Store[S, St] {
 	return &Store[S, St]{db: db, kind: kind}
+}
+
+// SetBus attaches an event.Bus so subsequent mutations publish to it.
+// Returns s for chaining, e.g. NewStore[...](db, kind).SetBus(bus).
+func (s *Store[S, St]) SetBus(bus event.Bus) *Store[S, St] {
+	s.bus = bus
+	return s
 }
 
 var _ store.Store[resource.OrganizationSpec, resource.OrganizationStatus] = (*Store[resource.OrganizationSpec, resource.OrganizationStatus])(nil)
@@ -156,9 +168,10 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 	if err != nil {
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: marshal audit after: %w", err)
 	}
+	actor := audit.ActorFrom(ctx)
 	if err := writeAudit(ctx, tx, audit.Record{
 		ID:         id.New(),
-		Actor:      audit.ActorFrom(ctx),
+		Actor:      actor,
 		Interface:  "core",
 		Kind:       string(s.kind),
 		ResourceID: r.Metadata.ID,
@@ -172,6 +185,7 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 	if err := tx.Commit(); err != nil {
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: commit: %w", s.kind, r.Metadata.ID, err)
 	}
+	s.publish(event.EventCreated, r.Metadata.ID, actor, now)
 	return r, nil
 }
 
@@ -252,9 +266,10 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: marshal audit after: %w", err)
 	}
 
+	actor := audit.ActorFrom(ctx)
 	if err := writeAudit(ctx, tx, audit.Record{
 		ID:         id.New(),
-		Actor:      audit.ActorFrom(ctx),
+		Actor:      actor,
 		Interface:  "core",
 		Kind:       string(s.kind),
 		ResourceID: r.Metadata.ID,
@@ -268,6 +283,7 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 	if err := tx.Commit(); err != nil {
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: update %s %s: commit: %w", s.kind, r.Metadata.ID, err)
 	}
+	s.publish(event.EventUpdated, r.Metadata.ID, actor, now)
 	// Return the authoritative post-commit row (CreatedAt preserved,
 	// incremented ResourceVersion, new UpdatedAt) rather than
 	// reconstructing it from what the caller passed in.
@@ -304,13 +320,14 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 		return err
 	}
 	actor := audit.ActorFrom(ctx)
+	var cascaded []graph.ResourceRef
 	if len(children) > 0 {
 		if !cascade {
 			return store.ErrHasChildren
 		}
 		visited := map[graph.ResourceRef]bool{ref: true}
 		for _, child := range children {
-			if err := cascadeDeleteChild(ctx, tx, child, actor, visited); err != nil {
+			if err := cascadeDeleteChild(ctx, tx, child, actor, visited, &cascaded); err != nil {
 				return err
 			}
 		}
@@ -340,20 +357,27 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("sqlite: delete %s %s: commit: %w", s.kind, resourceID, err)
 	}
+	for _, child := range cascaded {
+		s.publishKind(event.EventDeleted, child.Kind, child.ID, actor, now)
+	}
+	s.publish(event.EventDeleted, resourceID, actor, now)
 	return nil
 }
 
 // cascadeDeleteChild recursively deletes ref and everything it
 // transitively owns, post-order (grandchildren before children before
-// ref), each deletion writing its own audit record. Kind-agnostic because
-// a cascade can span multiple resource kinds (an Organization's children
+// ref), each deletion writing its own audit record and appending to
+// *deleted so the caller can publish an event per cascaded resource after
+// the whole transaction commits (events are never published mid-
+// transaction -- see the Store doc comment). Kind-agnostic because a
+// cascade can span multiple resource kinds (an Organization's children
 // are Projects, whose children are Applications, ...) that this Store's
 // own S, St type parameters can't represent.
 //
 // visited guards against a cyclic owns-graph (nothing in resource.Validate
 // currently rejects one) causing unbounded recursion -- a malformed
 // OwnerRefs cycle is rejected with an error instead of a stack overflow.
-func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, actor string, visited map[graph.ResourceRef]bool) error {
+func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, actor string, visited map[graph.ResourceRef]bool, deleted *[]graph.ResourceRef) error {
 	if visited[ref] {
 		return fmt.Errorf("sqlite: cascade delete: cycle detected in owns-graph at %s %s", ref.Kind, ref.ID)
 	}
@@ -364,7 +388,7 @@ func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, 
 		return err
 	}
 	for _, child := range children {
-		if err := cascadeDeleteChild(ctx, tx, child, actor, visited); err != nil {
+		if err := cascadeDeleteChild(ctx, tx, child, actor, visited, deleted); err != nil {
 			return err
 		}
 	}
@@ -380,6 +404,7 @@ func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, 
 	if err := graph.DeleteEdgesFor(ctx, tx, ref); err != nil {
 		return err
 	}
+	*deleted = append(*deleted, ref)
 
 	return writeAudit(ctx, tx, audit.Record{
 		ID:         id.New(),
@@ -436,6 +461,23 @@ func rawSnapshotJSON(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef) (js
 		return nil, fmt.Errorf("sqlite: marshal raw snapshot %s %s: %w", ref.Kind, ref.ID, err)
 	}
 	return out, nil
+}
+
+// publish sends an event.Event for this Store's own kind to s.bus, if one
+// is set (SetBus) -- a no-op otherwise. Always called after tx.Commit()
+// has already succeeded, never before (see the Store doc comment).
+func (s *Store[S, St]) publish(eventType event.EventType, resourceID, actor string, at time.Time) {
+	s.publishKind(eventType, s.kind, resourceID, actor, at)
+}
+
+// publishKind is like publish but for an arbitrary kind -- used for
+// cascade-deleted children, which may be a different kind than this
+// Store was constructed for.
+func (s *Store[S, St]) publishKind(eventType event.EventType, kind resource.Kind, resourceID, actor string, at time.Time) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(event.Event{Type: eventType, Kind: kind, ID: resourceID, Actor: actor, At: at})
 }
 
 // writeAudit inserts one audit_log row as part of tx -- always called
