@@ -311,7 +311,7 @@ func TestStore_Create_WritesExactlyOneAuditRecord(t *testing.T) {
 	if rec.After == nil {
 		t.Fatal("After = nil, want the created resource's JSON snapshot")
 	}
-	if !bytesContain(rec.After, `"Name":"acme"`) {
+	if !bytesContain(rec.After, `"name":"acme"`) {
 		t.Errorf("After = %s, want it to contain the created resource's Name", rec.After)
 	}
 }
@@ -340,10 +340,10 @@ func TestStore_Update_WritesExactlyOneAuditRecordWithBeforeAndAfter(t *testing.T
 	if rec.Actor != "bob" {
 		t.Errorf("Actor = %q, want %q", rec.Actor, "bob")
 	}
-	if !bytesContain(rec.Before, `"Name":"acme"`) || bytesContain(rec.Before, `"Name":"acme-renamed"`) {
+	if !bytesContain(rec.Before, `"name":"acme"`) || bytesContain(rec.Before, `"name":"acme-renamed"`) {
 		t.Errorf("Before = %s, want the pre-update Name (acme, not acme-renamed)", rec.Before)
 	}
-	if !bytesContain(rec.After, `"Name":"acme-renamed"`) {
+	if !bytesContain(rec.After, `"name":"acme-renamed"`) {
 		t.Errorf("After = %s, want the post-update Name (acme-renamed)", rec.After)
 	}
 }

@@ -1,7 +1,9 @@
 package resource_test
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -109,5 +111,50 @@ func TestResource_GenericEnvelope(t *testing.T) {
 	}
 	if len(r.Status.Conditions) != 1 {
 		t.Errorf("len(Status.Conditions) = %d, want 1", len(r.Status.Conditions))
+	}
+}
+
+// TestMetadata_JSONTags_AreLowerCamelCase proves the actual point of
+// spec 002's T005-T010 (adding json tags to core/resource types): the
+// marshaled shape uses lowerCamelCase keys suitable for an HTTP API, not
+// Go's default capitalized field names. Round-trips back through
+// resource.Organization to confirm unmarshal still works too.
+func TestMetadata_JSONTags_AreLowerCamelCase(t *testing.T) {
+	org := resource.Organization{
+		Metadata: resource.Metadata{
+			ID:              "org-1",
+			Name:            "acme",
+			Kind:            resource.KindOrganization,
+			Labels:          map[string]string{"tier": "prod"},
+			ResourceVersion: 1,
+		},
+	}
+
+	data, err := json.Marshal(org)
+	if err != nil {
+		t.Fatalf("Marshal() = %v", err)
+	}
+
+	for _, wantKey := range []string{
+		`"id":"org-1"`, `"name":"acme"`, `"kind":"Organization"`,
+		`"resourceVersion":1`, `"tier":"prod"`,
+	} {
+		if !strings.Contains(string(data), wantKey) {
+			t.Errorf("marshaled JSON = %s, want it to contain %s", data, wantKey)
+		}
+	}
+	// Confirm capitalized Go field names did NOT leak through unchanged.
+	for _, wantAbsent := range []string{`"Name":`, `"ID":`, `"ResourceVersion":`} {
+		if strings.Contains(string(data), wantAbsent) {
+			t.Errorf("marshaled JSON = %s, want it to NOT contain %s (default Go field name)", data, wantAbsent)
+		}
+	}
+
+	var roundTripped resource.Organization
+	if err := json.Unmarshal(data, &roundTripped); err != nil {
+		t.Fatalf("Unmarshal() = %v", err)
+	}
+	if roundTripped.Metadata.Name != "acme" || roundTripped.Metadata.ID != "org-1" {
+		t.Errorf("round-tripped Metadata = %+v, want Name=acme ID=org-1", roundTripped.Metadata)
 	}
 }

@@ -11,14 +11,14 @@ const (
 // "a metric threshold, log pattern, synthetic check failure, ...").
 // Types only in spec 001 -- no lifecycle logic (spec.md Scope OUT).
 type AlertSpec struct {
-	Source   string // what produced this alert (observability backend, synthetic check, ...)
-	Rule     string
-	Severity string
+	Source   string `json:"source,omitempty"` // what produced this alert (observability backend, synthetic check, ...)
+	Rule     string `json:"rule,omitempty"`
+	Severity string `json:"severity,omitempty"`
 }
 
 type AlertStatus struct {
 	Status
-	FiredAt time.Time
+	FiredAt time.Time `json:"firedAt,omitzero"`
 }
 
 type Alert = Resource[AlertSpec, AlertStatus]
@@ -27,8 +27,8 @@ type Alert = Resource[AlertSpec, AlertStatus]
 // Diagnosis and the approval/action trail (docs/architecture/operations.md
 // full lifecycle) are explicitly out of scope for spec 001 -- types only.
 type IncidentSpec struct {
-	Severity string
-	Summary  string
+	Severity string `json:"severity,omitempty"`
+	Summary  string `json:"summary,omitempty"`
 }
 
 // IncidentStatus tracks what an Incident has correlated so far. Nothing
@@ -38,8 +38,8 @@ type IncidentSpec struct {
 // need a breaking change to add it.
 type IncidentStatus struct {
 	Status
-	CorrelatedAlerts  []string // Alert IDs
-	AffectedResources []string // resource IDs
+	CorrelatedAlerts  []string `json:"correlatedAlerts,omitempty"`  // Alert IDs
+	AffectedResources []string `json:"affectedResources,omitempty"` // resource IDs
 }
 
 type Incident = Resource[IncidentSpec, IncidentStatus]

@@ -47,7 +47,7 @@ type Project = Resource[ProjectSpec, ProjectStatus]
 // Environment. An empty/missing entry means "use the capability's
 // registry default."
 type EnvironmentSpec struct {
-	CapabilityOverrides map[string]string
+	CapabilityOverrides map[string]string `json:"capabilityOverrides,omitempty"`
 }
 
 // AvailabilityLevel is the honest, never-silently-upgraded description of
@@ -64,7 +64,7 @@ const (
 
 type EnvironmentStatus struct {
 	Status
-	Availability AvailabilityLevel
+	Availability AvailabilityLevel `json:"availability,omitempty"`
 }
 
 type Environment = Resource[EnvironmentSpec, EnvironmentStatus]

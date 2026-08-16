@@ -11,9 +11,9 @@ const (
 // what capability this is, whether a fresh install can run without it,
 // which providers are registered for it, and which one is the default.
 type CapabilitySpec struct {
-	Required  bool
-	Providers []string // registered provider names for this capability
-	Default   string   // provider name a fresh install picks absent user choice
+	Required  bool     `json:"required"`
+	Providers []string `json:"providers,omitempty"` // registered provider names for this capability
+	Default   string   `json:"default,omitempty"`   // provider name a fresh install picks absent user choice
 }
 
 type CapabilityStatus struct {
@@ -27,16 +27,16 @@ type Capability = Resource[CapabilitySpec, CapabilityStatus]
 // (docs/architecture/provider-model.md "Registration"). Nothing verifies
 // these numbers in spec 001 -- that's a benchmark/reconciliation concern.
 type ResourceRequirements struct {
-	RSSBytes      int64
-	CPUMilliCores int64
+	RSSBytes      int64 `json:"rssBytes,omitempty"`
+	CPUMilliCores int64 `json:"cpuMilliCores,omitempty"`
 }
 
 // HealthCheckContract describes how the reconciliation engine (spec 003)
 // should check whether this provider is alive. Stored as data only in
 // spec 001 -- nothing executes it yet (provider-model.md "Lifecycle").
 type HealthCheckContract struct {
-	Kind   string // interpreted by the reconciliation engine, not here
-	Config map[string]string
+	Kind   string            `json:"kind,omitempty"` // interpreted by the reconciliation engine, not here
+	Config map[string]string `json:"config,omitempty"`
 }
 
 // ProviderSpec is a provider's registration descriptor
@@ -44,9 +44,9 @@ type HealthCheckContract struct {
 // capabilities it implements, its resource requirements, and its health
 // check contract.
 type ProviderSpec struct {
-	Capabilities         []string
-	ResourceRequirements ResourceRequirements
-	HealthCheck          HealthCheckContract
+	Capabilities         []string             `json:"capabilities,omitempty"`
+	ResourceRequirements ResourceRequirements `json:"resourceRequirements,omitzero"`
+	HealthCheck          HealthCheckContract  `json:"healthCheck,omitzero"`
 }
 
 type ProviderStatus struct {
@@ -59,10 +59,10 @@ type Provider = Resource[ProviderSpec, ProviderStatus]
 // Capability within a specific Environment -- "this Environment uses this
 // Provider for this Capability" (capability-model.md, resource-model.md).
 type ProviderInstanceSpec struct {
-	CapabilityID  string
-	ProviderID    string
-	EnvironmentID string
-	Config        map[string]string
+	CapabilityID  string            `json:"capabilityId,omitempty"`
+	ProviderID    string            `json:"providerId,omitempty"`
+	EnvironmentID string            `json:"environmentId,omitempty"`
+	Config        map[string]string `json:"config,omitempty"`
 }
 
 type ProviderInstanceStatus struct {

@@ -9,7 +9,7 @@ const (
 // SiteSpec describes a physical or logical location (resource-model.md:
 // "a room, a cloud region, a colo") that groups Clusters by proximity.
 type SiteSpec struct {
-	Location string
+	Location string `json:"location,omitempty"`
 }
 
 type SiteStatus struct {
@@ -22,7 +22,7 @@ type Site = Resource[SiteSpec, SiteStatus]
 // manages this cluster's compute capability -- by ID through the Provider
 // Registry, never a hardcoded vendor name (constitution rule 1).
 type ClusterSpec struct {
-	ProviderID string
+	ProviderID string `json:"providerId,omitempty"`
 }
 
 type ClusterStatus struct {
@@ -41,12 +41,12 @@ type NodeSpec struct{}
 // exists now so the topology planner and later specs have a stable target.
 type NodeStatus struct {
 	Status
-	CPUCores              int
-	MemoryBytes           int64
-	DiskType              string // e.g. "nvme", "ssd", "hdd" -- reported value, not a fixed enum
-	DiskBytes             int64
-	NetworkMbps           int
-	VirtualizationSupport bool
+	CPUCores              int    `json:"cpuCores,omitempty"`
+	MemoryBytes           int64  `json:"memoryBytes,omitempty"`
+	DiskType              string `json:"diskType,omitempty"` // e.g. "nvme", "ssd", "hdd" -- reported value, not a fixed enum
+	DiskBytes             int64  `json:"diskBytes,omitempty"`
+	NetworkMbps           int    `json:"networkMbps,omitempty"`
+	VirtualizationSupport bool   `json:"virtualizationSupport,omitempty"`
 }
 
 type Node = Resource[NodeSpec, NodeStatus]

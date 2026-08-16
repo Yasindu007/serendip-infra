@@ -25,38 +25,38 @@ const (
 // "owns" edge in the resource graph. A resource may have zero or more
 // owners (e.g. a Component is owned by its Application).
 type OwnerRef struct {
-	Kind Kind
-	ID   string
+	Kind Kind   `json:"kind"`
+	ID   string `json:"id"`
 }
 
 // Relationship declares a non-owns edge (runs-on, depends-on, provided-by)
 // from this resource to another. Owns edges are derived from OwnerRefs
 // instead -- a Relationship must never carry EdgeOwns.
 type Relationship struct {
-	Type       EdgeType
-	TargetKind Kind
-	TargetID   string
+	Type       EdgeType `json:"type"`
+	TargetKind Kind     `json:"targetKind"`
+	TargetID   string   `json:"targetId"`
 }
 
 // Metadata is the envelope every Serendip resource shares, regardless of
 // kind (docs/architecture/resource-model.md "Resource envelope").
 type Metadata struct {
-	ID              string
-	Name            string
-	Kind            Kind
-	Labels          map[string]string
-	OwnerRefs       []OwnerRef
-	Relationships   []Relationship
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	ResourceVersion int64
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Kind            Kind              `json:"kind"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	OwnerRefs       []OwnerRef        `json:"ownerRefs,omitempty"`
+	Relationships   []Relationship    `json:"relationships,omitempty"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	UpdatedAt       time.Time         `json:"updatedAt"`
+	ResourceVersion int64             `json:"resourceVersion"`
 }
 
 // Resource pairs Metadata with a kind-specific desired state (Spec) and
 // observed state (Status). Every resource kind instantiates this generic
 // envelope rather than hand-rolling its own metadata handling.
 type Resource[S any, St any] struct {
-	Metadata Metadata
-	Spec     S
-	Status   St
+	Metadata Metadata `json:"metadata"`
+	Spec     S        `json:"spec"`
+	Status   St       `json:"status"`
 }

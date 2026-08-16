@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -174,5 +175,77 @@ func TestDelete_Cascade_CycleDetected(t *testing.T) {
 	err = orgs.Delete(ctx, a.Metadata.ID, true)
 	if err == nil {
 		t.Fatal("Delete(a, cascade=true) on a cyclic owns-graph succeeded, want a cycle-detected error")
+	}
+}
+
+// TestCascadeDelete_AuditSnapshotShape_MatchesOrdinaryDelete proves a
+// cascade-deleted child's audit "before" snapshot has the same shape and
+// key casing (lowerCamelCase, nested under "metadata") as an ordinary
+// (non-cascaded) delete's -- contract-guardian flagged this as a real gap
+// after T005-T010 added json tags to core/resource: rawSnapshotJSON built
+// its own ad hoc struct with hardcoded capitalized tags, independent of
+// resource.Metadata, so cascade-deleted children's audit records would
+// have looked different from every other resource's.
+func TestCascadeDelete_AuditSnapshotShape_MatchesOrdinaryDelete(t *testing.T) {
+	ctx := context.Background()
+	db := newCascadeTestDB(t)
+
+	orgs := sqlite.NewStore[resource.OrganizationSpec, resource.OrganizationStatus](db, resource.KindOrganization)
+	projects := sqlite.NewStore[resource.ProjectSpec, resource.ProjectStatus](db, resource.KindProject)
+
+	org, err := orgs.Create(ctx, resource.Organization{Metadata: resource.Metadata{Name: "acme"}})
+	if err != nil {
+		t.Fatalf("Create(org) = %v", err)
+	}
+	project, err := projects.Create(ctx, resource.Project{
+		Metadata: resource.Metadata{
+			Name:      "web",
+			OwnerRefs: []resource.OwnerRef{{Kind: resource.KindOrganization, ID: org.Metadata.ID}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create(project) = %v", err)
+	}
+
+	// org has a child (project), so deleting it cascades -- project's
+	// audit "before" snapshot goes through cascadeDeleteChild/
+	// rawSnapshotJSON, not the ordinary typed Delete() path.
+	if err := orgs.Delete(ctx, org.Metadata.ID, true); err != nil {
+		t.Fatalf("Delete(org, cascade=true) = %v", err)
+	}
+
+	var beforeJSON string
+	if err := db.QueryRowContext(ctx,
+		`SELECT before FROM audit_log WHERE resource_id = ? AND after IS NULL`, project.Metadata.ID,
+	).Scan(&beforeJSON); err != nil {
+		t.Fatalf("query cascade child's audit before snapshot: %v", err)
+	}
+
+	for _, wantKey := range []string{
+		`"metadata":{`, `"id":"` + project.Metadata.ID + `"`, `"name":"web"`,
+		`"kind":"Project"`, `"resourceVersion":1`, `"spec":`, `"status":`,
+		// project has a real OwnerRef (org) but no Labels/Relationships --
+		// present vs. omitted keys must both be correct, not just casing.
+		`"ownerRefs":[{`,
+	} {
+		if !strings.Contains(beforeJSON, wantKey) {
+			t.Errorf("cascade child audit snapshot = %s, want it to contain %s", beforeJSON, wantKey)
+		}
+	}
+	for _, wantAbsent := range []string{
+		`"Name":`, `"ID":`, `"ResourceVersion":`, `"Metadata":`, // old ad hoc capitalized shape
+		// project.Metadata.Labels/Relationships were never set (nil), so
+		// omitempty must actually drop these keys -- the bug this test
+		// exists to catch: wrapping raw DB column text ("null") in
+		// json.RawMessage defeats omitempty (RawMessage("null") has
+		// len()==4, never counts as empty), even though the real
+		// resource.Metadata's nil map/slice correctly omits under the
+		// same tag. Fixed by unmarshaling into typed map/slice fields
+		// instead of RawMessage before marshaling the snapshot.
+		`"labels":`, `"relationships":`,
+	} {
+		if strings.Contains(beforeJSON, wantAbsent) {
+			t.Errorf("cascade child audit snapshot = %s, want it to NOT contain %s", beforeJSON, wantAbsent)
+		}
 	}
 }

@@ -18,16 +18,16 @@ const (
 // Every resource kind's Status embeds Status (below), so all kinds share
 // this shape regardless of what Type values they use.
 type Condition struct {
-	Type               string
-	Status             ConditionStatus
-	Reason             string
-	Message            string
-	LastTransitionTime time.Time
+	Type               string          `json:"type"`
+	Status             ConditionStatus `json:"status"`
+	Reason             string          `json:"reason,omitempty"`
+	Message            string          `json:"message,omitempty"`
+	LastTransitionTime time.Time       `json:"lastTransitionTime"`
 }
 
 // Status is embedded by every kind-specific Status struct so Conditions
 // are handled uniformly across all resource kinds (spec 001 open question
 // "shared status package", resolved in specs/001-resource-model/plan.md).
 type Status struct {
-	Conditions []Condition
+	Conditions []Condition `json:"conditions,omitempty"`
 }
