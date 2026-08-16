@@ -56,6 +56,25 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "relationship with EdgeOwns type rejected",
+			meta: resource.Metadata{
+				Name: "my-app",
+				Relationships: []resource.Relationship{
+					{Type: resource.EdgeOwns, TargetKind: resource.KindProject, TargetID: "p1"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "relationship with non-owns type accepted",
+			meta: resource.Metadata{
+				Name: "my-app",
+				Relationships: []resource.Relationship{
+					{Type: resource.EdgeRunsOn, TargetKind: resource.KindCluster, TargetID: "c1"},
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

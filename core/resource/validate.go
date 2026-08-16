@@ -31,6 +31,11 @@ func Validate(m Metadata) error {
 			return fmt.Errorf("resource: invalid label value %q for key %q", value, key)
 		}
 	}
+	for i, rel := range m.Relationships {
+		if rel.Type == EdgeOwns {
+			return fmt.Errorf("resource: Relationships[%d]: EdgeOwns is derived from OwnerRefs, not a declarable Relationship type", i)
+		}
+	}
 	return nil
 }
 

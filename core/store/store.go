@@ -15,6 +15,11 @@ var ErrNotFound = errors.New("store: resource not found")
 // doesn't match the currently stored one (optimistic concurrency).
 var ErrConflict = errors.New("store: resource version conflict")
 
+// ErrHasChildren is returned by Delete(cascade=false) when the resource
+// has "owns" children (docs/architecture/resource-model.md
+// "Relationships"). Retry with cascade=true to delete them too.
+var ErrHasChildren = errors.New("store: resource has children; delete rejected without cascade")
+
 // ListOptions filters Store.List. Label matching is exact-match only in
 // spec 001 -- full Kubernetes-style set-based selectors (in/notin/exists)
 // are deferred until a real consumer needs them

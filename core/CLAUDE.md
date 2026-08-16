@@ -12,6 +12,9 @@ Hard rules (constitution 1-3):
 Conventions:
 - One package per concern: resource/, registry/, graph/, reconcile/, policy/,
   event/, audit/, store/.
-- store/ hides SQLite behind an interface (ADR 0003). No SQL outside store/.
+- store/ hides SQLite behind an interface (ADR 0003). graph/ also contains
+  direct SQL against the shared edges table (specs/001-resource-model/plan.md,
+  T013) -- it's tightly coupled to store/sqlite's schema by design, not a
+  layering violation. No SQL outside store/ and graph/.
 - Interfaces defined here, implemented in providers/.
 Run go test ./core/... after every change here.

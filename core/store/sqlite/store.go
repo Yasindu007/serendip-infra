@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
+	"github.com/serendip-infra/serendip-infra/core/graph"
 	"github.com/serendip-infra/serendip-infra/core/id"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
@@ -20,11 +21,15 @@ const timeLayout = time.RFC3339Nano
 // resource kind, fixed at construction (kind is a struct field, not a
 // per-call parameter, because Get/Update/Delete in the store.Store
 // interface don't take a kind argument). Every mutation (Create/Update/
-// Delete) writes its audit_log row inside the same transaction as the
-// data change -- not an optional wrapper a caller could forget
-// (constitution rule 8, specs/001-resource-model/plan.md). Graph-edge
-// sync and cascade-delete children-checking are added on top of this in
-// T013; event publishing in T014.
+// Delete) writes its audit_log row AND syncs the edges table inside the
+// same transaction as the data change -- neither is an optional wrapper a
+// caller could forget (constitution rule 8, resource-model.md's graph,
+// specs/001-resource-model/plan.md). Cascade-delete of "owns" children
+// may span multiple resource kinds (e.g. deleting an Organization cascades
+// into Projects, Applications, ...), so it operates on raw table rows via
+// core/graph.ResourceRef rather than this type's own S, St -- see
+// cascadeDeleteChild below. Event publishing is added on top of this in
+// T014.
 type Store[S, St any] struct {
 	db   *sql.DB
 	kind resource.Kind
@@ -142,6 +147,11 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: %w", s.kind, r.Metadata.ID, err)
 	}
 
+	ref := graph.ResourceRef{Kind: s.kind, ID: r.Metadata.ID}
+	if err := graph.SyncEdges(ctx, tx, ref, r.Metadata.OwnerRefs, r.Metadata.Relationships); err != nil {
+		return resource.Resource[S, St]{}, err
+	}
+
 	afterJSON, err := json.Marshal(r)
 	if err != nil {
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: marshal audit after: %w", err)
@@ -225,6 +235,11 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 		return resource.Resource[S, St]{}, store.ErrConflict
 	}
 
+	ref := graph.ResourceRef{Kind: s.kind, ID: r.Metadata.ID}
+	if err := graph.SyncEdges(ctx, tx, ref, r.Metadata.OwnerRefs, r.Metadata.Relationships); err != nil {
+		return resource.Resource[S, St]{}, err
+	}
+
 	after, err := scanResource[S, St](tx.QueryRowContext(ctx, `
 		SELECT id, name, labels, owner_refs, relationships, spec, status,
 		       resource_version, created_at, updated_at
@@ -259,13 +274,12 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 	return after, nil
 }
 
-// Delete removes a resource by id+kind. The cascade parameter is accepted
-// for store.Store interface conformance but not yet acted on -- checking
-// for "owns" children and rejecting/cascading is core/graph's job, wired
-// into this method in T013.
+// Delete removes a resource by id+kind. If it has "owns" children
+// (docs/architecture/resource-model.md "Relationships"), cascade=false
+// rejects with store.ErrHasChildren; cascade=true deletes every child
+// first (post-order, deepest first), each with its own audit record,
+// entirely within this one transaction.
 func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bool) error {
-	_ = cascade
-
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("sqlite: delete %s %s: begin: %w", s.kind, resourceID, err)
@@ -284,14 +298,35 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 		return fmt.Errorf("sqlite: marshal audit before: %w", err)
 	}
 
+	ref := graph.ResourceRef{Kind: s.kind, ID: resourceID}
+	children, err := graph.Children(ctx, tx, ref)
+	if err != nil {
+		return err
+	}
+	actor := audit.ActorFrom(ctx)
+	if len(children) > 0 {
+		if !cascade {
+			return store.ErrHasChildren
+		}
+		visited := map[graph.ResourceRef]bool{ref: true}
+		for _, child := range children {
+			if err := cascadeDeleteChild(ctx, tx, child, actor, visited); err != nil {
+				return err
+			}
+		}
+	}
+
 	if _, err := tx.ExecContext(ctx, `DELETE FROM resources WHERE id = ? AND kind = ?`, resourceID, string(s.kind)); err != nil {
 		return fmt.Errorf("sqlite: delete %s %s: %w", s.kind, resourceID, err)
+	}
+	if err := graph.DeleteEdgesFor(ctx, tx, ref); err != nil {
+		return err
 	}
 
 	now := time.Now().UTC()
 	if err := writeAudit(ctx, tx, audit.Record{
 		ID:         id.New(),
-		Actor:      audit.ActorFrom(ctx),
+		Actor:      actor,
 		Interface:  "core",
 		Kind:       string(s.kind),
 		ResourceID: resourceID,
@@ -306,6 +341,101 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 		return fmt.Errorf("sqlite: delete %s %s: commit: %w", s.kind, resourceID, err)
 	}
 	return nil
+}
+
+// cascadeDeleteChild recursively deletes ref and everything it
+// transitively owns, post-order (grandchildren before children before
+// ref), each deletion writing its own audit record. Kind-agnostic because
+// a cascade can span multiple resource kinds (an Organization's children
+// are Projects, whose children are Applications, ...) that this Store's
+// own S, St type parameters can't represent.
+//
+// visited guards against a cyclic owns-graph (nothing in resource.Validate
+// currently rejects one) causing unbounded recursion -- a malformed
+// OwnerRefs cycle is rejected with an error instead of a stack overflow.
+func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, actor string, visited map[graph.ResourceRef]bool) error {
+	if visited[ref] {
+		return fmt.Errorf("sqlite: cascade delete: cycle detected in owns-graph at %s %s", ref.Kind, ref.ID)
+	}
+	visited[ref] = true
+
+	children, err := graph.Children(ctx, tx, ref)
+	if err != nil {
+		return err
+	}
+	for _, child := range children {
+		if err := cascadeDeleteChild(ctx, tx, child, actor, visited); err != nil {
+			return err
+		}
+	}
+
+	beforeJSON, err := rawSnapshotJSON(ctx, tx, ref)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM resources WHERE id = ? AND kind = ?`, ref.ID, string(ref.Kind)); err != nil {
+		return fmt.Errorf("sqlite: cascade delete %s %s: %w", ref.Kind, ref.ID, err)
+	}
+	if err := graph.DeleteEdgesFor(ctx, tx, ref); err != nil {
+		return err
+	}
+
+	return writeAudit(ctx, tx, audit.Record{
+		ID:         id.New(),
+		Actor:      actor,
+		Interface:  "core",
+		Kind:       string(ref.Kind),
+		ResourceID: ref.ID,
+		Before:     beforeJSON,
+		After:      nil,
+		At:         time.Now().UTC(),
+	})
+}
+
+// rawSnapshotJSON marshals a resources row into an audit "before"
+// snapshot without needing the row's Spec/Status Go types -- the JSON
+// columns are re-wrapped verbatim via json.RawMessage rather than
+// unmarshaled into a concrete struct, so this works for any kind
+// (needed by cascadeDeleteChild, which encounters kinds this Store[S, St]
+// instance was never constructed for).
+func rawSnapshotJSON(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef) (json.RawMessage, error) {
+	var snap struct {
+		ID              string          `json:"ID"`
+		Name            string          `json:"Name"`
+		Labels          json.RawMessage `json:"Labels"`
+		OwnerRefs       json.RawMessage `json:"OwnerRefs"`
+		Relationships   json.RawMessage `json:"Relationships"`
+		Spec            json.RawMessage `json:"Spec"`
+		Status          json.RawMessage `json:"Status"`
+		ResourceVersion int64           `json:"ResourceVersion"`
+		CreatedAt       string          `json:"CreatedAt"`
+		UpdatedAt       string          `json:"UpdatedAt"`
+	}
+	var labels, ownerRefs, relationships, spec, status string
+	err := tx.QueryRowContext(ctx, `
+		SELECT id, name, labels, owner_refs, relationships, spec, status,
+		       resource_version, created_at, updated_at
+		FROM resources WHERE id = ? AND kind = ?`, ref.ID, string(ref.Kind),
+	).Scan(&snap.ID, &snap.Name, &labels, &ownerRefs, &relationships, &spec, &status,
+		&snap.ResourceVersion, &snap.CreatedAt, &snap.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: raw snapshot %s %s: %w", ref.Kind, ref.ID, err)
+	}
+	snap.Labels = json.RawMessage(labels)
+	snap.OwnerRefs = json.RawMessage(ownerRefs)
+	snap.Relationships = json.RawMessage(relationships)
+	snap.Spec = json.RawMessage(spec)
+	snap.Status = json.RawMessage(status)
+
+	out, err := json.Marshal(snap)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: marshal raw snapshot %s %s: %w", ref.Kind, ref.ID, err)
+	}
+	return out, nil
 }
 
 // writeAudit inserts one audit_log row as part of tx -- always called
