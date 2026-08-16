@@ -17,41 +17,72 @@ Last updated: 2026-08-16
 PR #24.** All 19 tasks + epic closed and linked (locally only — see
 GitHub note below, nothing from spec 002 has been pushed anywhere yet).
 
-**Spec 002 (HTTP API) in progress: T001-T010 committed locally
-(through 695a0d3), T011 (generic `ResourceHandler[S,St]`) next.**
-`api/{problem.go, middleware.go}` exist and are tested: RFC 7807 error
-mapping, request-ID middleware, actor-extraction middleware (the real
-authn gate — got a deliberately security-focused contract-guardian pass,
-no bypass found). `core/resource` now has `json:"lowerCamelCase"` tags
-throughout (T005-T010) — this surfaced and fixed a real bug along the
-way: `core/store/sqlite`'s cascade-delete audit-snapshot builder
-(`rawSnapshotJSON`) wrapped raw DB text in `json.RawMessage`, which
-silently defeats `omitempty` (an empty map/slice is stored as the literal
-string `"null"`, and `RawMessage("null")` has `len()==4`, never counting
-as empty) — contract-guardian caught this on a re-review (BLOCK, then
-PASS after the fix). Worth remembering: `core/resource.ErrValidation` is
-new too (T002) — `resource.Validate()` didn't have a sentinel error
-before spec 002 needed one to map validation failures to 400 without
-string-matching. `core/audit` gained `WithRequestID`/`RequestIDFrom` and
-`WithInterface`/`InterfaceFrom` (T003) — the latter wasn't explicitly
-scoped to any task on paper but shared T003's exact call sites and no
-other task claimed it, so it got bundled in (contract-guardian agreed
-this was the right call).
+**Spec 002 (HTTP API) — T001-T017 done and committed locally, T018 (this
+edit) in progress, only T019 (final acceptance pass + contract-guardian)
+left.** Full picture:
+
+- `api/{problem.go, middleware.go, handler.go, graph_handler.go,
+  server.go}` — RFC 7807 error mapping, request-ID middleware,
+  actor-extraction middleware (static `SERENDIP_API_KEYS`, the real authn
+  gate — deliberately security-focused contract-guardian pass, no bypass
+  found), generic `ResourceHandler[S,St]` (14 instantiations in
+  `server.go`, mirrors `core/store/sqlite.Store[S,St]`'s pattern),
+  `GraphHandler` (first real consumer of `graph.SQLiteGraph` outside
+  `core/store/sqlite`'s own transactions), two-mux composition
+  (`/healthz` bypasses auth, `/v1/` doesn't).
+- `cmd/serendipd/main.go` (T014) — real entrypoint: open+migrate SQLite,
+  construct bus+server, graceful shutdown on SIGINT/SIGTERM. Verified via
+  the actual compiled binary, not just unit tests — healthz/auth checked
+  on Windows, then a real SIGINT-triggered clean shutdown (~200ms, no
+  hang) verified in WSL2 since Windows has no scriptable way to deliver a
+  real SIGINT/Ctrl-C to a background process. **Go wasn't installed in
+  WSL at session start — installed to `~/go-sdk` (no sudo available,
+  user-space install) and added to `~/.bashrc`'s PATH; reusable for any
+  future Linux-side testing**, which also better matches the actual
+  target deployment platform (K3s on Linux, ADR 0001) than Windows does.
+- Test coverage: `api/handler_test.go` (T011, T015 — CRUD cycle, 404,
+  validation 400, version-conflict 409, malformed-body 400, permissive
+  Content-Type pinned as intentional, combined owner+label filtering),
+  `api/graph_handler_test.go` (T013), `api/acceptance_test.go` (T016 —
+  spec.md's acceptance criteria 2-4 proven through the *fully composed*
+  `api.NewServer` stack: create/get/delete round-trip with audit rows
+  showing a real actor+interface; a rejected no-actor mutation produces
+  zero audit rows/events/data-changes; every error is problem+json with
+  a request ID matching the audit row a real mutation produces).
+- `.claude/scripts/check-imports.sh` (T017) — extended to also scan
+  `api/` (previously `core/`-only): rule 2's removability bullet only
+  holds if `api/` never imports `providers/` directly either. `api/`'s
+  one vendor-name mention (a Thunder reference in `middleware.go`,
+  pointing at ADR 0006's already-made decision) is a comment, not a
+  leaked dependency — left as-is, constitution rule 1 scopes the
+  identifier/comment restriction to `core/` anyway.
+- `core/resource` has `json:"lowerCamelCase"` tags throughout (T005-T010)
+  — surfaced and fixed a real bug along the way: `core/store/sqlite`'s
+  cascade-delete audit-snapshot builder (`rawSnapshotJSON`) wrapped raw
+  DB text in `json.RawMessage`, which silently defeats `omitempty` (an
+  empty map/slice is stored as the literal string `"null"`, and
+  `RawMessage("null")` has `len()==4`, never counting as empty) —
+  contract-guardian caught this on a re-review (BLOCK, then PASS after
+  the fix). `core/resource.ErrValidation` is new too (T002).
+  `core/audit` gained `WithRequestID`/`RequestIDFrom` and
+  `WithInterface`/`InterfaceFrom` (T003).
 
 Plan.md decisions worth remembering without re-reading it: generic
 `ResourceHandler[S,St]` (one type, 14 instantiations, mirrors
 `core/store/sqlite.Store[S,St]`), static API-key actor extraction
 (`SERENDIP_API_KEYS` env var — explicitly weak/temporary until a real
-identity provider exists), JSON tags directly on `core/resource` types
-(no separate DTOs), flat unscoped routes (no multi-tenant path nesting —
-`OwnerRefs` is plural so it doesn't map to single-parent nesting anyway),
-`/v1/` prefix from day one.
+identity provider exists; `api.ActorMiddleware`'s doc comment names it as
+the exact swap-in point for `providers/identity` later), JSON tags
+directly on `core/resource` types (no separate DTOs), flat unscoped
+routes (no multi-tenant path nesting — `OwnerRefs` is plural so it
+doesn't map to single-parent nesting anyway), `/v1/` prefix from day one.
 
 **Process note this stretch**: user asked me to make spec-level decisions
 myself and present them for approval rather than asking open questions
 for routine/reversible calls (saved to memory as `decide-then-confirm`) —
-applying that from T001 onward in spec 002, most visibly in the
-Interface-bundling call above and the rawSnapshotJSON fix.
+applied throughout spec 002: the Interface-bundling call, the
+rawSnapshotJSON fix, extending check-imports.sh to `api/`, and the
+Content-Type/owner+label test-gap decisions in T015.
 
 **GitHub note**: `serendipinfra` account is flagged by GitHub (blocks
 OAuth app authorization — hit this trying `coderabbit auth login` —
@@ -145,11 +176,13 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **T011** (generic `ResourceHandler[S,St]`) — the actual HTTP CRUD
-   layer, then T012 (mount all 14 kinds + server assembly), T013 (graph
-   read endpoints — finally gives `graph.SQLiteGraph` a real consumer),
-   T014 (`cmd/serendipd` wiring), T015-T019 (tests, import audit, docs
-   sync, final pass) per `specs/002-http-api/tasks.md`.
+1. **T019** (final acceptance pass + contract-guardian) — the last task
+   in `specs/002-http-api/tasks.md`: `go test ./core/... ./api/... -v`
+   full run, re-check all 5 acceptance criteria against actual test
+   output, one holistic `contract-guardian` review across `core/` (the
+   audit/migration changes) and all of `api/`. Then spec 002 is fully
+   done and spec 003 planning starts (per `docs/PRD.md`'s roadmap —
+   check it for what's next in sequence, don't assume).
 2. GitHub: PAT permissions got fixed and the tracking board (milestones/
    issues/sub-issues/project) got fully built and spec 001 merged via
    PR #24 — but then `serendipinfra` got flagged (blocks OAuth app
