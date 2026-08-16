@@ -13,8 +13,8 @@ Last updated: 2026-08-16
 
 ## Current phase
 
-**Phase 0 complete. Phase 1 (Foundation, spec 001) in progress: T001-T003
-committed, T004 next.**
+**Phase 0 complete. Phase 1 (Foundation, spec 001) in progress: T001-T008
+committed (fc3dc6e), T009 (Store interface) next.**
 
 ## Done
 
@@ -65,41 +65,58 @@ committed, T004 next.**
   times, flagged 2 plan/code drifts (Kind type instead of bare string,
   fuller label-prefix grammar) — both fixed by updating `plan.md` to match,
   not by changing the code (the code was the better call in both cases).
+- **T004-T008** (fc3dc6e): all 14 per-kind resource types (org tree,
+  infra tree, app, capability, ops), each a `resource.<Kind> =
+  Resource[<Kind>Spec, <Kind>Status]` type alias. contract-guardian PASS;
+  fixed one advisory (vendor names in test fixtures → vendor-neutral),
+  left two as reasoned/intentional (ProviderInstanceSpec.Config,
+  AlertSpec fields — slightly beyond doc-named scope but not speculative).
+  Key things NOT yet populated by anything (types only, expected): Node
+  hardware facts (spec 004's job), Incident correlation (operations.md,
+  later spec), Environment.Availability (reconciliation's job, spec 003).
 - **contract-guardian is run before every `core/` commit this session** —
-  established pattern, keep doing it for T004 onward, not just when
-  convenient.
+  established pattern, keep doing it, not just when convenient.
 
 ## Tooling set up this session (unrelated to spec 001, don't confuse with it)
 
 - **GitHub tracking board (Jira-style: Milestone=Phase, Issue=Spec/Epic,
   native sub-issues=Tasks, Project board)**: designed and approved by user,
-  **blocked** — `gh` API calls (milestones/labels/issues) get 403
-  "Resource not accessible by personal access token", and
-  `gh project create` fails with a GraphQL permissions error. Root cause:
-  the fine-grained PAT is missing **Issues: Read and write** (repo-level,
-  on `Serendip-Infra/serendip-infra`) and **Projects: Read and write**
-  (org-level, on `Serendip-Infra`). User needs to fix this at
-  github.com/settings/personal-access-tokens — told them the exact steps.
-  **Once fixed, resume by building**: 8 milestones (Phase 0-6, see
-  `docs/PRD.md` roadmap), one Epic issue per spec (001-004) with
-  `--parent`-linked sub-issues T001-T019 under spec 001 (mark T001-T003
-  closed since done), a Project v2 board (Backlog/In Progress/Review/Done).
-- **Git remote / SSH identity mismatch flagged, not fixed**: user has SSH
-  config host aliases (`github.com-org` → serendipinfra,
-  `github.com-personal` → Yasindu007) but both git remotes use plain
-  `git@github.com:...`, so per-remote identity separation isn't actually
-  active. Offered to fix (`git remote set-url` to use the aliased hosts);
-  **awaiting user go-ahead**, not done.
-- **CodeRabbit** (1ac6992): `.coderabbit.yaml` (path-scoped review
+  **still blocked as of this update**, tested empirically twice. User
+  re-ran `gh auth login` as the `serendipinfra` org account (a NEW
+  fine-grained PAT, `github_pat_11CLUSRSI0...`) believing they'd granted
+  full permissions. Retested: reading Issues now works (was fully blocked
+  before), but writing (milestone/label creation) still 403s, and
+  `gh project create` still fails with the same GraphQL permission error.
+  Likely cause (told user, unresolved): Issues permission is set to
+  Read-only not Read-and-write, Projects org-level permission wasn't
+  touched, or a fine-grained-PAT org-resource pending-approval step exists
+  that hasn't been approved. **Once actually fixed (verify with `gh api
+  repos/Serendip-Infra/serendip-infra/milestones -f title=test -f
+  state=open` — should NOT 403), resume by building**: 8 milestones
+  (Phase 0-6, see `docs/PRD.md` roadmap), one Epic issue per spec (001-004)
+  with `--parent`-linked sub-issues T001-T019 under spec 001 (mark
+  T001-T008 closed since done), a Project v2 board (Backlog/In
+  Progress/Review/Done).
+- **Git remote / SSH identity mismatch: fixed by user.** `git remote -v`
+  now shows `origin` → `git@github.com-personal:...` and `upstream` →
+  `git@github.com-org:...`, matching their SSH config aliases. Confirmed,
+  no further action needed.
+- **CodeRabbit** (1ac6992, c57eb19): `.coderabbit.yaml` (path-scoped review
   instructions tied to constitution rules) + GitHub App install
   instructions in `GETTING-STARTED.md` (browser-only, needs org-owner
-  approval, not scriptable — not yet confirmed done by user). Local
-  advisory review via `.githooks/post-commit` (background, non-blocking,
-  `core.hooksPath` set locally) — **blocked on two manual WSL2 steps**
-  needing the user's `sudo` password: `apt-get install unzip`, then
-  `sh /tmp/coderabbit-install.sh` (already downloaded to WSL `/tmp`,
-  content-vetted, sha256 `29dadcd3...`), then `coderabbit auth login`.
-  Exact commands are in `GETTING-STARTED.md`'s "Local review" section.
+  approval, not scriptable — not yet confirmed done by user). Auto-review
+  gated to **external contributors only**: `auto_review.labels:
+  [external-contribution]` allowlist +
+  `.github/workflows/label-external-contributions.yml` (labels PRs based
+  on `author_association`; org members' PRs stay unlabeled since internal
+  review already covers those; `@coderabbitai review` comment still works
+  manually anytime). Local advisory review via `.githooks/post-commit`
+  (background, non-blocking, `core.hooksPath` set locally) — **blocked on
+  two manual WSL2 steps** needing the user's `sudo` password:
+  `apt-get install unzip`, then `sh /tmp/coderabbit-install.sh` (already
+  downloaded to WSL `/tmp`, content-vetted, sha256 `29dadcd3...`), then
+  `coderabbit auth login`. Exact commands are in `GETTING-STARTED.md`'s
+  "Local review" section.
 - **Memory saved**: `architecture_change_guardrails` (feedback-type) —
   user pasted a generic AI-guardrail prompt (had stale "NEXUS" naming),
   most of it duplicates constitution.md rules 1-3/7-8. Non-redundant parts
