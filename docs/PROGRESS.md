@@ -14,18 +14,44 @@ Last updated: 2026-08-16
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24 (2026-08-16).** All 19 tasks + epic closed and linked. Spec 002
-(HTTP API): `spec.md` + `plan.md` + `tasks.md` (T001-T019) drafted,
-**awaiting user approval before implementation** — nothing in `api/`
-exists yet beyond the starter-kit `api/CLAUDE.md`. Key plan.md decisions
-worth remembering without re-reading it: generic `ResourceHandler[S,St]`
-(one type, 14 instantiations, mirrors `core/store/sqlite.Store[S,St]`),
-static API-key actor extraction (`SERENDIP_API_KEYS` env var — explicitly
-weak/temporary until a real identity provider exists), JSON tags added
-directly to `core/resource` types (no separate DTOs), flat unscoped
-routes (no multi-tenant path nesting — `OwnerRefs` is plural so it
-doesn't map to single-parent nesting anyway), `/v1/` prefix from day one,
-new `audit.Record.RequestID` field + migration `0002_add_request_id.sql`.
+PR #24.** All 19 tasks + epic closed and linked (locally only — see
+GitHub note below, nothing from spec 002 has been pushed anywhere yet).
+
+**Spec 002 (HTTP API) in progress: T001-T010 committed locally
+(through 695a0d3), T011 (generic `ResourceHandler[S,St]`) next.**
+`api/{problem.go, middleware.go}` exist and are tested: RFC 7807 error
+mapping, request-ID middleware, actor-extraction middleware (the real
+authn gate — got a deliberately security-focused contract-guardian pass,
+no bypass found). `core/resource` now has `json:"lowerCamelCase"` tags
+throughout (T005-T010) — this surfaced and fixed a real bug along the
+way: `core/store/sqlite`'s cascade-delete audit-snapshot builder
+(`rawSnapshotJSON`) wrapped raw DB text in `json.RawMessage`, which
+silently defeats `omitempty` (an empty map/slice is stored as the literal
+string `"null"`, and `RawMessage("null")` has `len()==4`, never counting
+as empty) — contract-guardian caught this on a re-review (BLOCK, then
+PASS after the fix). Worth remembering: `core/resource.ErrValidation` is
+new too (T002) — `resource.Validate()` didn't have a sentinel error
+before spec 002 needed one to map validation failures to 400 without
+string-matching. `core/audit` gained `WithRequestID`/`RequestIDFrom` and
+`WithInterface`/`InterfaceFrom` (T003) — the latter wasn't explicitly
+scoped to any task on paper but shared T003's exact call sites and no
+other task claimed it, so it got bundled in (contract-guardian agreed
+this was the right call).
+
+Plan.md decisions worth remembering without re-reading it: generic
+`ResourceHandler[S,St]` (one type, 14 instantiations, mirrors
+`core/store/sqlite.Store[S,St]`), static API-key actor extraction
+(`SERENDIP_API_KEYS` env var — explicitly weak/temporary until a real
+identity provider exists), JSON tags directly on `core/resource` types
+(no separate DTOs), flat unscoped routes (no multi-tenant path nesting —
+`OwnerRefs` is plural so it doesn't map to single-parent nesting anyway),
+`/v1/` prefix from day one.
+
+**Process note this stretch**: user asked me to make spec-level decisions
+myself and present them for approval rather than asking open questions
+for routine/reversible calls (saved to memory as `decide-then-confirm`) —
+applying that from T001 onward in spec 002, most visibly in the
+Interface-bundling call above and the rawSnapshotJSON fix.
 
 **GitHub note**: `serendipinfra` account is flagged by GitHub (blocks
 OAuth app authorization — hit this trying `coderabbit auth login` —
@@ -119,15 +145,26 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Spec 002 (HTTP API)** — `/new-spec 002-http-api`, then `/plan-spec`
-   per `GETTING-STARTED.md`'s workflow. Nothing started yet. This is also
-   when the `"core"` literal in `audit.Record.Interface` gets a real
-   per-interface value for API-driven mutations, and when multi-tenant
-   isolation enforcement (flagged below) likely needs to become concrete.
-2. Two things blocked on the user (not on implementation) — check current
-   status before assuming still blocked: GitHub PAT permissions (tracking
-   board), WSL sudo steps for CodeRabbit local review. (SSH identity
-   separation is resolved.)
+1. **T011** (generic `ResourceHandler[S,St]`) — the actual HTTP CRUD
+   layer, then T012 (mount all 14 kinds + server assembly), T013 (graph
+   read endpoints — finally gives `graph.SQLiteGraph` a real consumer),
+   T014 (`cmd/serendipd` wiring), T015-T019 (tests, import audit, docs
+   sync, final pass) per `specs/002-http-api/tasks.md`.
+2. GitHub: PAT permissions got fixed and the tracking board (milestones/
+   issues/sub-issues/project) got fully built and spec 001 merged via
+   PR #24 — but then `serendipinfra` got flagged (blocks OAuth app
+   authorization, and apparently Issues/PR list-view visibility too).
+   User emailed GitHub Support directly (SMS verification doesn't support
+   Sri Lankan numbers, blocking the normal contact path) and is waiting to
+   hear back — expect a few days. **Nothing from spec 002 has been pushed
+   anywhere** (all local commits only) — don't assume otherwise. WSL sudo
+   step for CodeRabbit local review turned out to be avoidable entirely
+   (a Python-based `unzip` shim, no `sudo` needed) — CLI is installed,
+   only `coderabbit auth login` (browser) remains, blocked by the same
+   account flag. **Do not use `serendipinfra` OR `Yasindu007` (user's
+   personal account) for GitHub automation right now** — user explicitly
+   asked not to touch the personal account either; leave GitHub alone
+   entirely until they say otherwise.
 
 ## Standing instructions (fold into CLAUDE.md properly if this section
 keeps persisting across many sessions unchanged — don't let it live here
