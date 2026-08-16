@@ -13,6 +13,22 @@ Target: runs comfortably on a single old laptop (ThinkPad T470, i5-6th gen,
 Read `docs/constitution.md` before writing any code. It always wins over
 anything in this file or in a prompt.
 
+## Session continuity
+
+Read `docs/PROGRESS.md` first, every session — it's the current-state
+handoff doc (what's done, what's next), overwritten each session rather
+than appended to. Read `docs/PRD.md` alongside it for why/what/roadmap
+context that changes rarely. Do not rely on conversation memory alone to
+carry project state across a `/clear`, auto-compaction, or a new session —
+these two files are the durable source of truth.
+
+Update `docs/PROGRESS.md` at natural checkpoints: end of a spec, end of a
+phase, before a long gap, or when context is running long and a `/clear`
+is likely soon. There is no tool available to self-trigger `/clear` or
+measure exact context-window percentage — the practical substitute is
+keeping `docs/PROGRESS.md` current enough that losing conversation history
+costs nothing.
+
 ## Stack
 
 - Go 1.22+ for `core/`, `api/`, `agent/`, `providers/`

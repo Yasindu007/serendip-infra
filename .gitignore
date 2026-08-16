@@ -1,0 +1,29 @@
+# Founding conversation exports — reference material only, never published.
+# See GETTING-STARTED.md step 2 and docs/architecture/README.md.
+docs/raw/
+
+# Go
+/bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# Node / UI
+node_modules/
+ui/dist/
+ui/.vite/
+
+# Local dev / secrets
+.env
+.env.*
+*.local
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Benchmark scratch (keep committed results under profiles/*/bench/, not raw scratch runs)
+*.pprof
