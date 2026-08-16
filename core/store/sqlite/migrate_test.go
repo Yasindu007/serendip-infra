@@ -32,17 +32,61 @@ func TestMigrate_AppliesSchemaAndIsIdempotent(t *testing.T) {
 		}
 	}
 
-	// Re-running must be a no-op: no error, no duplicate-table failure.
+	// Count after the first Migrate() -- deliberately not a hardcoded
+	// number, since the number of embedded migration files grows over
+	// time (e.g. T003 in spec 002 added a second one). What idempotency
+	// actually means is "re-running doesn't change this count."
+	var firstCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&firstCount); err != nil {
+		t.Fatalf("count schema_migrations after first Migrate(): %v", err)
+	}
+	if firstCount == 0 {
+		t.Fatal("schema_migrations is empty after Migrate(), want at least one row")
+	}
+
+	// Re-running must be a no-op: no error, no duplicate-table failure,
+	// no additional rows.
 	if err := sqlite.Migrate(ctx, db); err != nil {
 		t.Fatalf("Migrate() second call = %v, want nil (idempotent)", err)
 	}
 
-	var migrationCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
-		t.Fatalf("count schema_migrations: %v", err)
+	var secondCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&secondCount); err != nil {
+		t.Fatalf("count schema_migrations after second Migrate(): %v", err)
 	}
-	if migrationCount != 1 {
-		t.Errorf("schema_migrations rows = %d, want 1 (re-run must not re-insert)", migrationCount)
+	if secondCount != firstCount {
+		t.Errorf("schema_migrations rows after re-run = %d, want unchanged from %d", secondCount, firstCount)
+	}
+}
+
+func TestMigrate_RequestIDColumnExists(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	db, err := sqlite.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	defer db.Close()
+	if err := sqlite.Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate() = %v", err)
+	}
+
+	// Inserting a row referencing request_id proves the column exists
+	// with the expected (nullable TEXT) type -- migration 0002.
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO audit_log (id, actor, interface, kind, resource_id, at, request_id)
+		VALUES ('a', 'alice', 'http', 'Organization', 'org-1', '2026-08-16T00:00:00Z', 'req-1')`)
+	if err != nil {
+		t.Fatalf("insert with request_id: %v", err)
+	}
+
+	var requestID string
+	if err := db.QueryRowContext(ctx, `SELECT request_id FROM audit_log WHERE id = 'a'`).Scan(&requestID); err != nil {
+		t.Fatalf("select request_id: %v", err)
+	}
+	if requestID != "req-1" {
+		t.Errorf("request_id = %q, want %q", requestID, "req-1")
 	}
 }
 

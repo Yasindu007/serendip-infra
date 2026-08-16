@@ -22,4 +22,8 @@ type Record struct {
 	// PolicyDecision is reserved for a future policy engine (spec 003+).
 	// Nil until then -- nothing sets it in spec 001.
 	PolicyDecision *string
+	// RequestID ties this record back to the HTTP request that caused it
+	// (spec 002, RequestIDFrom). Empty for mutations not made through the
+	// API (a direct core/store call, e.g. a test or a future reconciler).
+	RequestID string
 }

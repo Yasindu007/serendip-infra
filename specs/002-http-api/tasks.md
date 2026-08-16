@@ -33,6 +33,20 @@ Ordered; `[P]` = parallel-safe within its block, `[A]` = subagent-eligible
   edits to `core/store/sqlite/store.go`.
 - **Verify**: `go test ./core/... ./api/...` — a test asserts the same
   request ID appears in the response header and the resulting audit row.
+- **Scope grew during implementation** (contract-guardian-reviewed,
+  judged reasonable, noted here for anyone reading this file later): also
+  added `audit.WithInterface`/`InterfaceFrom` and replaced the hardcoded
+  `Interface: "core"` literal at all 4 `audit.Record{}` construction
+  sites in `core/store/sqlite/store.go`. This wasn't explicitly T003's
+  job on paper, but shares the exact same context-carrying mechanism and
+  call sites as `RequestID`, and no other task in this file was ever
+  scoped to implement acceptance criterion 2's "`Interface` is a real
+  value, not `\"core\"`" requirement (T004 is actor-only, T016 only
+  tests it). Left unassigned, it would have been silently missing until
+  someone noticed. Also fixed a spec-001-era test
+  (`TestMigrate_AppliesSchemaAndIsIdempotent`) that hardcoded "exactly 1
+  migration row," which broke once this task's migration `0002` made
+  that assumption stale.
 
 ## T004 — Actor extraction middleware
 
