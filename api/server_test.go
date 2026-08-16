@@ -86,3 +86,41 @@ func TestNewServer_V1Routes_RequireAuth(t *testing.T) {
 		t.Errorf("GET /v1/organizations (no token) status = %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 }
+
+// T019 gap fix: an unmatched route must still be RFC 7807 problem+json
+// (acceptance criterion 4, "every error response"), not Go's default
+// plain-text 404 -- caught by contract-guardian's holistic final review.
+func TestNewServer_UnmatchedRoute_IsProblemJSON(t *testing.T) {
+	db := newTestDB(t)
+	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"})
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"unmatched under /v1/", "/v1/no-such-kind"},
+		{"unmatched top-level", "/bogus"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			req.Header.Set("Authorization", "Bearer key-alice")
+			srv.Handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want %d, body: %s", w.Code, http.StatusNotFound, w.Body)
+			}
+			if ct := w.Header().Get("Content-Type"); ct != "application/problem+json" {
+				t.Errorf("Content-Type = %q, want application/problem+json", ct)
+			}
+			var p api.Problem
+			if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+				t.Fatalf("decode Problem body: %v (body: %s)", err, w.Body)
+			}
+			if p.Status != http.StatusNotFound {
+				t.Errorf("Problem.Status = %d, want %d", p.Status, http.StatusNotFound)
+			}
+		})
+	}
+}

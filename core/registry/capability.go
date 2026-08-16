@@ -59,7 +59,7 @@ func (r *CapabilityRegistry) SetDefault(ctx context.Context, name, provider stri
 		return err
 	}
 	if !slices.Contains(cap.Spec.Providers, provider) {
-		return fmt.Errorf("registry: provider %q is not registered for capability %q", provider, name)
+		return fmt.Errorf("%w: provider %q is not registered for capability %q", resource.ErrValidation, provider, name)
 	}
 	cap.Spec.Default = provider
 	_, err = r.store.Update(ctx, cap)

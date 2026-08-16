@@ -3,6 +3,7 @@ package registry_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -79,8 +80,9 @@ func TestCapabilityRegistry_SetDefault_RejectsUnregisteredProvider(t *testing.T)
 		t.Fatalf("Register() = %v", err)
 	}
 
-	if err := r.SetDefault(ctx, "identity", "provider-nonexistent"); err == nil {
-		t.Fatal("SetDefault() with unregistered provider succeeded, want an error")
+	err := r.SetDefault(ctx, "identity", "provider-nonexistent")
+	if !errors.Is(err, resource.ErrValidation) {
+		t.Fatalf("SetDefault() with unregistered provider error = %v, want errors.Is(err, resource.ErrValidation) so api/'s MapStoreError maps it to 400, not 500", err)
 	}
 	// The default must be unchanged after a rejected switch.
 	got, err := r.Default(ctx, "identity")

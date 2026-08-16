@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"net/http"
 
+	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/graph"
+	"github.com/serendip-infra/serendip-infra/core/registry"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
@@ -18,9 +20,12 @@ import (
 // assembled: nothing else in this package ever calls NewServeMux + graph
 // wiring, so leaving it unwired would mean the graph endpoints exist but
 // are unreachable through the actual running server -- same reasoning as
-// T003's Interface-bundling call), the middleware chain (request ID ->
-// actor -> mux, specs/002-http-api/plan.md), and a GET /healthz that
-// needs no token.
+// T003's Interface-bundling call), the registry default-provider endpoint
+// (RegistryHandler -- specs/002-http-api/spec.md Scope-IN item 2, closed
+// as a T019 final-review gap fix; no task on paper ever built it and the
+// drop went undisclosed until contract-guardian's holistic pass caught
+// it), the middleware chain (request ID -> actor -> mux,
+// specs/002-http-api/plan.md), and a GET /healthz that needs no token.
 //
 // apiKeys is the static token-to-actor map for ActorMiddleware -- see its
 // doc comment for why this is intentionally temporary.
@@ -41,13 +46,25 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string) *http.Serve
 	mountResource[resource.NodeSpec, resource.NodeStatus](apiMux, db, bus, resource.KindNode, "nodes")
 	mountResource[resource.ApplicationSpec, resource.ApplicationStatus](apiMux, db, bus, resource.KindApplication, "applications")
 	mountResource[resource.ComponentSpec, resource.ComponentStatus](apiMux, db, bus, resource.KindComponent, "components")
-	mountResource[resource.CapabilitySpec, resource.CapabilityStatus](apiMux, db, bus, resource.KindCapability, "capabilities")
+	// Capability's store is shared with RegistryHandler below (T019 gap
+	// fix -- specs/002-http-api/spec.md Scope-IN item 2, "get/set a
+	// capability's default provider", was never wired up) rather than
+	// going through mountResource's private per-call store construction.
+	capStore := sqlite.NewStore[resource.CapabilitySpec, resource.CapabilityStatus](db, resource.KindCapability).SetBus(bus)
+	NewResourceHandler[resource.CapabilitySpec, resource.CapabilityStatus](capStore, "capabilities").Register(apiMux)
 	mountResource[resource.ProviderSpec, resource.ProviderStatus](apiMux, db, bus, resource.KindProvider, "providers")
 	mountResource[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](apiMux, db, bus, resource.KindProviderInstance, "provider-instances")
 	mountResource[resource.IncidentSpec, resource.IncidentStatus](apiMux, db, bus, resource.KindIncident, "incidents")
 	mountResource[resource.AlertSpec, resource.AlertStatus](apiMux, db, bus, resource.KindAlert, "alerts")
 
 	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
+	NewRegistryHandler(registry.NewCapabilityRegistry(capStore)).Register(apiMux)
+	// Catch-all for anything under /v1/ that doesn't match a registered
+	// kind/graph/registry route -- without this, an unmatched /v1/ path
+	// falls through to Go's default plain-text 404, violating acceptance
+	// criterion 4's literal "every error response is valid ... problem+json"
+	// (T019 final-review gap fix, contract-guardian non-blocking finding).
+	apiMux.HandleFunc("/", notFoundHandler)
 
 	topMux := http.NewServeMux()
 	topMux.HandleFunc("GET /healthz", healthzHandler)
@@ -56,10 +73,17 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string) *http.Serve
 	// topMux, not apiMux, so there's no bypass logic to get wrong inside
 	// a shared handler.
 	topMux.Handle("/v1/", ActorMiddleware(apiKeys)(apiMux))
+	// Same reasoning as apiMux's catch-all, for paths outside /v1/ and
+	// /healthz entirely (e.g. a bare "/" or a typo'd top-level path).
+	topMux.HandleFunc("/", notFoundHandler)
 
 	return &http.Server{
 		Handler: RequestIDMiddleware(topMux),
 	}
+}
+
+func notFoundHandler(w http.ResponseWriter, r *http.Request) {
+	WriteProblem(w, http.StatusNotFound, "not found", "no route matches "+r.Method+" "+r.URL.Path, audit.RequestIDFrom(r.Context()))
 }
 
 // mountResource constructs a Store[S, St] for kind (wired to bus) and
