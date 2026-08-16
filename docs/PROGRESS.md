@@ -13,9 +13,8 @@ Last updated: 2026-08-16
 
 ## Current phase
 
-**Phase 0 — Setup & architecture freeze: complete.** User reviewed
-`docs/architecture/*.md` and ADRs 0004-0006 and approved committing. Next
-phase is Foundation (spec 001 planning) — see "Not yet done / next up".
+**Phase 0 complete. Phase 1 (Foundation, spec 001) in progress: T001-T003
+committed, T004 next.**
 
 ## Done
 
@@ -53,32 +52,85 @@ phase is Foundation (spec 001 planning) — see "Not yet done / next up".
   "lighter than Keycloak") stays unverified until actually benchmarked on a
   T470 — the dev machine's headroom is not evidence.
 
-## Not yet done / next up
+## Done (spec 001 implementation)
 
-1. Phase 0 batch committed (architecture docs, ADRs 0004-0006, PRD,
-   PROGRESS, .gitignore) — see git log for the commit.
-2. `specs/001-resource-model/plan.md` and `tasks.md` (T001-T019) drafted
-   and approved by user.
-3. **T001 done, not yet committed**: `go.mod`/`go.sum` (module
-   `github.com/serendip-infra/serendip-infra`, `go 1.22`), empty
-   `core/{id,resource,store,registry,graph,event,audit}/doc.go` scaffold,
-   `google/uuid` dependency added, ADR 0007 written. `go build ./...` /
-   `go vet ./...` / `gofmt -l .` all clean.
-4. **Next: T002** (`core/id` — UUIDv7 wrapper + tests), then T003
-   (envelope, blocks T004-T008). Key plan decisions to remember without
-   re-reading plan.md: one shared `resources` SQLite table (not per-kind),
-   audit+graph sync inside the same transaction as every mutation,
-   `SetMaxOpenConns(1)`, exact-match-only label filtering for now.
-5. `contract-guardian` review required before committing any `core/`
-   change (CLAUDE.md standing rule) — not yet run this session.
+- `specs/001-resource-model/plan.md` + `tasks.md` (T001-T019) drafted, user-approved.
+- **T001** (165f61b): `go.mod` (`github.com/serendip-infra/serendip-infra`,
+  `go 1.22`), `core/{id,resource,store,registry,graph,event,audit}/` scaffold,
+  `google/uuid` dep, ADR 0007.
+- **T002** (a2eb3a9): `core/id.New()` (UUIDv7 wrapper), tests pass.
+- **T003** (de8ac80): `core/resource` envelope — `Metadata`, `Kind`,
+  `EdgeType`+4 constants, `OwnerRef`, `Relationship`, `Condition`/`Status`,
+  generic `Resource[S, St]`, `Validate()`. contract-guardian PASS both
+  times, flagged 2 plan/code drifts (Kind type instead of bare string,
+  fuller label-prefix grammar) — both fixed by updating `plan.md` to match,
+  not by changing the code (the code was the better call in both cases).
+- **contract-guardian is run before every `core/` commit this session** —
+  established pattern, keep doing it for T004 onward, not just when
+  convenient.
 
-## Standing instructions this session established (not yet in CLAUDE.md structurally — verify they've been folded in; if this section still exists next session, they may not have been)
+## Tooling set up this session (unrelated to spec 001, don't confuse with it)
+
+- **GitHub tracking board (Jira-style: Milestone=Phase, Issue=Spec/Epic,
+  native sub-issues=Tasks, Project board)**: designed and approved by user,
+  **blocked** — `gh` API calls (milestones/labels/issues) get 403
+  "Resource not accessible by personal access token", and
+  `gh project create` fails with a GraphQL permissions error. Root cause:
+  the fine-grained PAT is missing **Issues: Read and write** (repo-level,
+  on `Serendip-Infra/serendip-infra`) and **Projects: Read and write**
+  (org-level, on `Serendip-Infra`). User needs to fix this at
+  github.com/settings/personal-access-tokens — told them the exact steps.
+  **Once fixed, resume by building**: 8 milestones (Phase 0-6, see
+  `docs/PRD.md` roadmap), one Epic issue per spec (001-004) with
+  `--parent`-linked sub-issues T001-T019 under spec 001 (mark T001-T003
+  closed since done), a Project v2 board (Backlog/In Progress/Review/Done).
+- **Git remote / SSH identity mismatch flagged, not fixed**: user has SSH
+  config host aliases (`github.com-org` → serendipinfra,
+  `github.com-personal` → Yasindu007) but both git remotes use plain
+  `git@github.com:...`, so per-remote identity separation isn't actually
+  active. Offered to fix (`git remote set-url` to use the aliased hosts);
+  **awaiting user go-ahead**, not done.
+- **CodeRabbit** (1ac6992): `.coderabbit.yaml` (path-scoped review
+  instructions tied to constitution rules) + GitHub App install
+  instructions in `GETTING-STARTED.md` (browser-only, needs org-owner
+  approval, not scriptable — not yet confirmed done by user). Local
+  advisory review via `.githooks/post-commit` (background, non-blocking,
+  `core.hooksPath` set locally) — **blocked on two manual WSL2 steps**
+  needing the user's `sudo` password: `apt-get install unzip`, then
+  `sh /tmp/coderabbit-install.sh` (already downloaded to WSL `/tmp`,
+  content-vetted, sha256 `29dadcd3...`), then `coderabbit auth login`.
+  Exact commands are in `GETTING-STARTED.md`'s "Local review" section.
+- **Memory saved**: `architecture_change_guardrails` (feedback-type) —
+  user pasted a generic AI-guardrail prompt (had stale "NEXUS" naming),
+  most of it duplicates constitution.md rules 1-3/7-8. Non-redundant parts
+  saved: don't add a new abstraction when one exists, match existing
+  error-handling/observability conventions, and a flagged gap —
+  **multi-tenant isolation is not yet an enforced constitution rule**,
+  worth an ADR once spec 002 (HTTP API/auth) makes it concrete.
+
+## Next up
+
+1. **T004-T008** (per-kind resource types: org tree, infra tree, app,
+   capability, ops — parallel-safe against each other, all depend on T003
+   which is done). Keep fields minimal per `resource-model.md`, don't
+   invent business fields — see `tasks.md` for exact scope per task.
+2. Then T009-T019 in order (store, audit, graph, event bus, registry,
+   benchmark, docs sync, final acceptance pass) per `tasks.md`.
+3. Three things blocked on the user, not on implementation — check if
+   resolved before assuming still blocked: GitHub PAT permissions (board
+   setup), WSL sudo steps (CodeRabbit local review), remote URL fix
+   (SSH identity separation).
+
+## Standing instructions (confirm still true if this section persists across
+many sessions — fold into CLAUDE.md properly if so, don't let it live here
+forever)
 
 - Setup wizard: every required capability shows a recommended default
   (clearly labeled) plus alternatives — never hardcode the default as the
   only path. See `docs/PRD.md` "Setup wizard philosophy".
-- Keep `docs/PROGRESS.md` current: update it at natural milestones (end of
-  a spec, end of a phase, before a long gap) so a fresh session — whether
-  from manual `/clear`, auto-compaction, or a new terminal — can resume
-  with zero back-and-forth. This file, not conversation memory, is the
-  durable handoff mechanism (see CLAUDE.md "Session continuity").
+- Run `contract-guardian` before every commit touching `core/` or
+  `providers/` — not optional, established as a hard habit this session.
+- Keep `docs/PROGRESS.md` current at natural checkpoints (end of a task
+  batch, end of a phase, before a long gap) — this file, not conversation
+  memory, is the durable handoff mechanism (see CLAUDE.md "Session
+  continuity"). Rewrite stale sections, don't just append.
