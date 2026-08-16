@@ -1,6 +1,7 @@
 package resource_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -81,6 +82,9 @@ func TestValidate(t *testing.T) {
 			err := resource.Validate(tt.meta)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate(%+v) error = %v, wantErr %v", tt.meta, err, tt.wantErr)
+			}
+			if tt.wantErr && !errors.Is(err, resource.ErrValidation) {
+				t.Errorf("Validate(%+v) error = %v, want it to wrap resource.ErrValidation", tt.meta, err)
 			}
 		})
 	}
