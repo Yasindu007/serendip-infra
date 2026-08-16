@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -16,7 +17,21 @@ import (
 
 	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/event"
+	"github.com/serendip-infra/serendip-infra/core/graph"
+	"github.com/serendip-infra/serendip-infra/core/reconcile"
+	"github.com/serendip-infra/serendip-infra/core/resource"
+	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+)
+
+// resyncEvery/reconcileTimeout are specs/003-reconciliation-engine/plan.md's
+// chosen defaults, not yet exposed as env vars -- nothing has needed to
+// tune them yet (no profile-specific override exists), unlike
+// SERENDIP_ADDR/SERENDIP_DB_PATH which real deployments already need to
+// vary.
+const (
+	resyncEvery      = 30 * time.Second
+	reconcileTimeout = 10 * time.Second
 )
 
 func main() {
@@ -51,6 +66,8 @@ func run() error {
 	srv := api.NewServer(db, bus, apiKeys)
 	srv.Addr = addr
 
+	engine := newReconcileEngine(db, bus)
+
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("serendipd: listening on %s (db: %s)", addr, dbPath)
@@ -61,9 +78,30 @@ func run() error {
 		close(errCh)
 	}()
 
+	// engineDone always closes once Run returns, regardless of why --
+	// used below to make sure no reconcile call is still in flight
+	// before db.Close() runs. engineErrCh, in contrast, only ever
+	// receives a value for a genuine crash (never for a plain ctx
+	// cancellation): if it reacted to ctx cancellation the same way
+	// ctx.Done() itself does, Go's select below could race and pick
+	// this case instead of the ctx.Done() shutdown branch, skipping
+	// srv.Shutdown() entirely -- errCh above avoids the same race only
+	// because it's closed downstream of Shutdown() being called, not in
+	// direct, parallel reaction to ctx.
+	engineDone := make(chan struct{})
+	engineErrCh := make(chan error, 1)
+	go func() {
+		defer close(engineDone)
+		log.Print("serendipd: reconcile engine starting")
+		if err := engine.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			engineErrCh <- err
+		}
+	}()
+
 	select {
 	case <-ctx.Done():
 		log.Print("serendipd: shutdown signal received")
+		<-engineDone
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -76,7 +114,33 @@ func run() error {
 			return fmt.Errorf("serve: %w", err)
 		}
 		return nil
+	case err := <-engineErrCh:
+		return fmt.Errorf("reconcile engine: %w", err)
 	}
+}
+
+// newReconcileEngine constructs the Engine and registers its one
+// Reconciler (spec 003: Cluster health, no other kind yet). Not started
+// here -- the caller runs engine.Run(ctx) itself so it can share the same
+// shutdown-signal ctx the HTTP server already uses.
+func newReconcileEngine(db *sql.DB, bus event.Bus) *reconcile.Engine {
+	clusters := sqlite.NewStore[resource.ClusterSpec, resource.ClusterStatus](db, resource.KindCluster)
+	providers := sqlite.NewStore[resource.ProviderSpec, resource.ProviderStatus](db, resource.KindProvider)
+
+	engine := reconcile.NewEngine(bus, resyncEvery, reconcileTimeout)
+	engine.Register(resource.KindCluster, reconcile.NewClusterReconciler(clusters, providers, reconcile.TCPHealthChecker{}),
+		func(ctx context.Context) ([]graph.ResourceRef, error) {
+			list, err := clusters.List(ctx, store.ListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			refs := make([]graph.ResourceRef, len(list))
+			for i, c := range list {
+				refs[i] = graph.ResourceRef{Kind: resource.KindCluster, ID: c.Metadata.ID}
+			}
+			return refs, nil
+		})
+	return engine
 }
 
 func envOr(key, fallback string) string {
