@@ -111,14 +111,24 @@ Status must never imply a capability that doesn't exist:
 
 ## Open questions
 
-Carried forward from `specs/001-resource-model/spec.md`, unresolved as of
-this writing:
+Three of the four questions originally carried forward from
+`specs/001-resource-model/spec.md` are resolved as of spec 001's
+implementation (see `specs/001-resource-model/plan.md` for the full
+reasoning):
 
-- **ID format**: ULID vs. UUIDv7 — not decided.
-- **Conditions**: one shared status package across all resource types, or
-  per-resource-type Condition types? Current lean is shared, not finalized.
-- **Label/selector semantics**: adopt the Kubernetes label-selector grammar
-  verbatim, or define a Serendip-specific one? Not decided.
+- **ID format: UUIDv7**, via `github.com/google/uuid` (ADR 0007). Chosen
+  over ULID for a single well-audited dependency rather than two
+  time-sortable-ID options with no meaningful difference for this use.
+- **Conditions: one shared status package** (`core/resource.Condition`/
+  `Status`), embedded by every kind's Status struct.
+- **Label/selector semantics: exact-match only.** `core/store.ListOptions`
+  filters by kind/owner/exact label equality; the full Kubernetes
+  set-based selector grammar (`in`/`notin`/`exists`) is deferred until a
+  real consumer needs it (likely the topology planner) — building it
+  speculatively would violate constitution rule 10 (scope discipline).
+
+Still open:
+
 - **Network resource**: the source design discussion sketches a Network
   capability (VPC/subnet/security-group equivalents) in detail conceptually
   but it has no committed field-level shape yet — needs its own spec before

@@ -13,153 +13,112 @@ Last updated: 2026-08-16
 
 ## Current phase
 
-**Phase 0 complete. Phase 1 (Foundation, spec 001) in progress: T001-T013
-committed (through 68c6ea1). T014 (event bus) next.** The hard part is
-done: core/store/sqlite has CRUD + optimistic concurrency (T011) +
-transactional audit (T012) + graph edges/cross-kind cascade delete/blast
-radius (T013). Acceptance criteria 1 and 2 (spec.md) are both satisfied
-and tested. T013 needed a cross-kind cascade design worth remembering:
-`Store[S,St]` is single-kind by construction, but cascade-deleting e.g. an
-Organization's children spans Project/Application/etc kinds it has no Go
-types for -- cascadeDeleteChild in store.go operates on kind-agnostic
-`graph.ResourceRef` instead, reconstructing audit snapshots from raw JSON
-columns rather than typed structs. Has a cycle guard (owns-graph cycles
-aren't rejected by Validate, only Relationship-type EdgeOwns is).
-T014-T019 remain: event bus, registry, benchmark, import/naming audit,
-docs sync, final acceptance pass.
+**Phase 0 complete. Spec 001 (Foundation resource model) complete:
+T001-T017 committed, T018 (this update) in progress, T019 (final
+acceptance pass) next — then Phase 1 moves to spec 002 (HTTP API).**
 
-## Done
+## Spec 001 — what actually got built
 
-- Starter kit committed: constitution, root + per-package `CLAUDE.md`,
-  5 subagent defs, 3 slash commands, hooks (kubectl context guard,
-  post-edit build/vet), ADRs 0001-0003 (K3s, storage progression, Go+SQLite).
-- `docs/raw/{nexus.md,other.md}` — founding conversation exports — copied
-  in locally, **gitignored, never committed** (user's explicit instruction).
-- All 10 `docs/architecture/*.md` extracted from the raw source via
-  docs-keeper agent. Name fully migrated Nexus→Serendip.
-- ADR 0004 (monorepo strategy) written.
-- ADR 0005 (OpenChoreo as default Application Platform) and ADR 0006
-  (Thunder as default Identity) written, grounded in a live oss-researcher
-  check (2026-08) rather than just the year-old source conversation.
-  Key facts baked into those ADRs, worth remembering without re-reading them:
-  - OpenChoreo: 1.0 GA, CNCF Sandbox, actively developed. Real risk: control
-    plane wants ~4-8GB RAM alone — tight on a shared T470, **unverified**,
-    gated on a Phase 3b benchmark before it's an `edge-1` default.
-  - Thunder: renamed **ThunderID**, repo moved to `github.com/asgardeo/thunder`,
-    hit **v1.0.0 on 2026-08-15** — zero field track record at time of
-    decision. ADR 0006 defines explicit fallback triggers to Keycloak.
-- `docs/architecture/*.md` cross-references updated to point at ADR 0005/0006
-  instead of flagging them as open gaps.
-- `docs/PRD.md` written — product scope, POC definition, default-provider
-  table, setup-wizard UX philosophy (recommended default + alternatives,
-  never a forced single choice).
-- `.gitignore` added (`docs/raw/` excluded, plus standard Go/Node/editor
-  entries).
-- **Hardware clarification locked in** (see `docs/PRD.md` Hardware
-  section): dev/POC machine is RTX 4060 / Ryzen 7 / 32GB RAM, available
-  now. Reference/target hardware stays ThinkPad T470-class per constitution
-  rule 4 — unchanged, just not purchased yet. POC runs on the dev machine;
-  T470 purchase is gated on POC success (roadmap Phase 3b in `PRD.md`).
-  Every resource-footprint claim (ADR 0005 OpenChoreo RAM, ADR 0006 Thunder
-  "lighter than Keycloak") stays unverified until actually benchmarked on a
-  T470 — the dev machine's headroom is not evidence.
+`core/{id,resource,store,store/sqlite,graph,audit,event,registry}` —
+the full resource model foundation:
 
-## Done (spec 001 implementation)
+- **`core/id`**: `id.New()` — UUIDv7 (ADR 0007), one-package dependency isolation.
+- **`core/resource`**: `Metadata`/`Condition`/`Status`/generic `Resource[S,St]`
+  envelope, `Validate()` (Kubernetes-style label grammar), all 14 resource
+  kinds (Organization, Team, Project, Environment, Site, Cluster, Node,
+  Application, Component, Capability, Provider, ProviderInstance, Alert,
+  Incident) as `resource.<Kind> = Resource[<Kind>Spec, <Kind>Status]` aliases.
+- **`core/store` + `core/store/sqlite`**: generic `Store[S,St]` interface,
+  SQLite implementation — one shared `resources` table (JSON-blob columns,
+  not per-kind tables), embedded migrations, WAL + `SetMaxOpenConns(1)`.
+  Full CRUD with optimistic concurrency (`ErrConflict`/`ErrNotFound`).
+- **`core/audit`**: every Create/Update/Delete writes one `audit_log` row
+  **inside the same transaction** as the data change — verified with a
+  live mutation test (temporarily broke the write, confirmed the test
+  catches it, reverted).
+- **`core/graph`**: edges table, `SyncEdges`/`Children`/`Dependents`/
+  `BlastRadius`. Cross-kind cascade delete (`store.ErrHasChildren`,
+  cascade=true recursively deletes post-order) — the one genuinely tricky
+  design: a `Store[ProjectSpec,...]` deleting a Project must also delete
+  Application-kind children it has no Go type for, so cascade operates on
+  kind-agnostic `graph.ResourceRef` + raw-JSON audit snapshots, not the
+  typed `S,St`. Has a cycle guard (malformed `OwnerRefs` cycles reject
+  with an error, not a stack overflow).
+- **`core/event`**: in-process `Bus`, published strictly after
+  `tx.Commit()` succeeds (never before — an event for a rolled-back
+  mutation would be wrong). Optional per-`Store` via `SetBus`, nil-safe.
+- **`core/registry`**: `CapabilityRegistry`/`ProviderRegistry` — thin
+  wrappers; `SetDefault` is an ordinary `store.Update`, which is exactly
+  what makes acceptance criterion 3 true by construction.
+- **`cmd/bench-resource-model`**: 10,011 resources, ~20-23MB real process
+  memory on the dev machine (directional — see `docs/PRD.md` Hardware
+  section, revalidate on real T470 in Phase 3b).
 
-- `specs/001-resource-model/plan.md` + `tasks.md` (T001-T019) drafted, user-approved.
-- **T001** (165f61b): `go.mod` (`github.com/serendip-infra/serendip-infra`,
-  `go 1.22`), `core/{id,resource,store,registry,graph,event,audit}/` scaffold,
-  `google/uuid` dep, ADR 0007.
-- **T002** (a2eb3a9): `core/id.New()` (UUIDv7 wrapper), tests pass.
-- **T003** (de8ac80): `core/resource` envelope — `Metadata`, `Kind`,
-  `EdgeType`+4 constants, `OwnerRef`, `Relationship`, `Condition`/`Status`,
-  generic `Resource[S, St]`, `Validate()`. contract-guardian PASS both
-  times, flagged 2 plan/code drifts (Kind type instead of bare string,
-  fuller label-prefix grammar) — both fixed by updating `plan.md` to match,
-  not by changing the code (the code was the better call in both cases).
-- **T004-T008** (fc3dc6e): all 14 per-kind resource types (org tree,
-  infra tree, app, capability, ops), each a `resource.<Kind> =
-  Resource[<Kind>Spec, <Kind>Status]` type alias. contract-guardian PASS;
-  fixed one advisory (vendor names in test fixtures → vendor-neutral),
-  left two as reasoned/intentional (ProviderInstanceSpec.Config,
-  AlertSpec fields — slightly beyond doc-named scope but not speculative).
-  Key things NOT yet populated by anything (types only, expected): Node
-  hardware facts (spec 004's job), Incident correlation (operations.md,
-  later spec), Environment.Availability (reconciliation's job, spec 003).
-- **contract-guardian is run before every `core/` commit this session** —
-  established pattern, keep doing it, not just when convenient.
+All 5 acceptance criteria (spec.md) are satisfied and tested. Every task
+T001-T016 got an independent `contract-guardian` review before commit —
+PASS on all, several real findings caught and fixed along the way (see
+git log on `core/` commits for detail per-task if needed; not repeated
+here since it's git-archaeology, not current state).
 
-## Tooling set up this session (unrelated to spec 001, don't confuse with it)
+`go.mod`'s `go` directive is `1.25.0`, not `1.22` — `modernc.org/sqlite`
+v1.56.0 forced this via Go's toolchain mechanism when it was added in
+T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
-- **GitHub tracking board (Jira-style: Milestone=Phase, Issue=Spec/Epic,
-  native sub-issues=Tasks, Project board)**: designed and approved by user,
-  **still blocked as of this update**, tested empirically twice. User
-  re-ran `gh auth login` as the `serendipinfra` org account (a NEW
-  fine-grained PAT, `github_pat_11CLUSRSI0...`) believing they'd granted
-  full permissions. Retested: reading Issues now works (was fully blocked
-  before), but writing (milestone/label creation) still 403s, and
-  `gh project create` still fails with the same GraphQL permission error.
-  Likely cause (told user, unresolved): Issues permission is set to
-  Read-only not Read-and-write, Projects org-level permission wasn't
-  touched, or a fine-grained-PAT org-resource pending-approval step exists
-  that hasn't been approved. **Once actually fixed (verify with `gh api
+## Tooling set up this session (unrelated to spec 001 — separate track)
+
+- **CodeRabbit**: `.coderabbit.yaml` + GitHub App instructions in
+  `GETTING-STARTED.md` (browser-only install, not yet confirmed done by
+  user). Auto-review gated to **external contributors only**
+  (`.github/workflows/label-external-contributions.yml` labels PRs by
+  `author_association`; org members' PRs aren't auto-reviewed since
+  internal review covers those already). Local advisory review via
+  `.githooks/post-commit` — **blocked on the user running two WSL2
+  commands with their sudo password** (exact commands in
+  `GETTING-STARTED.md`'s "Local review" section).
+- **GitHub tracking board** (Jira-style: Milestone=Phase, Issue=Spec,
+  native sub-issues=Task, Project board) — designed, approved, **still
+  blocked** on GitHub token permissions (Issues write + Projects, tested
+  empirically twice, still 403/GraphQL-permission-denied as of last
+  check). User was told to check three specific things (Issues
+  Read-vs-Read&write checkbox, Projects org-level permission, a possible
+  pending-approval step) — verify with `gh api
   repos/Serendip-Infra/serendip-infra/milestones -f title=test -f
-  state=open` — should NOT 403), resume by building**: 8 milestones
-  (Phase 0-6, see `docs/PRD.md` roadmap), one Epic issue per spec (001-004)
-  with `--parent`-linked sub-issues T001-T019 under spec 001 (mark
-  T001-T008 closed since done), a Project v2 board (Backlog/In
-  Progress/Review/Done).
-- **Git remote / SSH identity mismatch: fixed by user.** `git remote -v`
-  now shows `origin` → `git@github.com-personal:...` and `upstream` →
-  `git@github.com-org:...`, matching their SSH config aliases. Confirmed,
-  no further action needed.
-- **CodeRabbit** (1ac6992, c57eb19): `.coderabbit.yaml` (path-scoped review
-  instructions tied to constitution rules) + GitHub App install
-  instructions in `GETTING-STARTED.md` (browser-only, needs org-owner
-  approval, not scriptable — not yet confirmed done by user). Auto-review
-  gated to **external contributors only**: `auto_review.labels:
-  [external-contribution]` allowlist +
-  `.github/workflows/label-external-contributions.yml` (labels PRs based
-  on `author_association`; org members' PRs stay unlabeled since internal
-  review already covers those; `@coderabbitai review` comment still works
-  manually anytime). Local advisory review via `.githooks/post-commit`
-  (background, non-blocking, `core.hooksPath` set locally) — **blocked on
-  two manual WSL2 steps** needing the user's `sudo` password:
-  `apt-get install unzip`, then `sh /tmp/coderabbit-install.sh` (already
-  downloaded to WSL `/tmp`, content-vetted, sha256 `29dadcd3...`), then
-  `coderabbit auth login`. Exact commands are in `GETTING-STARTED.md`'s
-  "Local review" section.
+  state=open` before assuming fixed. Once unblocked: 8 milestones
+  (Phase 0-6 per `docs/PRD.md`), one Epic issue per spec with
+  `--parent`-linked sub-issues T001-T019 under spec 001 (mark done ones
+  closed), Project v2 board (Backlog/In Progress/Review/Done).
+- **Git remote / SSH identity separation**: fixed by user, confirmed via
+  `git remote -v` (aliased hosts in use). No further action.
 - **Memory saved**: `architecture_change_guardrails` (feedback-type) —
-  user pasted a generic AI-guardrail prompt (had stale "NEXUS" naming),
-  most of it duplicates constitution.md rules 1-3/7-8. Non-redundant parts
-  saved: don't add a new abstraction when one exists, match existing
-  error-handling/observability conventions, and a flagged gap —
-  **multi-tenant isolation is not yet an enforced constitution rule**,
-  worth an ADR once spec 002 (HTTP API/auth) makes it concrete.
+  don't add a new abstraction when one exists; match existing
+  error-handling/observability conventions; **multi-tenant isolation is
+  not yet an enforced constitution rule**, flagged for a possible ADR
+  once spec 002 (HTTP API/auth) makes it concrete.
 
 ## Next up
 
-1. **T004-T008** (per-kind resource types: org tree, infra tree, app,
-   capability, ops — parallel-safe against each other, all depend on T003
-   which is done). Keep fields minimal per `resource-model.md`, don't
-   invent business fields — see `tasks.md` for exact scope per task.
-2. Then T009-T019 in order (store, audit, graph, event bus, registry,
-   benchmark, docs sync, final acceptance pass) per `tasks.md`.
-3. Three things blocked on the user, not on implementation — check if
-   resolved before assuming still blocked: GitHub PAT permissions (board
-   setup), WSL sudo steps (CodeRabbit local review), remote URL fix
-   (SSH identity separation).
+1. **T019** (final acceptance pass): `go test ./core/... -v` full run,
+   re-confirm all 5 acceptance criteria individually against actual test
+   output, run `contract-guardian` on the full `core/` diff one more time
+   before spec 001 is considered fully closed.
+2. Then **spec 002 (HTTP API)** — `/new-spec 002-http-api`, then
+   `/plan-spec` per `GETTING-STARTED.md`'s workflow. This is also when the
+   "real interface" value replaces `"core"` in `audit.Record.Interface`
+   for API-driven mutations, and when multi-tenant isolation enforcement
+   (flagged above) likely needs to become concrete.
+3. Three things blocked on the user (not on implementation) — check
+   current status before assuming still blocked: GitHub PAT permissions,
+   WSL sudo steps for CodeRabbit, (SSH identity separation is resolved).
 
-## Standing instructions (confirm still true if this section persists across
-many sessions — fold into CLAUDE.md properly if so, don't let it live here
+## Standing instructions (fold into CLAUDE.md properly if this section
+keeps persisting across many sessions unchanged — don't let it live here
 forever)
 
 - Setup wizard: every required capability shows a recommended default
   (clearly labeled) plus alternatives — never hardcode the default as the
   only path. See `docs/PRD.md` "Setup wizard philosophy".
 - Run `contract-guardian` before every commit touching `core/` or
-  `providers/` — not optional, established as a hard habit this session.
-- Keep `docs/PROGRESS.md` current at natural checkpoints (end of a task
-  batch, end of a phase, before a long gap) — this file, not conversation
-  memory, is the durable handoff mechanism (see CLAUDE.md "Session
-  continuity"). Rewrite stale sections, don't just append.
+  `providers/` — established as a hard habit this session, not optional.
+- Keep `docs/PROGRESS.md` current at natural checkpoints — this file, not
+  conversation memory, is the durable handoff mechanism (CLAUDE.md
+  "Session continuity"). Rewrite stale sections, don't just append.
