@@ -27,8 +27,8 @@ type HealthChecker interface {
 // TCPHealthChecker implements the "tcp" HealthCheckContract.Kind: dials
 // Config["address"] (e.g. "127.0.0.1:6443"). Stdlib-only and
 // provider-agnostic -- reusable unchanged by any future real provider's
-// health check (a K3s apiserver, an OpenBao API, ...), not specific to
-// one.
+// health check (a Kubernetes-style apiserver, a secrets-store API, ...),
+// not specific to one.
 type TCPHealthChecker struct{}
 
 func (TCPHealthChecker) Check(ctx context.Context, contract resource.HealthCheckContract) error {
