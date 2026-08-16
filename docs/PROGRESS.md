@@ -13,8 +13,14 @@ Last updated: 2026-08-16
 
 ## Current phase
 
-**Phase 0 complete. Phase 1 (Foundation, spec 001) in progress: T001-T008
-committed (fc3dc6e), T009 (Store interface) next.**
+**Phase 0 complete. Phase 1 (Foundation, spec 001) in progress: T001-T012
+committed (through d244a4c). T013 (graph edges + cascade delete + blast
+radius) next.** core/store/sqlite now has real CRUD + optimistic
+concurrency (T011) + transactional audit (T012) — every mutation writes
+exactly one audit_log row atomically with the data change, verified by a
+live mutation test (temporarily broke the audit write, confirmed the test
+catches it, reverted). T013-T019 remain: graph, event bus, registry,
+benchmark, import/naming audit, docs sync, final acceptance pass.
 
 ## Done
 
