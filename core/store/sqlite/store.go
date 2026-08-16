@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/id"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
@@ -18,9 +19,12 @@ const timeLayout = time.RFC3339Nano
 // Store is the SQLite implementation of store.Store[S, St] for one
 // resource kind, fixed at construction (kind is a struct field, not a
 // per-call parameter, because Get/Update/Delete in the store.Store
-// interface don't take a kind argument). List/audit/graph-edge/event
-// integration are added on top of this in T012-T014 -- this file is
-// deliberately just resources-table CRUD with optimistic concurrency.
+// interface don't take a kind argument). Every mutation (Create/Update/
+// Delete) writes its audit_log row inside the same transaction as the
+// data change -- not an optional wrapper a caller could forget
+// (constitution rule 8, specs/001-resource-model/plan.md). Graph-edge
+// sync and cascade-delete children-checking are added on top of this in
+// T013; event publishing in T014.
 type Store[S, St any] struct {
 	db   *sql.DB
 	kind resource.Kind
@@ -120,7 +124,13 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 		return resource.Resource[S, St]{}, err
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: begin: %w", s.kind, r.Metadata.ID, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO resources
 			(id, kind, name, labels, owner_refs, relationships, spec, status,
 			 resource_version, created_at, updated_at)
@@ -128,9 +138,29 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 		r.Metadata.ID, string(s.kind), r.Metadata.Name,
 		cols.labels, cols.ownerRefs, cols.relationships, cols.spec, cols.status,
 		r.Metadata.ResourceVersion,
-		now.Format(timeLayout), now.Format(timeLayout))
-	if err != nil {
+		now.Format(timeLayout), now.Format(timeLayout)); err != nil {
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: %w", s.kind, r.Metadata.ID, err)
+	}
+
+	afterJSON, err := json.Marshal(r)
+	if err != nil {
+		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: marshal audit after: %w", err)
+	}
+	if err := writeAudit(ctx, tx, audit.Record{
+		ID:         id.New(),
+		Actor:      audit.ActorFrom(ctx),
+		Interface:  "core",
+		Kind:       string(s.kind),
+		ResourceID: r.Metadata.ID,
+		Before:     nil, // nothing existed before a Create
+		After:      afterJSON,
+		At:         now,
+	}); err != nil {
+		return resource.Resource[S, St]{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: commit: %w", s.kind, r.Metadata.ID, err)
 	}
 	return r, nil
 }
@@ -149,8 +179,31 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 		return resource.Resource[S, St]{}, err
 	}
 
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: update %s %s: begin: %w", s.kind, r.Metadata.ID, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	// Read the pre-update row inside the same transaction: it's both the
+	// audit "before" snapshot and the existence check. SetMaxOpenConns(1)
+	// (conn.go) means no other transaction can interleave between this
+	// read and the write below, so this is race-safe despite being a
+	// read-then-write rather than a single atomic statement.
+	before, err := scanResource[S, St](tx.QueryRowContext(ctx, `
+		SELECT id, name, labels, owner_refs, relationships, spec, status,
+		       resource_version, created_at, updated_at
+		FROM resources WHERE id = ? AND kind = ?`, r.Metadata.ID, string(s.kind)), s.kind)
+	if err != nil {
+		return resource.Resource[S, St]{}, err // ErrNotFound already wrapped by scanResource
+	}
+	beforeJSON, err := json.Marshal(before)
+	if err != nil {
+		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: marshal audit before: %w", err)
+	}
+
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		UPDATE resources
 		SET name = ?, labels = ?, owner_refs = ?, relationships = ?,
 		    spec = ?, status = ?, resource_version = resource_version + 1,
@@ -167,38 +220,118 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: update %s %s: %w", s.kind, r.Metadata.ID, err)
 	}
 	if affected == 0 {
-		// Distinguish "doesn't exist" from "version conflict" for a
-		// clearer error to the caller.
-		if _, getErr := s.Get(ctx, r.Metadata.ID); errors.Is(getErr, store.ErrNotFound) {
-			return resource.Resource[S, St]{}, store.ErrNotFound
-		}
+		// The before-select above already proved the row exists, so zero
+		// rows affected here specifically means a stale ResourceVersion.
 		return resource.Resource[S, St]{}, store.ErrConflict
 	}
 
-	// Return the authoritative row (CreatedAt, incremented ResourceVersion,
-	// new UpdatedAt) rather than reconstructing it from what the caller
-	// passed in.
-	return s.Get(ctx, r.Metadata.ID)
+	after, err := scanResource[S, St](tx.QueryRowContext(ctx, `
+		SELECT id, name, labels, owner_refs, relationships, spec, status,
+		       resource_version, created_at, updated_at
+		FROM resources WHERE id = ? AND kind = ?`, r.Metadata.ID, string(s.kind)), s.kind)
+	if err != nil {
+		return resource.Resource[S, St]{}, err
+	}
+	afterJSON, err := json.Marshal(after)
+	if err != nil {
+		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: marshal audit after: %w", err)
+	}
+
+	if err := writeAudit(ctx, tx, audit.Record{
+		ID:         id.New(),
+		Actor:      audit.ActorFrom(ctx),
+		Interface:  "core",
+		Kind:       string(s.kind),
+		ResourceID: r.Metadata.ID,
+		Before:     beforeJSON,
+		After:      afterJSON,
+		At:         now,
+	}); err != nil {
+		return resource.Resource[S, St]{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: update %s %s: commit: %w", s.kind, r.Metadata.ID, err)
+	}
+	// Return the authoritative post-commit row (CreatedAt preserved,
+	// incremented ResourceVersion, new UpdatedAt) rather than
+	// reconstructing it from what the caller passed in.
+	return after, nil
 }
 
-// Delete removes a resource unconditionally by id+kind. The cascade
-// parameter is accepted for store.Store interface conformance but not
-// yet acted on -- checking for "owns" children and rejecting/cascading
-// is core/graph's job, wired into this method in T013.
+// Delete removes a resource by id+kind. The cascade parameter is accepted
+// for store.Store interface conformance but not yet acted on -- checking
+// for "owns" children and rejecting/cascading is core/graph's job, wired
+// into this method in T013.
 func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bool) error {
 	_ = cascade
-	result, err := s.db.ExecContext(ctx, `DELETE FROM resources WHERE id = ? AND kind = ?`, resourceID, string(s.kind))
+
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("sqlite: delete %s %s: begin: %w", s.kind, resourceID, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	before, err := scanResource[S, St](tx.QueryRowContext(ctx, `
+		SELECT id, name, labels, owner_refs, relationships, spec, status,
+		       resource_version, created_at, updated_at
+		FROM resources WHERE id = ? AND kind = ?`, resourceID, string(s.kind)), s.kind)
+	if err != nil {
+		return err // ErrNotFound already wrapped by scanResource
+	}
+	beforeJSON, err := json.Marshal(before)
+	if err != nil {
+		return fmt.Errorf("sqlite: marshal audit before: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM resources WHERE id = ? AND kind = ?`, resourceID, string(s.kind)); err != nil {
 		return fmt.Errorf("sqlite: delete %s %s: %w", s.kind, resourceID, err)
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("sqlite: delete %s %s: %w", s.kind, resourceID, err)
+
+	now := time.Now().UTC()
+	if err := writeAudit(ctx, tx, audit.Record{
+		ID:         id.New(),
+		Actor:      audit.ActorFrom(ctx),
+		Interface:  "core",
+		Kind:       string(s.kind),
+		ResourceID: resourceID,
+		Before:     beforeJSON,
+		After:      nil, // nothing exists after a Delete
+		At:         now,
+	}); err != nil {
+		return err
 	}
-	if affected == 0 {
-		return store.ErrNotFound
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite: delete %s %s: commit: %w", s.kind, resourceID, err)
 	}
 	return nil
+}
+
+// writeAudit inserts one audit_log row as part of tx -- always called
+// inside the same transaction as the data mutation it records, never
+// after a separate Commit (constitution rule 8).
+func writeAudit(ctx context.Context, tx *sql.Tx, rec audit.Record) error {
+	var policyDecision any
+	if rec.PolicyDecision != nil {
+		policyDecision = *rec.PolicyDecision
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO audit_log (id, actor, interface, kind, resource_id, before, after, at, policy_decision)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, rec.Actor, rec.Interface, rec.Kind, rec.ResourceID,
+		nullableJSON(rec.Before), nullableJSON(rec.After), rec.At.Format(timeLayout), policyDecision)
+	if err != nil {
+		return fmt.Errorf("sqlite: write audit record: %w", err)
+	}
+	return nil
+}
+
+func nullableJSON(b json.RawMessage) any {
+	if b == nil {
+		return nil
+	}
+	return string(b)
 }
 
 type marshaledColumns struct {
