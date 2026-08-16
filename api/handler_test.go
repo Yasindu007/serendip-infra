@@ -189,6 +189,62 @@ func TestResourceHandler_Create_MalformedBody(t *testing.T) {
 	assertProblemJSON(t, w)
 }
 
+// The handler decodes the body as JSON regardless of the Content-Type
+// header -- api/CLAUDE.md's "handlers are thin" rule and specs/002-http-api
+// name no framework-level content negotiation, so this pins the actual
+// (permissive) behavior as intentional rather than an accidental gap.
+func TestResourceHandler_Create_IgnoresContentTypeHeader(t *testing.T) {
+	mux := newTestMux(t)
+	body, err := json.Marshal(resource.Organization{Metadata: resource.Metadata{Name: "acme"}})
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "text/plain")
+	w := httptest.NewRecorder()
+	api.RequestIDMiddleware(mux).ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (a wrong Content-Type header should not block a valid JSON body), body: %s", w.Code, http.StatusCreated, w.Body)
+	}
+}
+
+func TestResourceHandler_List_CombinedOwnerAndLabelFilters(t *testing.T) {
+	db := newTestDB(t)
+	s := sqlite.NewStore[resource.OrganizationSpec, resource.OrganizationStatus](db, resource.KindOrganization)
+	mux := http.NewServeMux()
+	api.NewResourceHandler(s, "organizations").Register(mux)
+
+	create := func(name, ownerID, labelValue string) {
+		w := doRequest(mux, http.MethodPost, "/v1/organizations", resource.Organization{
+			Metadata: resource.Metadata{
+				Name:      name,
+				OwnerRefs: []resource.OwnerRef{{Kind: resource.KindOrganization, ID: ownerID}},
+				Labels:    map[string]string{"env": labelValue},
+			},
+		})
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Create(%s) status = %d, body: %s", name, w.Code, w.Body)
+		}
+	}
+	create("match", "owner-1", "prod")
+	create("wrong-label", "owner-1", "staging")
+	create("wrong-owner", "owner-2", "prod")
+
+	w := doRequest(mux, http.MethodGet, "/v1/organizations?ownerId=owner-1&label.env=prod", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("List status = %d, want %d, body: %s", w.Code, http.StatusOK, w.Body)
+	}
+	var list []resource.Organization
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(list) != 1 || list[0].Metadata.Name != "match" {
+		t.Fatalf("List(ownerId=owner-1, label.env=prod) = %+v, want exactly [match]", list)
+	}
+}
+
 func assertProblemJSON(t *testing.T, w *httptest.ResponseRecorder) {
 	t.Helper()
 	if ct := w.Header().Get("Content-Type"); ct != "application/problem+json" {
