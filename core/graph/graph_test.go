@@ -30,6 +30,77 @@ func ref(kind resource.Kind, id string) graph.ResourceRef {
 	return graph.ResourceRef{Kind: kind, ID: id}
 }
 
+// SQLiteGraph is the public Graph interface implementation --
+// core/store/sqlite calls the package-level Children/Dependents/
+// BlastRadius/SyncEdges functions directly against its own *sql.Tx (the
+// other tests in this file), but SQLiteGraph{db} is what a future
+// consumer outside a store transaction (e.g. an HTTP handler in spec 002,
+// or the AI-ops blast-radius queries ai-operations.md describes) will
+// actually construct and call. Confirm it delegates correctly, not just
+// that the underlying free functions work.
+func TestSQLiteGraph_DelegatesToPackageFunctions(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	g := graph.NewSQLiteGraph(db)
+
+	org := ref(resource.KindOrganization, "org-1")
+	project := ref(resource.KindProject, "project-1")
+	cluster := ref(resource.KindCluster, "cluster-1")
+	backend := ref(resource.KindComponent, "backend")
+	frontend := ref(resource.KindComponent, "frontend")
+
+	if err := graph.SyncEdges(ctx, db, project,
+		[]resource.OwnerRef{{Kind: org.Kind, ID: org.ID}}, nil); err != nil {
+		t.Fatalf("SyncEdges(project) = %v", err)
+	}
+	if err := graph.SyncEdges(ctx, db, backend, nil,
+		[]resource.Relationship{
+			{Type: resource.EdgeRunsOn, TargetKind: cluster.Kind, TargetID: cluster.ID},
+		}); err != nil {
+		t.Fatalf("SyncEdges(backend) = %v", err)
+	}
+	if err := graph.SyncEdges(ctx, db, frontend, nil,
+		[]resource.Relationship{
+			{Type: resource.EdgeDependsOn, TargetKind: backend.Kind, TargetID: backend.ID},
+		}); err != nil {
+		t.Fatalf("SyncEdges(frontend) = %v", err)
+	}
+
+	t.Run("Children", func(t *testing.T) {
+		got, err := g.Children(ctx, org)
+		if err != nil {
+			t.Fatalf("Children(org) = %v", err)
+		}
+		if len(got) != 1 || got[0] != project {
+			t.Errorf("Children(org) = %+v, want [%+v]", got, project)
+		}
+	})
+
+	t.Run("Dependents", func(t *testing.T) {
+		got, err := g.Dependents(ctx, backend)
+		if err != nil {
+			t.Fatalf("Dependents(backend) = %v", err)
+		}
+		if len(got) != 1 || got[0] != frontend {
+			t.Errorf("Dependents(backend) = %+v, want [%+v]", got, frontend)
+		}
+	})
+
+	t.Run("BlastRadius", func(t *testing.T) {
+		got, err := g.BlastRadius(ctx, cluster)
+		if err != nil {
+			t.Fatalf("BlastRadius(cluster) = %v", err)
+		}
+		found := map[graph.ResourceRef]bool{}
+		for _, r := range got {
+			found[r] = true
+		}
+		if !found[backend] || !found[frontend] {
+			t.Errorf("BlastRadius(cluster) = %+v, want it to include backend and frontend", got)
+		}
+	})
+}
+
 func TestSyncEdges_OwnsAndRelationships(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
