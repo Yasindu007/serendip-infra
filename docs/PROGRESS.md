@@ -57,11 +57,20 @@ phase is Foundation (spec 001 planning) — see "Not yet done / next up".
 
 1. Phase 0 batch committed (architecture docs, ADRs 0004-0006, PRD,
    PROGRESS, .gitignore) — see git log for the commit.
-2. **Next: `/plan-spec 001-resource-model`** — review plan.md and tasks.md
-   carefully, this is the highest-leverage review of the project (per
-   `GETTING-STARTED.md`). Not started yet.
-3. Then implement spec 001 task by task, `/ship` per commit, `/clear`
-   between tasks.
+2. `specs/001-resource-model/plan.md` and `tasks.md` (T001-T019) drafted
+   and approved by user.
+3. **T001 done, not yet committed**: `go.mod`/`go.sum` (module
+   `github.com/serendip-infra/serendip-infra`, `go 1.22`), empty
+   `core/{id,resource,store,registry,graph,event,audit}/doc.go` scaffold,
+   `google/uuid` dependency added, ADR 0007 written. `go build ./...` /
+   `go vet ./...` / `gofmt -l .` all clean.
+4. **Next: T002** (`core/id` — UUIDv7 wrapper + tests), then T003
+   (envelope, blocks T004-T008). Key plan decisions to remember without
+   re-reading plan.md: one shared `resources` SQLite table (not per-kind),
+   audit+graph sync inside the same transaction as every mutation,
+   `SetMaxOpenConns(1)`, exact-match-only label filtering for now.
+5. `contract-guardian` review required before committing any `core/`
+   change (CLAUDE.md standing rule) — not yet run this session.
 
 ## Standing instructions this session established (not yet in CLAUDE.md structurally — verify they've been folded in; if this section still exists next session, they may not have been)
 
