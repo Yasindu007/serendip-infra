@@ -5,14 +5,22 @@ import (
 	"net/http"
 
 	"github.com/serendip-infra/serendip-infra/core/event"
+	"github.com/serendip-infra/serendip-infra/core/graph"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
 
 // NewServer assembles the full HTTP API: one ResourceHandler per resource
 // kind (14 instantiations below, mirroring core/store/sqlite.Store[S,St]'s
-// per-kind pattern), the middleware chain (request ID -> actor -> mux,
-// specs/002-http-api/plan.md), and a GET /healthz that needs no token.
+// per-kind pattern), the graph read endpoints (GraphHandler, T013 --
+// wired in here even though tasks.md's T013 didn't list server.go as a
+// file it touches, since otherwise GraphHandler would be dead code once
+// assembled: nothing else in this package ever calls NewServeMux + graph
+// wiring, so leaving it unwired would mean the graph endpoints exist but
+// are unreachable through the actual running server -- same reasoning as
+// T003's Interface-bundling call), the middleware chain (request ID ->
+// actor -> mux, specs/002-http-api/plan.md), and a GET /healthz that
+// needs no token.
 //
 // apiKeys is the static token-to-actor map for ActorMiddleware -- see its
 // doc comment for why this is intentionally temporary.
@@ -38,6 +46,8 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string) *http.Serve
 	mountResource[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](apiMux, db, bus, resource.KindProviderInstance, "provider-instances")
 	mountResource[resource.IncidentSpec, resource.IncidentStatus](apiMux, db, bus, resource.KindIncident, "incidents")
 	mountResource[resource.AlertSpec, resource.AlertStatus](apiMux, db, bus, resource.KindAlert, "alerts")
+
+	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
 
 	topMux := http.NewServeMux()
 	topMux.HandleFunc("GET /healthz", healthzHandler)
