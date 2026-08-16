@@ -20,18 +20,17 @@ type Reconciler interface {
 }
 
 // registration pairs a Reconciler with a lister used for periodic resync
-// (T005) -- list returns every ref of that Reconciler's kind so the
-// engine can re-check state that didn't change via a triggering mutation
-// (e.g. a health check flipping from pass to fail with no store write
-// involved).
+// -- list returns every ref of that Reconciler's kind so the engine can
+// re-check state that didn't change via a triggering mutation (e.g. a
+// health check flipping from pass to fail with no store write involved).
 type registration struct {
 	reconciler Reconciler
 	list       func(ctx context.Context) ([]graph.ResourceRef, error)
 }
 
 // Engine dispatches Reconcile calls to per-Kind Reconcilers, triggered by
-// core/event.Bus activity (this file) and, from T005, periodic resync.
-// Single goroutine, sequential processing -- appropriate at edge-1 scale
+// core/event.Bus activity and periodic resync. Single goroutine,
+// sequential processing -- appropriate at edge-1 scale
 // (core/reconcile/CLAUDE.md); do not add concurrency speculatively.
 type Engine struct {
 	bus              event.Bus
@@ -43,9 +42,8 @@ type Engine struct {
 }
 
 // NewEngine returns an Engine that bounds each Reconcile call to
-// reconcileTimeout and (from T005) resyncs every registered kind at
-// least once per resyncEvery. Both durations are accepted here already
-// so callers/tests don't need to change shape once T005 lands.
+// reconcileTimeout and resyncs every registered kind at least once per
+// resyncEvery.
 func NewEngine(bus event.Bus, resyncEvery, reconcileTimeout time.Duration) *Engine {
 	return &Engine{
 		bus:              bus,
@@ -58,7 +56,7 @@ func NewEngine(bus event.Bus, resyncEvery, reconcileTimeout time.Duration) *Engi
 }
 
 // Register wires a Reconciler for kind, with list used for periodic
-// resync (T005).
+// resync.
 func (e *Engine) Register(kind resource.Kind, r Reconciler, list func(ctx context.Context) ([]graph.ResourceRef, error)) {
 	e.regs[kind] = registration{reconciler: r, list: list}
 }
@@ -66,15 +64,15 @@ func (e *Engine) Register(kind resource.Kind, r Reconciler, list func(ctx contex
 // Ready returns a channel closed once Run has subscribed to the event
 // bus -- an event published before that point would be missed (nothing
 // is listening yet). Mainly useful for synchronizing tests; production
-// callers don't need to wait on it, since periodic resync (T005) would
+// callers don't need to wait on it, since periodic resync would
 // eventually pick up anything published before subscription anyway.
 func (e *Engine) Ready() <-chan struct{} {
 	return e.ready
 }
 
-// Run subscribes to the event bus and processes reconcile work
-// sequentially until ctx is canceled. No periodic resync yet (T005) --
-// event-triggered dispatch only. Call once per Engine.
+// Run subscribes to the event bus, starts the periodic resync ticker,
+// and processes reconcile work sequentially until ctx is canceled. Call
+// once per Engine.
 func (e *Engine) Run(ctx context.Context) error {
 	// event.InProcessBus's own doc comment: "handlers run on the
 	// publishing goroutine... must be fast and non-blocking." This
@@ -87,12 +85,16 @@ func (e *Engine) Run(ctx context.Context) error {
 		select {
 		case e.workCh <- graph.ResourceRef{Kind: ev.Kind, ID: ev.ID}:
 		default:
-			// Queue full -- dropped. Safe once T005's periodic resync
-			// exists: it re-lists and re-enqueues everything anyway, so
-			// nothing is lost forever, only delayed.
+			// Queue full -- dropped. Safe: periodic resync re-lists and
+			// re-enqueues everything anyway, so nothing is lost forever,
+			// only delayed.
 		}
 	})
 	defer unsubscribe()
+
+	ticker := time.NewTicker(e.resyncEvery)
+	defer ticker.Stop()
+
 	close(e.ready)
 
 	for {
@@ -101,6 +103,27 @@ func (e *Engine) Run(ctx context.Context) error {
 			return ctx.Err()
 		case ref := <-e.workCh:
 			e.reconcileOne(ctx, ref)
+		case <-ticker.C:
+			e.resyncAll(ctx)
+		}
+	}
+}
+
+// resyncAll re-lists every registered kind and enqueues every ref the
+// same way an event does -- one code path for both triggers, so a full
+// queue during a resync burst degrades identically to an event burst.
+func (e *Engine) resyncAll(ctx context.Context) {
+	for kind, reg := range e.regs {
+		refs, err := reg.list(ctx)
+		if err != nil {
+			log.Printf("reconcile: resync list %s: %v", kind, err)
+			continue
+		}
+		for _, ref := range refs {
+			select {
+			case e.workCh <- ref:
+			default:
+			}
 		}
 	}
 }

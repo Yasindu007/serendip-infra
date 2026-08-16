@@ -114,6 +114,56 @@ func TestEngine_ReconcileContext_CarriesAuditIdentity(t *testing.T) {
 	}
 }
 
+// Proves resync dispatches without any event ever being published --
+// the mechanism T005 exists for (detecting drift, e.g. a health check
+// flipping, that happens without a triggering mutation).
+func TestEngine_PeriodicResync_DispatchesWithoutEvent(t *testing.T) {
+	bus := event.NewInProcessBus()
+	fake := &fakeReconciler{}
+	list := func(ctx context.Context) ([]graph.ResourceRef, error) {
+		return []graph.ResourceRef{{Kind: resource.KindCluster, ID: "cluster-1"}}, nil
+	}
+	engine := reconcile.NewEngine(bus, 20*time.Millisecond, time.Second) // short resync interval for the test
+	engine.Register(resource.KindCluster, fake, list)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go engine.Run(ctx)
+	<-engine.Ready()
+
+	// No event published at all -- only the resync ticker can be
+	// responsible for any call that arrives.
+	waitForCallCount(t, fake, 1)
+
+	if fake.calls[0] != (graph.ResourceRef{Kind: resource.KindCluster, ID: "cluster-1"}) {
+		t.Errorf("calls[0] = %+v, want {Kind:Cluster ID:cluster-1}", fake.calls[0])
+	}
+}
+
+func TestEngine_PeriodicResync_ListErrorDoesNotStopTheLoop(t *testing.T) {
+	bus := event.NewInProcessBus()
+	fake := &fakeReconciler{}
+	callCount := 0
+	list := func(ctx context.Context) ([]graph.ResourceRef, error) {
+		callCount++
+		if callCount == 1 {
+			return nil, context.DeadlineExceeded // first tick: simulate a real list failure
+		}
+		return []graph.ResourceRef{{Kind: resource.KindCluster, ID: "cluster-1"}}, nil
+	}
+	engine := reconcile.NewEngine(bus, 20*time.Millisecond, time.Second)
+	engine.Register(resource.KindCluster, fake, list)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go engine.Run(ctx)
+	<-engine.Ready()
+
+	// A failed list on the first tick must not stop later ticks from
+	// working -- the engine must still recover on a later successful list.
+	waitForCallCount(t, fake, 1)
+}
+
 func TestEngine_Run_ReturnsOnContextCancellation(t *testing.T) {
 	bus := event.NewInProcessBus()
 	engine := reconcile.NewEngine(bus, time.Hour, time.Second)
