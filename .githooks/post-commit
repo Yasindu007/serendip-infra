@@ -1,0 +1,33 @@
+#!/usr/bin/env sh
+# Advisory local CodeRabbit review. Never blocks or delays git commit --
+# runs in the background *after* the commit completes, writes findings to
+# .coderabbit/review-<sha>.log. Purely a personal convenience: external
+# contributors are reviewed on GitHub (.coderabbit.yaml + the GitHub App)
+# regardless of whether this hook is set up on their machine at all.
+#
+# CodeRabbit CLI is Linux/macOS only -- on Windows this shells out to WSL2.
+# If the CLI isn't installed/authenticated anywhere, this silently no-ops.
+
+repo_root=$(git rev-parse --show-toplevel)
+sha=$(git rev-parse --short HEAD)
+log_dir="$repo_root/.coderabbit"
+log_file="$log_dir/review-$sha.log"
+mkdir -p "$log_dir"
+
+run_in_background() {
+	# "$@" is the full command to run; detach it so this hook returns
+	# immediately regardless of how long the review takes.
+	nohup "$@" >"$log_file" 2>&1 &
+	disown 2>/dev/null || true
+}
+
+if command -v coderabbit >/dev/null 2>&1; then
+	run_in_background coderabbit review --light --type committed --plain --base HEAD~1
+elif command -v wsl.exe >/dev/null 2>&1 && wsl.exe bash -lc 'command -v coderabbit' >/dev/null 2>&1; then
+	# repo_root is a Git-Bash-style path (e.g. /d/serendip-infra);
+	# WSL2 mounts the same drive under /mnt/d/...
+	wsl_root=$(echo "$repo_root" | sed -E 's#^/([a-zA-Z])/#/mnt/\1/#')
+	run_in_background wsl.exe bash -lc "cd '$wsl_root' && coderabbit review --light --type committed --plain --base HEAD~1"
+fi
+
+exit 0

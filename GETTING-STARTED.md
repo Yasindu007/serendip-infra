@@ -18,3 +18,44 @@ Rules of thumb:
 - Never accept "done" without the Verify line output.
 - Anything upstream (K3s flags, Longhorn CRDs) -> oss-researcher, never
   pasted into the main session.
+
+## CodeRabbit (PR review)
+
+Config lives at `.coderabbit.yaml` (path-scoped review instructions for
+core/, providers/, specs/, ADRs). Takes effect once the GitHub App is
+installed -- one-time, browser-only, requires an org owner:
+
+1. Go to github.com/apps/coderabbitai (or github.com/marketplace/coderabbitai).
+2. Install/Request for the `Serendip-Infra` org, select `serendip-infra`
+   (or all repos).
+3. If prompted, approve under org Settings -> Third-party access (org
+   owner only).
+
+No API-driven install path exists -- this step can't be scripted. Once
+installed, every PR against `Serendip-Infra/serendip-infra` gets reviewed
+automatically per `.coderabbit.yaml`.
+
+### Local review (advisory, WSL2)
+
+CodeRabbit CLI ships Linux/macOS binaries only. On Windows it runs through
+WSL2. `git config core.hooksPath .githooks` is already set for this repo
+clone -- `.githooks/post-commit` fires after every commit, runs
+`coderabbit review --light` in the **background** (never delays or blocks
+`git commit` -- a full review can take several minutes), and writes
+findings to `.coderabbit/review-<sha>.log` (gitignored, local only). If the
+CLI isn't installed anywhere it can find, the hook silently no-ops --
+nothing breaks for a clone that skips this setup.
+
+One-time setup inside WSL2 Ubuntu (needs your `sudo` password, can't be
+scripted):
+
+```sh
+wsl
+sudo apt-get update && sudo apt-get install -y unzip
+sh /tmp/coderabbit-install.sh   # already downloaded and vetted; re-download
+                                 # from https://cli.coderabbit.ai/install.sh if missing
+coderabbit auth login           # opens a browser; or --api-key "cr-..." for headless
+```
+
+After that, every commit gets a background review automatically -- check
+`.coderabbit/review-<sha>.log` whenever you want the findings.

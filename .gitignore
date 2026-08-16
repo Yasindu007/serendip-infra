@@ -27,3 +27,6 @@ Thumbs.db
 
 # Benchmark scratch (keep committed results under profiles/*/bench/, not raw scratch runs)
 *.pprof
+
+# Local CodeRabbit review logs (.githooks/post-commit) — personal, not shared
+.coderabbit/

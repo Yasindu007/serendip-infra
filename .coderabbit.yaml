@@ -1,0 +1,66 @@
+# CodeRabbit configuration for Serendip Infra.
+# Schema: https://coderabbit.ai/integrations/schema.v2.json
+# Full docs: https://docs.coderabbit.ai/reference/configuration
+#
+# Requires the CodeRabbit GitHub App installed on Serendip-Infra/serendip-infra
+# (github.com/apps/coderabbitai) before this takes effect on PRs.
+
+language: en-US
+
+reviews:
+  tone_instructions: >
+    Direct and concise. Flag constitution violations explicitly by rule
+    number. Don't restate rules that already passed -- only comment on
+    what actually needs attention.
+
+  path_instructions:
+    - path: "core/**/*.go"
+      instructions: |
+        This is Serendip Infra's domain layer (core/CLAUDE.md, docs/constitution.md).
+        Read docs/constitution.md before reviewing. Flag, in priority order:
+        1. Any import of a providers/ package or a vendor SDK (client-go,
+           any product-specific client) -- core/ must never import these
+           (constitution rule 2).
+        2. Any OSS product name (Longhorn, Thunder, OpenBao, OpenChoreo,
+           Rancher, Crossplane, Cilium, kgateway, CloudNativePG,
+           OpenObserve, SigNoz, K3s...) appearing in an identifier,
+           function name, or comment describing behavior -- core/ speaks
+           only in capability language (constitution rule 1).
+        3. A mutation path (Create/Update/Delete on a resource) that
+           doesn't produce an audit record (constitution rule 8).
+        4. A new abstraction introduced when an existing one in core/ or
+           providers/ already serves the purpose -- check before
+           approving a new interface/wrapper type.
+        5. Reconciliation logic that isn't idempotent, or that mutates
+           infrastructure directly instead of going through
+           desired-state -> reconciler -> provider -> verification
+           (constitution rule 3).
+        6. Any query or mutation that could leak data across an
+           Organization/Team/Project/Environment boundary -- this is not
+           yet a fully enforced constitution rule, so flag it as a
+           discussion point rather than a hard failure.
+
+    - path: "providers/**/*.go"
+      instructions: |
+        Provider implementations (providers/CLAUDE.md, docs/architecture/provider-model.md).
+        Flag: a provider that isn't removable without breaking
+        `go build ./core/... ./api/...` (constitution rule 2); business
+        logic instantiating a provider directly instead of going through
+        the Provider Registry; missing health-check contract or resource-
+        requirements descriptor on a new provider registration.
+
+    - path: "specs/**/*.md"
+      instructions: |
+        Spec/plan/tasks documents (see CLAUDE.md workflow rules). Flag
+        acceptance criteria that aren't independently verifiable, and any
+        task missing an explicit "Verify:" line.
+
+    - path: "docs/decisions/*.md"
+      instructions: |
+        ADRs. Flag a new dependency or vendor default introduced elsewhere
+        in the PR that has no corresponding ADR (constitution rule 4 for
+        dependencies; see ADR 0005/0006 as the pattern for provider
+        defaults).
+
+  auto_review:
+    enabled: true
