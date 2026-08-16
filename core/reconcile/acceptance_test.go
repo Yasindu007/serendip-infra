@@ -256,6 +256,69 @@ func TestAcceptanceCriterion4_ResyncAlone_DetectsHealthFlip(t *testing.T) {
 // api/acceptance_test.go's countAllAuditRows already use -- audit_log
 // isn't exposed through store.Store, so tests that need to assert on it
 // query the underlying *sql.DB directly.
+// TestAcceptanceCriterion5_AuditRowsShowReconcilerIdentity is spec.md's
+// acceptance criterion 5: every reconciler-driven audit_log row shows
+// Interface = reconcile.InterfaceName and Actor = reconcile.ActorName --
+// not "core" or "http" (Interface) and not "unknown" (Actor). This
+// checks the persisted row itself, not just the context value
+// engine_test.go's TestEngine_ReconcileContext_CarriesAuditIdentity
+// already proves is set correctly before the store call happens.
+func TestAcceptanceCriterion5_AuditRowsShowReconcilerIdentity(t *testing.T) {
+	f := newAcceptanceFixture(t, time.Hour)
+	addr, stop := startListener(t)
+	defer stop()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go f.engine.Run(ctx)
+	<-f.engine.Ready()
+
+	provider, err := f.providers.Create(context.Background(), resource.Provider{
+		Metadata: resource.Metadata{Name: "acceptance-provider"},
+		Spec:     resource.ProviderSpec{HealthCheck: resource.HealthCheckContract{Kind: "tcp", Config: map[string]string{"address": addr}}},
+	})
+	if err != nil {
+		t.Fatalf("Create(provider) = %v", err)
+	}
+	cluster, err := f.clusters.Create(context.Background(), resource.Cluster{
+		Metadata: resource.Metadata{Name: "acceptance-cluster"},
+		Spec:     resource.ClusterSpec{ProviderID: provider.Metadata.ID},
+	})
+	if err != nil {
+		t.Fatalf("Create(cluster) = %v", err)
+	}
+
+	waitForCondition(t, f, cluster.Metadata.ID, resource.ConditionTrue)
+
+	rows, err := f.db.QueryContext(context.Background(),
+		`SELECT actor, interface FROM audit_log WHERE resource_id = ? ORDER BY at`, cluster.Metadata.ID)
+	if err != nil {
+		t.Fatalf("query audit_log: %v", err)
+	}
+	defer rows.Close()
+
+	var sawReconcilerRow bool
+	for rows.Next() {
+		var actor, iface string
+		if err := rows.Scan(&actor, &iface); err != nil {
+			t.Fatalf("scan audit_log row: %v", err)
+		}
+		if iface != reconcile.InterfaceName {
+			continue // this is the Create row, made directly against the store (Interface defaults to "core"), not reconciler-driven
+		}
+		sawReconcilerRow = true
+		if actor != reconcile.ActorName {
+			t.Errorf("reconciler-driven audit row actor = %q, want %q (not \"unknown\")", actor, reconcile.ActorName)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate audit_log rows: %v", err)
+	}
+	if !sawReconcilerRow {
+		t.Fatal("no audit_log row with Interface = reconcile.InterfaceName found -- the reconciler's Update never happened or wasn't audited")
+	}
+}
+
 func countAuditRows(t *testing.T, f *acceptanceFixture, resourceID string) int {
 	t.Helper()
 	var n int
