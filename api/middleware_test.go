@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/api"
+	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
@@ -82,5 +83,78 @@ func TestRequestIDMiddleware_PropagatesToResponseAndAuditRow(t *testing.T) {
 func TestRequestIDFromContext_EmptyWhenNotSet(t *testing.T) {
 	if got := api.RequestIDFromContext(context.Background()); got != "" {
 		t.Errorf("RequestIDFromContext(bare context) = %q, want empty", got)
+	}
+}
+
+func TestActorMiddleware_ValidToken_ResolvesActor(t *testing.T) {
+	apiKeys := map[string]string{"key-alice": "alice"}
+
+	var gotActor string
+	var nextCalled bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		gotActor = audit.ActorFrom(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := api.ActorMiddleware(apiKeys)(next)
+	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", nil)
+	req.Header.Set("Authorization", "Bearer key-alice")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if !nextCalled {
+		t.Fatal("next handler was not called for a valid token")
+	}
+	if gotActor != "alice" {
+		t.Errorf("actor in context = %q, want %q", gotActor, "alice")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+// TestActorMiddleware_RejectsWithoutReachingNext is spec.md's acceptance
+// criterion 3, literally: a rejected request must never reach the
+// handler chain that would call core/store -- proven here by asserting
+// next is never invoked (if it were, any core/store call inside it could
+// not happen either, since the whole point is the handler never runs).
+func TestActorMiddleware_RejectsWithoutReachingNext(t *testing.T) {
+	apiKeys := map[string]string{"key-alice": "alice"}
+
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{"no Authorization header", ""},
+		{"malformed (no Bearer prefix)", "key-alice"},
+		{"unknown token", "Bearer key-does-not-exist"},
+		{"empty bearer token", "Bearer "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var nextCalled bool
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				nextCalled = true
+			})
+
+			handler := api.ActorMiddleware(apiKeys)(next)
+			req := httptest.NewRequest(http.MethodPost, "/v1/organizations", nil)
+			if tt.header != "" {
+				req.Header.Set("Authorization", tt.header)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if nextCalled {
+				t.Error("next handler was called for a rejected request, want it never reached")
+			}
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+			}
+			if ct := w.Header().Get("Content-Type"); ct != "application/problem+json" {
+				t.Errorf("Content-Type = %q, want application/problem+json", ct)
+			}
+		})
 	}
 }
