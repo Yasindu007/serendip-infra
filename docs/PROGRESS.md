@@ -17,9 +17,32 @@ Last updated: 2026-08-16
 PR #24.** All 19 tasks + epic closed and linked (locally only — see
 GitHub note below, nothing from spec 002 has been pushed anywhere yet).
 
-**Spec 002 (HTTP API) — T001-T017 done and committed locally, T018 (this
-edit) in progress, only T019 (final acceptance pass + contract-guardian)
-left.** Full picture:
+**Spec 002 (HTTP API) — COMPLETE. All 19 tasks committed locally**
+(nothing pushed — see GitHub note below), holistic contract-guardian
+review PASS. Full picture:
+
+- **T019's holistic review caught one real, undisclosed scope gap**:
+  spec.md's Scope-IN item 2 ("HTTP handlers over `core/registry`:
+  register/list capabilities and providers, get/set a capability's
+  default provider") was never built by any T001-T018 task, and the drop
+  was never documented as a deferral — register/list were covered
+  incidentally by the generic 14-kind CRUD mount, but get/set-default
+  (which needs `CapabilityRegistry.SetDefault`'s "must already be a
+  registered provider" validation, not available through the generic
+  store-backed PUT) was simply missing. Fixed same-session: new
+  `api/registry_handler.go` (`GET/PUT /v1/capabilities/{name}/default`),
+  `CapabilityRegistry.SetDefault`'s rejection now wraps
+  `resource.ErrValidation` so it maps to 400 not 500. Re-reviewed: PASS.
+  **Lesson for future specs**: a task list can look complete (all tasks
+  done, all green) while quietly dropping a spec.md commitment no task
+  ever claimed — the final holistic review step earns its place in the
+  workflow precisely by re-reading spec.md's Scope-IN against the actual
+  code, not just re-running the diffs already reviewed task-by-task.
+- Same review also caught (non-blocking, fixed anyway): unmatched routes
+  (e.g. `/v1/no-such-kind`) returned Go's default plain-text 404, not RFC
+  7807 problem+json — violated acceptance criterion 4's literal "every
+  error response." Both `apiMux` and `topMux` now have a problem+json
+  catch-all (`api/server.go`).
 
 - `api/{problem.go, middleware.go, handler.go, graph_handler.go,
   server.go}` — RFC 7807 error mapping, request-ID middleware,
@@ -176,13 +199,12 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **T019** (final acceptance pass + contract-guardian) — the last task
-   in `specs/002-http-api/tasks.md`: `go test ./core/... ./api/... -v`
-   full run, re-check all 5 acceptance criteria against actual test
-   output, one holistic `contract-guardian` review across `core/` (the
-   audit/migration changes) and all of `api/`. Then spec 002 is fully
-   done and spec 003 planning starts (per `docs/PRD.md`'s roadmap —
-   check it for what's next in sequence, don't assume).
+1. **Spec 002 is done.** Spec 003 planning starts next (per
+   `docs/PRD.md`'s roadmap — check it for what's actually next in
+   sequence, don't assume; the reconciliation engine is the obvious
+   candidate since `api/CLAUDE.md` already says "every mutating endpoint
+   creates desired state; reconcilers do the work" and none exist yet,
+   but confirm against PRD.md rather than assuming).
 2. GitHub: PAT permissions got fixed and the tracking board (milestones/
    issues/sub-issues/project) got fully built and spec 001 merged via
    PR #24 — but then `serendipinfra` got flagged (blocks OAuth app
