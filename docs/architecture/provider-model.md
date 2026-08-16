@@ -101,3 +101,26 @@ constitution rule 1's "external escape hatch" requires for every capability.
   actual `core/` interface names, or get split further per capability (e.g.
   separate `ClusterProvider` vs. `ComputeProvider`), is undecided — resolve
   during the relevant spec's plan.md, not by guessing here.
+
+**Breadcrumb from spec 003** (`core/reconcile`, the reconciliation
+engine): still doesn't resolve the question above — no real provider
+exists yet, so nothing forced a decision. What it did establish, real
+and load-bearing for whoever answers the question next:
+
+- `HealthCheckContract.Kind` now has one concrete, implemented value:
+  `"tcp"` (dials `Config["address"]` via stdlib `net.Dialer`). An
+  empty/unrecognized `Kind` means "not configured," not an error — that
+  convention is now precedent, not just a comment.
+- The generic dispatch shape that turned out to work:
+  `Reconciler.Reconcile(ctx, graph.ResourceRef) error`, one interface per
+  *kind* being reconciled, not per capability. Whether the eventual
+  capability-specific Provider interface(s) plug in underneath a
+  `Reconciler` implementation (most likely, given how `ClusterReconciler`
+  is structured — it calls a `HealthChecker`, a capability-shaped
+  interface, from inside a kind-shaped `Reconciler`) or need to reshape
+  this dispatch layer is worth checking against whatever the first real
+  provider actually needs, not assumed either way.
+- The observe/verify side (health checking) is now real and working;
+  the apply/provision side (actually creating infrastructure) is still
+  completely unbuilt — that boundary is exactly where the first real
+  provider spec starts, not somewhere upstream of it.

@@ -14,98 +14,65 @@ Last updated: 2026-08-16
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** All 19 tasks + epic closed and linked (locally only — see
-GitHub note below, nothing from spec 002 has been pushed anywhere yet).
+PR #24.** Specs 002 and 003 are committed locally only — nothing pushed
+anywhere yet (see GitHub note below).
 
-**Spec 002 (HTTP API) — COMPLETE. All 19 tasks committed locally**
-(nothing pushed — see GitHub note below), holistic contract-guardian
-review PASS. Full picture:
+**Spec 003 (Reconciliation engine) — COMPLETE. All 11 tasks committed
+locally**, holistic contract-guardian review PASS (one round-trip: a
+vendor-name-in-a-comment finding, fixed, re-reviewed clean). Full
+picture:
 
-- **T019's holistic review caught one real, undisclosed scope gap**:
-  spec.md's Scope-IN item 2 ("HTTP handlers over `core/registry`:
-  register/list capabilities and providers, get/set a capability's
-  default provider") was never built by any T001-T018 task, and the drop
-  was never documented as a deferral — register/list were covered
-  incidentally by the generic 14-kind CRUD mount, but get/set-default
-  (which needs `CapabilityRegistry.SetDefault`'s "must already be a
-  registered provider" validation, not available through the generic
-  store-backed PUT) was simply missing. Fixed same-session: new
-  `api/registry_handler.go` (`GET/PUT /v1/capabilities/{name}/default`),
-  `CapabilityRegistry.SetDefault`'s rejection now wraps
-  `resource.ErrValidation` so it maps to 400 not 500. Re-reviewed: PASS.
-  **Lesson for future specs**: a task list can look complete (all tasks
-  done, all green) while quietly dropping a spec.md commitment no task
-  ever claimed — the final holistic review step earns its place in the
-  workflow precisely by re-reading spec.md's Scope-IN against the actual
-  code, not just re-running the diffs already reviewed task-by-task.
-- Same review also caught (non-blocking, fixed anyway): unmatched routes
-  (e.g. `/v1/no-such-kind`) returned Go's default plain-text 404, not RFC
-  7807 problem+json — violated acceptance criterion 4's literal "every
-  error response." Both `apiMux` and `topMux` now have a problem+json
-  catch-all (`api/server.go`).
+- **Why this spec looks narrower than "reconciliation engine" might
+  suggest**: no `providers/` package exists yet, so building the full
+  capability-specific Provider Go interface `provider-model.md` sketches
+  (`ApplicationProvider`, `InfrastructureProvider`, ...) would have been
+  guessing at a shape with no real consumer — that doc's own open
+  question explicitly defers it to "the relevant spec's plan.md," and
+  this spec deliberately didn't claim to be that spec. What it built
+  instead is fully real, not a stub: `core/reconcile`, an event-driven +
+  30s-periodic-resync `Engine` (single goroutine, sequential — edge-1
+  scale doesn't need more), proven end-to-end with one concrete
+  `Reconciler` (`ClusterReconciler`) driving a stdlib-only, genuinely
+  reusable `TCPHealthChecker` against `resource.HealthCheckContract` —
+  the exact mechanism that field's spec-001 doc comment named as
+  "the reconciliation engine (spec 003)."
+- **Idempotency (constitution rule 3) is enforced in code, not just
+  documented**: `ClusterReconciler.setCondition` compares the computed
+  `{Status, Reason}` against what's already stored before calling
+  `Update` — a no-drift reconcile makes zero store calls, zero audit
+  rows, zero `ResourceVersion` bumps. Proven directly (not just "no
+  error") in both `cluster_test.go` (unit level) and
+  `acceptance_test.go`'s criterion-3 test (through the real `Engine`).
+- **A real shutdown race was designed around, not just avoided by luck**:
+  `cmd/serendipd`'s engine goroutine reacts to the same `ctx` the HTTP
+  server's shutdown branch does. If the engine's completion channel
+  became ready merely from `ctx` cancellation (the same instant
+  `ctx.Done()` itself becomes ready), Go's `select` could randomly pick
+  that case over the shutdown branch and skip `srv.Shutdown()` entirely.
+  Fix: the engine's error channel only ever receives a value for a
+  genuine crash (`context.Canceled` is filtered out before sending), so
+  it can never race `ctx.Done()`'s readiness — mirrors why the
+  pre-existing HTTP `errCh` was already race-free (it's only ready
+  *downstream* of `Shutdown()` being called, never in direct parallel
+  reaction to `ctx`). A separate `engineDone` channel is waited on before
+  the deferred `db.Close()` runs, so no in-flight reconcile can be
+  torn down mid-write.
+- **T010's holistic review caught one real (if trivial) constitution
+  violation**: `TCPHealthChecker`'s doc comment named K3s and OpenBao as
+  illustrative future consumers — inside `core/reconcile`, where rule 1's
+  "no OSS product name in `core/` types, function names, or
+  comments-as-behavior" applies unqualified (unlike spec 002's Thunder
+  mention in `api/middleware.go`, which is outside `core/` and was
+  correctly ruled acceptable). Fixed to vendor-neutral language,
+  re-reviewed: PASS.
+- Verified end-to-end via the real compiled binary in WSL, not just unit
+  tests: a `Cluster` created through the live HTTP API got a real
+  `Healthy: True` Condition within ~100ms (event-triggered), and a real
+  SIGINT still shuts down cleanly (~200ms) with both the HTTP server and
+  the engine active.
 
-- `api/{problem.go, middleware.go, handler.go, graph_handler.go,
-  server.go}` — RFC 7807 error mapping, request-ID middleware,
-  actor-extraction middleware (static `SERENDIP_API_KEYS`, the real authn
-  gate — deliberately security-focused contract-guardian pass, no bypass
-  found), generic `ResourceHandler[S,St]` (14 instantiations in
-  `server.go`, mirrors `core/store/sqlite.Store[S,St]`'s pattern),
-  `GraphHandler` (first real consumer of `graph.SQLiteGraph` outside
-  `core/store/sqlite`'s own transactions), two-mux composition
-  (`/healthz` bypasses auth, `/v1/` doesn't).
-- `cmd/serendipd/main.go` (T014) — real entrypoint: open+migrate SQLite,
-  construct bus+server, graceful shutdown on SIGINT/SIGTERM. Verified via
-  the actual compiled binary, not just unit tests — healthz/auth checked
-  on Windows, then a real SIGINT-triggered clean shutdown (~200ms, no
-  hang) verified in WSL2 since Windows has no scriptable way to deliver a
-  real SIGINT/Ctrl-C to a background process. **Go wasn't installed in
-  WSL at session start — installed to `~/go-sdk` (no sudo available,
-  user-space install) and added to `~/.bashrc`'s PATH; reusable for any
-  future Linux-side testing**, which also better matches the actual
-  target deployment platform (K3s on Linux, ADR 0001) than Windows does.
-- Test coverage: `api/handler_test.go` (T011, T015 — CRUD cycle, 404,
-  validation 400, version-conflict 409, malformed-body 400, permissive
-  Content-Type pinned as intentional, combined owner+label filtering),
-  `api/graph_handler_test.go` (T013), `api/acceptance_test.go` (T016 —
-  spec.md's acceptance criteria 2-4 proven through the *fully composed*
-  `api.NewServer` stack: create/get/delete round-trip with audit rows
-  showing a real actor+interface; a rejected no-actor mutation produces
-  zero audit rows/events/data-changes; every error is problem+json with
-  a request ID matching the audit row a real mutation produces).
-- `.claude/scripts/check-imports.sh` (T017) — extended to also scan
-  `api/` (previously `core/`-only): rule 2's removability bullet only
-  holds if `api/` never imports `providers/` directly either. `api/`'s
-  one vendor-name mention (a Thunder reference in `middleware.go`,
-  pointing at ADR 0006's already-made decision) is a comment, not a
-  leaked dependency — left as-is, constitution rule 1 scopes the
-  identifier/comment restriction to `core/` anyway.
-- `core/resource` has `json:"lowerCamelCase"` tags throughout (T005-T010)
-  — surfaced and fixed a real bug along the way: `core/store/sqlite`'s
-  cascade-delete audit-snapshot builder (`rawSnapshotJSON`) wrapped raw
-  DB text in `json.RawMessage`, which silently defeats `omitempty` (an
-  empty map/slice is stored as the literal string `"null"`, and
-  `RawMessage("null")` has `len()==4`, never counting as empty) —
-  contract-guardian caught this on a re-review (BLOCK, then PASS after
-  the fix). `core/resource.ErrValidation` is new too (T002).
-  `core/audit` gained `WithRequestID`/`RequestIDFrom` and
-  `WithInterface`/`InterfaceFrom` (T003).
-
-Plan.md decisions worth remembering without re-reading it: generic
-`ResourceHandler[S,St]` (one type, 14 instantiations, mirrors
-`core/store/sqlite.Store[S,St]`), static API-key actor extraction
-(`SERENDIP_API_KEYS` env var — explicitly weak/temporary until a real
-identity provider exists; `api.ActorMiddleware`'s doc comment names it as
-the exact swap-in point for `providers/identity` later), JSON tags
-directly on `core/resource` types (no separate DTOs), flat unscoped
-routes (no multi-tenant path nesting — `OwnerRefs` is plural so it
-doesn't map to single-parent nesting anyway), `/v1/` prefix from day one.
-
-**Process note this stretch**: user asked me to make spec-level decisions
-myself and present them for approval rather than asking open questions
-for routine/reversible calls (saved to memory as `decide-then-confirm`) —
-applied throughout spec 002: the Interface-bundling call, the
-rawSnapshotJSON fix, extending check-imports.sh to `api/`, and the
-Content-Type/owner+label test-gap decisions in T015.
+**Spec 002 (HTTP API) — COMPLETE.** See "Spec 002 — what actually got
+built" below for detail; condensed here now that spec 003 is current.
 
 **GitHub note**: `serendipinfra` account is flagged by GitHub (blocks
 OAuth app authorization — hit this trying `coderabbit auth login` —
@@ -118,6 +85,43 @@ GitHub automation until resolved.** User's personal account
 (`Yasindu007`) is confirmed unaffected but the user does not want it used
 for this project's automation either — leave GitHub tooling alone
 entirely until the flag clears.
+
+## Spec 002 — what actually got built
+
+`api/{problem,middleware,handler,graph_handler,registry_handler,server}.go`
++ `cmd/serendipd` — the HTTP API over `core/`, 19 tasks, all merged
+locally:
+
+- RFC 7807 error mapping, request-ID middleware, actor-extraction
+  middleware (static `SERENDIP_API_KEYS` — explicitly weak/temporary,
+  `ActorMiddleware`'s doc comment names it as the swap-in point for
+  `providers/identity` later), generic `ResourceHandler[S,St]` (14
+  instantiations in `server.go`), `GraphHandler`, `RegistryHandler`
+  (`GET/PUT /v1/capabilities/{name}/default`), two-mux composition
+  (`/healthz` bypasses auth, `/v1/` doesn't, both have a problem+json
+  404 catch-all).
+- `cmd/serendipd/main.go`: real entrypoint, graceful shutdown on
+  SIGINT/SIGTERM, verified via the real compiled binary in WSL (Go
+  wasn't installed there at the time — installed to `~/go-sdk`,
+  user-space, no sudo — reused by spec 003).
+- **T019's holistic review caught one real, undisclosed scope gap**:
+  spec.md had committed to registry get/set-default-provider endpoints
+  that no task ever built — fixed same-session (`RegistryHandler`,
+  `CapabilityRegistry.SetDefault` wrapping `resource.ErrValidation` for
+  a proper 400). **This is the lesson spec 003's T010 explicitly applied
+  again**: a task list can look complete while quietly dropping a
+  spec.md commitment no task ever claimed — the final holistic review
+  earns its place by re-reading spec.md's Scope-IN against the actual
+  code, not just re-running diffs already reviewed task-by-task.
+- `core/resource` gained `json:"lowerCamelCase"` tags throughout — this
+  surfaced and fixed a real bug (`core/store/sqlite`'s cascade-delete
+  audit-snapshot builder defeated `omitempty` by wrapping raw DB text in
+  `json.RawMessage`). `core/resource.ErrValidation` and
+  `core/audit`'s `WithRequestID`/`WithInterface` are also new here.
+
+All 5 acceptance criteria satisfied and tested; every task got an
+independent `contract-guardian` review before commit (git log has
+per-task detail if needed).
 
 ## Spec 001 — what actually got built
 
@@ -195,16 +199,20 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
   don't add a new abstraction when one exists; match existing
   error-handling/observability conventions; **multi-tenant isolation is
   not yet an enforced constitution rule**, flagged for a possible ADR
-  once spec 002 (HTTP API/auth) makes it concrete.
+  once spec 002 (HTTP API/auth) makes it concrete. Also
+  `propose_shortcuts_before_switching` (feedback-type, added during spec
+  003 planning) — a shortcut that reshapes which spec does what or pulls
+  a dependency forward (e.g. integrating a real provider like Thunder
+  earlier than the roadmap sequence) needs explicit confirmation before
+  switching approach, unlike routine implementation-detail calls.
 
 ## Next up
 
-1. **Spec 002 is done.** Spec 003 planning starts next (per
-   `docs/PRD.md`'s roadmap — check it for what's actually next in
-   sequence, don't assume; the reconciliation engine is the obvious
-   candidate since `api/CLAUDE.md` already says "every mutating endpoint
-   creates desired state; reconcilers do the work" and none exist yet,
-   but confirm against PRD.md rather than assuming).
+1. **Spec 003 is done — Phase 1 (Foundation, specs 001-003) is
+   complete.** Per `docs/PRD.md`'s roadmap, Phase 2 is the bootstrap
+   agent (spec 004): `serendip-agent` bootstraps a K3s node. Confirm
+   against `docs/PRD.md` before starting spec 004 planning rather than
+   assuming the phase list hasn't shifted.
 2. GitHub: PAT permissions got fixed and the tracking board (milestones/
    issues/sub-issues/project) got fully built and spec 001 merged via
    PR #24 — but then `serendipinfra` got flagged (blocks OAuth app
