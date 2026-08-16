@@ -13,9 +13,11 @@ Last updated: 2026-08-16
 
 ## Current phase
 
-**Phase 0 complete. Spec 001 (Foundation resource model) complete:
-T001-T017 committed, T018 (this update) in progress, T019 (final
-acceptance pass) next — then Phase 1 moves to spec 002 (HTTP API).**
+**Phase 0 complete. Spec 001 (Foundation resource model) fully complete:
+T001-T019 all committed (through 9b318df). All 5 acceptance criteria
+verified with real test evidence, final holistic contract-guardian pass
+PASS (one real finding — SQLiteGraph had zero test coverage — fixed same
+commit). Next: spec 002 (HTTP API) — nothing started yet.**
 
 ## Spec 001 — what actually got built
 
@@ -97,18 +99,15 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **T019** (final acceptance pass): `go test ./core/... -v` full run,
-   re-confirm all 5 acceptance criteria individually against actual test
-   output, run `contract-guardian` on the full `core/` diff one more time
-   before spec 001 is considered fully closed.
-2. Then **spec 002 (HTTP API)** — `/new-spec 002-http-api`, then
-   `/plan-spec` per `GETTING-STARTED.md`'s workflow. This is also when the
-   "real interface" value replaces `"core"` in `audit.Record.Interface`
-   for API-driven mutations, and when multi-tenant isolation enforcement
-   (flagged above) likely needs to become concrete.
-3. Three things blocked on the user (not on implementation) — check
-   current status before assuming still blocked: GitHub PAT permissions,
-   WSL sudo steps for CodeRabbit, (SSH identity separation is resolved).
+1. **Spec 002 (HTTP API)** — `/new-spec 002-http-api`, then `/plan-spec`
+   per `GETTING-STARTED.md`'s workflow. Nothing started yet. This is also
+   when the `"core"` literal in `audit.Record.Interface` gets a real
+   per-interface value for API-driven mutations, and when multi-tenant
+   isolation enforcement (flagged below) likely needs to become concrete.
+2. Two things blocked on the user (not on implementation) — check current
+   status before assuming still blocked: GitHub PAT permissions (tracking
+   board), WSL sudo steps for CodeRabbit local review. (SSH identity
+   separation is resolved.)
 
 ## Standing instructions (fold into CLAUDE.md properly if this section
 keeps persisting across many sessions unchanged — don't let it live here
