@@ -13,11 +13,31 @@ Last updated: 2026-08-16
 
 ## Current phase
 
-**Phase 0 complete. Spec 001 (Foundation resource model) fully complete:
-T001-T019 all committed (through 9b318df). All 5 acceptance criteria
-verified with real test evidence, final holistic contract-guardian pass
-PASS (one real finding — SQLiteGraph had zero test coverage — fixed same
-commit). Next: spec 002 (HTTP API) — nothing started yet.**
+**Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
+PR #24 (2026-08-16).** All 19 tasks + epic closed and linked. Spec 002
+(HTTP API): `spec.md` + `plan.md` + `tasks.md` (T001-T019) drafted,
+**awaiting user approval before implementation** — nothing in `api/`
+exists yet beyond the starter-kit `api/CLAUDE.md`. Key plan.md decisions
+worth remembering without re-reading it: generic `ResourceHandler[S,St]`
+(one type, 14 instantiations, mirrors `core/store/sqlite.Store[S,St]`),
+static API-key actor extraction (`SERENDIP_API_KEYS` env var — explicitly
+weak/temporary until a real identity provider exists), JSON tags added
+directly to `core/resource` types (no separate DTOs), flat unscoped
+routes (no multi-tenant path nesting — `OwnerRefs` is plural so it
+doesn't map to single-parent nesting anyway), `/v1/` prefix from day one,
+new `audit.Record.RequestID` field + migration `0002_add_request_id.sql`.
+
+**GitHub note**: `serendipinfra` account is flagged by GitHub (blocks
+OAuth app authorization — hit this trying `coderabbit auth login` —
+and apparently also Issues/PR list-view visibility, though individual
+resources remain fully intact via direct API access). Support contact is
+blocked by SMS-verification not supporting Sri Lankan numbers; user has
+emailed GitHub Support directly (2026-08-16) and is waiting to hear back
+— expect this to take a few days. **Do not use `serendipinfra` for any
+GitHub automation until resolved.** User's personal account
+(`Yasindu007`) is confirmed unaffected but the user does not want it used
+for this project's automation either — leave GitHub tooling alone
+entirely until the flag clears.
 
 ## Spec 001 — what actually got built
 
