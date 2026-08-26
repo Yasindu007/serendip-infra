@@ -9,13 +9,31 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-08-16
+Last updated: 2026-08-26
 
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
 PR #24.** Specs 002 and 003 are committed locally only — nothing pushed
 anywhere yet (see GitHub note below).
+
+**Spec 004 (Bootstrap agent — discovery/identity/self-registration) —
+PLANNING DONE, NOT YET APPROVED.** `specs/004-bootstrap-agent/{spec.md,
+plan.md,tasks.md}` exist on disk but are **uncommitted** (untracked —
+deliberately not committed yet, since committing implied "accepted" for
+specs 002/003 and this one hasn't gotten explicit user approval the way
+those did). Read `specs/004-bootstrap-agent/plan.md` before doing
+anything else with this spec — don't re-plan from scratch.
+
+Scope (decided, presented, not yet confirmed): NOT the full 8-item
+bootstrap-agent.md responsibility list — only hardware/environment
+discovery, stable node identity, and self-registration against the
+*already-existing* `/v1/nodes` API. K3s install, full negotiated
+enrollment (needs a topology planner), and daemon-mode health reporting
+are explicitly deferred (need root/real-host mutation or infra that
+doesn't exist yet). Zero new `api/`/`core/` code — purely additive
+under `agent/` + `cmd/serendip-agent/`, `core/id` is the only `core/`
+import. 10 tasks planned (T001-T010).
 
 **Spec 003 (Reconciliation engine) — COMPLETE. All 11 tasks committed
 locally**, holistic contract-guardian review PASS (one round-trip: a
@@ -74,17 +92,24 @@ picture:
 **Spec 002 (HTTP API) — COMPLETE.** See "Spec 002 — what actually got
 built" below for detail; condensed here now that spec 003 is current.
 
-**GitHub note**: `serendipinfra` account is flagged by GitHub (blocks
-OAuth app authorization — hit this trying `coderabbit auth login` —
-and apparently also Issues/PR list-view visibility, though individual
-resources remain fully intact via direct API access). Support contact is
-blocked by SMS-verification not supporting Sri Lankan numbers; user has
-emailed GitHub Support directly (2026-08-16) and is waiting to hear back
-— expect this to take a few days. **Do not use `serendipinfra` for any
-GitHub automation until resolved.** User's personal account
-(`Yasindu007`) is confirmed unaffected but the user does not want it used
-for this project's automation either — leave GitHub tooling alone
-entirely until the flag clears.
+**GitHub note (updated 2026-08-26)**: user believes GitHub may have
+lifted the `serendipinfra` suspension/flag. Status as of this check:
+`gh auth status` now reports the **`serendipinfra` token itself as
+invalid** ("Failed to log in... The token in keyring is invalid"),
+which is a *different* symptom than the earlier flag (which let the
+token authenticate but suppressed list-views/GraphQL). This could mean
+the account state changed (support resolved it and something
+invalidated the old token, e.g. a forced re-auth) or could be an
+unrelated token expiry — **not yet confirmed which**. No re-auth
+attempted; nothing GitHub-related was touched this session beyond the
+read-only `gh auth status`/rate-limit checks already covered in earlier
+entries. `Yasindu007` remains logged in, valid, and **not** made
+active — standing instruction not to use it stands unless the user says
+otherwise. **Before doing anything else with GitHub: confirm with the
+user directly whether `serendipinfra` is actually unsuspended (e.g. by
+having them check github.com in a browser or re-auth the CLI
+themselves), rather than assuming from this token-invalid symptom
+alone.**
 
 ## Spec 002 — what actually got built
 
@@ -208,11 +233,11 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Spec 003 is done — Phase 1 (Foundation, specs 001-003) is
-   complete.** Per `docs/PRD.md`'s roadmap, Phase 2 is the bootstrap
-   agent (spec 004): `serendip-agent` bootstraps a K3s node. Confirm
-   against `docs/PRD.md` before starting spec 004 planning rather than
-   assuming the phase list hasn't shifted.
+1. **Get explicit approval on `specs/004-bootstrap-agent/plan.md`** (not
+   yet given), then implement T001-T010 task-by-task, same rigor as
+   specs 002/003 (contract-guardian at the end given it's a new
+   top-level component; real verification in WSL2 for anything
+   Linux-specific, per precedent).
 2. GitHub: PAT permissions got fixed and the tracking board (milestones/
    issues/sub-issues/project) got fully built and spec 001 merged via
    PR #24 — but then `serendipinfra` got flagged (blocks OAuth app
