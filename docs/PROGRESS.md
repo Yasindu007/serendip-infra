@@ -9,107 +9,101 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-08-26
+Last updated: 2026-09-06
 
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** Specs 002 and 003 are committed locally only — nothing pushed
-anywhere yet (see GitHub note below).
+PR #24.** Specs 002, 003, and 004 are committed locally only — decided
+explicitly with the user to keep working locally and push everything
+together at a later checkpoint, now that GitHub auth works again (see
+GitHub note below) — not pushing yet is a choice, not a blocker.
 
 **Spec 004 (Bootstrap agent — discovery/identity/self-registration) —
-PLANNING DONE, NOT YET APPROVED.** `specs/004-bootstrap-agent/{spec.md,
-plan.md,tasks.md}` exist on disk but are **uncommitted** (untracked —
-deliberately not committed yet, since committing implied "accepted" for
-specs 002/003 and this one hasn't gotten explicit user approval the way
-those did). Read `specs/004-bootstrap-agent/plan.md` before doing
-anything else with this spec — don't re-plan from scratch.
+COMPLETE. All 10 tasks committed locally**, holistic contract-guardian
+review PASS (two non-blocking findings fixed same-session, re-reviewed
+clean). Full picture:
 
-Scope (decided, presented, not yet confirmed): NOT the full 8-item
-bootstrap-agent.md responsibility list — only hardware/environment
-discovery, stable node identity, and self-registration against the
-*already-existing* `/v1/nodes` API. K3s install, full negotiated
-enrollment (needs a topology planner), and daemon-mode health reporting
-are explicitly deferred (need root/real-host mutation or infra that
-doesn't exist yet). Zero new `api/`/`core/` code — purely additive
-under `agent/` + `cmd/serendip-agent/`, `core/id` is the only `core/`
-import. 10 tasks planned (T001-T010).
+- **Scope, approved before implementation**: NOT the full 8-item
+  `bootstrap-agent.md` responsibility list — only hardware/environment
+  discovery, stable node identity, and self-registration against the
+  *already-existing* `/v1/nodes` API (spec 002). K3s install, full
+  negotiated enrollment (needs a topology planner), and daemon-mode
+  health reporting are explicitly deferred — same "don't build against
+  infra that doesn't exist yet" reasoning specs 002/003 used for real
+  providers and the apply-side of reconciliation. Zero new `api/`/`core/`
+  code — purely additive under `agent/` + `cmd/serendip-agent/`,
+  `core/id` is the only `core/` import (`.claude/scripts/check-imports.sh`
+  extended and verified to actually catch a violation, not just pass).
+- **Researched two WSO2 datacenter repos before starting** (user's
+  request) for any reusable hardware-discovery tricks —
+  `wso2/open-cloud-datacenter`'s `dc-agent` turned out to have no
+  `/proc`/`/sys` discovery code at all (connection-lifecycle-only,
+  pre-discovery-stage); the other repo was inaccessible. One idea noted
+  but deliberately not acted on: `dc-agent`'s node identity is
+  server-issued (a minted token with region/zone baked in), not
+  self-generated like this spec's locally-persisted UUID — worth
+  reconsidering *if* a future full-enrollment spec needs to resist a
+  spoofing/compromised agent, not relevant to this spec's trusted,
+  one-shot, human-invoked scope.
+- **Real Linux facts, not guessed values**: `agent/discover` reads
+  `/proc/meminfo`, `/proc/cpuinfo`, `/proc/mounts`, and
+  `/sys/block/*`/`/sys/class/net/*` directly (zero non-stdlib deps).
+  Parse functions are tested against committed fixture files (portable,
+  no real host needed in CI); the real I/O layer was verified for real
+  in WSL2 — CPU count matched `nproc` exactly, memory matched
+  `/proc/meminfo` exactly. Disk-partition-suffix stripping handles both
+  traditional (`sda2`→`sda`) and NVMe/eMMC (`nvme0n1p2`→`nvme0n1`,
+  `mmcblk0p1`→`mmcblk0`) naming — the latter needed its own regex since
+  a plain trailing-digit strip would wrongly mangle `nvme0n1`.
+- **`agent/client` defines its own wire structs, doesn't import
+  `core/resource`** — confirmed against `core/store/sqlite/store.go`
+  directly (not assumed) that `CreatedAt` is server-preserved,
+  `UpdatedAt`/`Kind` are server-set regardless of client input, and
+  `Create` accepts a client-supplied `Metadata.ID`. `Upsert` does
+  GET-then-POST-or-PUT keyed by the locally-persisted identity, with one
+  retry on a 409 (a one-shot CLI doesn't need an unbounded retry loop).
+- **T009's holistic review (same discipline as specs 002/003's
+  T019/T010) found two real, worth-fixing gaps, no blocking ones**: (1)
+  `plan.md` had named a `SERENDIP_AGENT_STATE_DIR` env var as the
+  `--state-dir` override mechanism, but T006 never actually wired it up
+  — fixed with the same flag-then-env-then-fallback precedence
+  `cmd/serendipd` already uses. (2) `NodeStatusWire` had no `Conditions`
+  field, so `Upsert` would have silently wiped any `Conditions` a future
+  Node reconciler sets — fixed by preserving them across both the
+  initial and retry-after-409 update paths, with a regression test.
+  Binary size measured honestly (not assumed): 8.6MB unstripped / 6.0MB
+  stripped in WSL2, both well under `agent/CLAUDE.md`'s 30MB target.
+- **End-to-end proof, not just unit tests**: built real binaries in
+  WSL2, ran `discover` (values verified against `nproc`/`/proc/meminfo`
+  directly), started a real `serendipd`, ran `register` twice — first
+  created a Node (`resourceVersion=1`), second updated the *same* Node
+  (`resourceVersion=2`, not a duplicate), with `NodeStatus` fields
+  matching standalone `discover` output exactly.
 
-**Spec 003 (Reconciliation engine) — COMPLETE. All 11 tasks committed
-locally**, holistic contract-guardian review PASS (one round-trip: a
-vendor-name-in-a-comment finding, fixed, re-reviewed clean). Full
-picture:
+**Spec 003 (Reconciliation engine) and spec 002 (HTTP API) — COMPLETE.**
+See their own "what actually got built" sections below; condensed here
+now that spec 004 is current. Spec 003's one notable lesson, still worth
+carrying forward: its holistic review caught a vendor-name-in-a-comment
+constitution violation inside `core/reconcile` (K3s/OpenBao mentioned
+where rule 1 applies unqualified) — fixed, re-reviewed clean.
 
-- **Why this spec looks narrower than "reconciliation engine" might
-  suggest**: no `providers/` package exists yet, so building the full
-  capability-specific Provider Go interface `provider-model.md` sketches
-  (`ApplicationProvider`, `InfrastructureProvider`, ...) would have been
-  guessing at a shape with no real consumer — that doc's own open
-  question explicitly defers it to "the relevant spec's plan.md," and
-  this spec deliberately didn't claim to be that spec. What it built
-  instead is fully real, not a stub: `core/reconcile`, an event-driven +
-  30s-periodic-resync `Engine` (single goroutine, sequential — edge-1
-  scale doesn't need more), proven end-to-end with one concrete
-  `Reconciler` (`ClusterReconciler`) driving a stdlib-only, genuinely
-  reusable `TCPHealthChecker` against `resource.HealthCheckContract` —
-  the exact mechanism that field's spec-001 doc comment named as
-  "the reconciliation engine (spec 003)."
-- **Idempotency (constitution rule 3) is enforced in code, not just
-  documented**: `ClusterReconciler.setCondition` compares the computed
-  `{Status, Reason}` against what's already stored before calling
-  `Update` — a no-drift reconcile makes zero store calls, zero audit
-  rows, zero `ResourceVersion` bumps. Proven directly (not just "no
-  error") in both `cluster_test.go` (unit level) and
-  `acceptance_test.go`'s criterion-3 test (through the real `Engine`).
-- **A real shutdown race was designed around, not just avoided by luck**:
-  `cmd/serendipd`'s engine goroutine reacts to the same `ctx` the HTTP
-  server's shutdown branch does. If the engine's completion channel
-  became ready merely from `ctx` cancellation (the same instant
-  `ctx.Done()` itself becomes ready), Go's `select` could randomly pick
-  that case over the shutdown branch and skip `srv.Shutdown()` entirely.
-  Fix: the engine's error channel only ever receives a value for a
-  genuine crash (`context.Canceled` is filtered out before sending), so
-  it can never race `ctx.Done()`'s readiness — mirrors why the
-  pre-existing HTTP `errCh` was already race-free (it's only ready
-  *downstream* of `Shutdown()` being called, never in direct parallel
-  reaction to `ctx`). A separate `engineDone` channel is waited on before
-  the deferred `db.Close()` runs, so no in-flight reconcile can be
-  torn down mid-write.
-- **T010's holistic review caught one real (if trivial) constitution
-  violation**: `TCPHealthChecker`'s doc comment named K3s and OpenBao as
-  illustrative future consumers — inside `core/reconcile`, where rule 1's
-  "no OSS product name in `core/` types, function names, or
-  comments-as-behavior" applies unqualified (unlike spec 002's Thunder
-  mention in `api/middleware.go`, which is outside `core/` and was
-  correctly ruled acceptable). Fixed to vendor-neutral language,
-  re-reviewed: PASS.
-- Verified end-to-end via the real compiled binary in WSL, not just unit
-  tests: a `Cluster` created through the live HTTP API got a real
-  `Healthy: True` Condition within ~100ms (event-triggered), and a real
-  SIGINT still shuts down cleanly (~200ms) with both the HTTP server and
-  the engine active.
-
-**Spec 002 (HTTP API) — COMPLETE.** See "Spec 002 — what actually got
-built" below for detail; condensed here now that spec 003 is current.
-
-**GitHub note (updated 2026-08-26)**: user believes GitHub may have
-lifted the `serendipinfra` suspension/flag. Status as of this check:
-`gh auth status` now reports the **`serendipinfra` token itself as
-invalid** ("Failed to log in... The token in keyring is invalid"),
-which is a *different* symptom than the earlier flag (which let the
-token authenticate but suppressed list-views/GraphQL). This could mean
-the account state changed (support resolved it and something
-invalidated the old token, e.g. a forced re-auth) or could be an
-unrelated token expiry — **not yet confirmed which**. No re-auth
-attempted; nothing GitHub-related was touched this session beyond the
-read-only `gh auth status`/rate-limit checks already covered in earlier
-entries. `Yasindu007` remains logged in, valid, and **not** made
-active — standing instruction not to use it stands unless the user says
-otherwise. **Before doing anything else with GitHub: confirm with the
-user directly whether `serendipinfra` is actually unsuspended (e.g. by
-having them check github.com in a browser or re-auth the CLI
-themselves), rather than assuming from this token-invalid symptom
-alone.**
+**GitHub note (updated 2026-09-06, auth issue resolved)**: `serendipinfra`
+GitHub auth is now working. The PAT-generation flow had a real,
+unexplained problem (manually-created tokens repeatedly came back
+"invalid" from GitHub itself, tried via masked interactive prompt, a
+file piped via `--with-token`, and a `$env:GH_TOKEN` env var — all three
+independently rejected the same copied token) — resolved by using `gh
+auth login`'s **browser device-flow** option instead of pasting a PAT,
+which worked immediately. If a PAT is ever needed again and manual
+paste keeps failing, try device-flow login first rather than
+re-debugging the paste path. Current token scopes:
+`admin:public_key`, `gist`, `read:org`, `repo` — **missing `project` and
+`workflow`**; add with `gh auth refresh -h github.com -s
+project,workflow` only when Projects v2 board work or a
+`.github/workflows/*.yml` push is actually needed, not preemptively.
+`Yasindu007` remains a separate logged-in account, correctly inactive —
+standing instruction not to use it for this project stands.
 
 ## Spec 002 — what actually got built
 
@@ -147,6 +141,44 @@ locally:
 All 5 acceptance criteria satisfied and tested; every task got an
 independent `contract-guardian` review before commit (git log has
 per-task detail if needed).
+
+## Spec 003 — what actually got built
+
+`core/reconcile/{engine,health,cluster,audit}.go` + `cmd/serendipd`
+wiring — the reconciliation engine, 11 tasks, all merged locally:
+
+- `Engine`: event-driven (subscribes to `core/event.Bus`, non-blocking
+  enqueue per that bus's own "handlers must be fast" contract) +
+  30s-periodic-resync dispatch to per-`resource.Kind` `Reconciler`s.
+  Single goroutine, sequential — sufficient at edge-1 scale. Each
+  `Reconcile` call gets a bounded timeout and reconciler-specific audit
+  identity (`Interface="reconcile"`, `Actor="system:reconciler"`) set on
+  its context.
+- `HealthChecker`/`TCPHealthChecker`: one implemented
+  `HealthCheckContract.Kind` (`"tcp"`), stdlib-only, reusable unchanged
+  by any future real provider.
+- `ClusterReconciler`: the one concrete `Reconciler` — resolves a
+  Cluster's Provider, runs its health check, writes a `"Healthy"`
+  Condition, idempotently (`Update` only called when the computed
+  `{Status, Reason}` actually differs from what's stored — proven
+  directly via `ResourceVersion`/audit-row-count assertions, not just
+  "no error").
+- `cmd/serendipd/main.go`: engine runs alongside the HTTP server, sharing
+  the shutdown-signal `ctx` — a real shutdown race was designed around
+  (the engine's error channel only fires on genuine crashes, never on
+  plain `ctx` cancellation, so it can't race Go's `select` against the
+  HTTP shutdown branch).
+- **T010's holistic review caught one real (if trivial) constitution
+  violation**: `TCPHealthChecker`'s doc comment named K3s/OpenBao inside
+  `core/reconcile`, where rule 1 applies unqualified (unlike spec 002's
+  Thunder mention in `api/middleware.go`, correctly outside `core/`).
+  Fixed, re-reviewed: PASS.
+
+All 6 acceptance criteria satisfied and tested, including two proven
+end-to-end via the real compiled binary in WSL (not just `go test`): a
+Cluster created through the live API got marked `Healthy: True` within
+~100ms, and a real SIGINT still shuts down cleanly with both the HTTP
+server and engine active.
 
 ## Spec 001 — what actually got built
 
@@ -233,26 +265,27 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Get explicit approval on `specs/004-bootstrap-agent/plan.md`** (not
-   yet given), then implement T001-T010 task-by-task, same rigor as
-   specs 002/003 (contract-guardian at the end given it's a new
-   top-level component; real verification in WSL2 for anything
-   Linux-specific, per precedent).
-2. GitHub: PAT permissions got fixed and the tracking board (milestones/
-   issues/sub-issues/project) got fully built and spec 001 merged via
-   PR #24 — but then `serendipinfra` got flagged (blocks OAuth app
-   authorization, and apparently Issues/PR list-view visibility too).
-   User emailed GitHub Support directly (SMS verification doesn't support
-   Sri Lankan numbers, blocking the normal contact path) and is waiting to
-   hear back — expect a few days. **Nothing from spec 002 has been pushed
-   anywhere** (all local commits only) — don't assume otherwise. WSL sudo
-   step for CodeRabbit local review turned out to be avoidable entirely
-   (a Python-based `unzip` shim, no `sudo` needed) — CLI is installed,
-   only `coderabbit auth login` (browser) remains, blocked by the same
-   account flag. **Do not use `serendipinfra` OR `Yasindu007` (user's
-   personal account) for GitHub automation right now** — user explicitly
-   asked not to touch the personal account either; leave GitHub alone
-   entirely until they say otherwise.
+1. **Spec 004 is done — Phase 2 (Bootstrap agent) is complete.** Per
+   `docs/PRD.md`'s roadmap, Phase 3 is POC validation on the dev machine
+   (not real T470 hardware yet — that's 3b). Check `docs/PRD.md`'s POC
+   scope section for what's actually next in sequence before assuming;
+   the POC needs at least one real provider live per required capability
+   (Identity/Thunder, Secrets/OpenBao, Application Platform/OpenChoreo,
+   Storage/local-path, Gateway/kgateway) plus a demo app deployed
+   end-to-end — that's a bigger jump than specs 001-004's pattern of one
+   self-contained slice each, so it may need breaking into its own
+   sub-specs. Decide and present that breakdown, don't just start coding.
+2. **specs 002/003/004 are still unpushed by deliberate choice** (user
+   confirmed: keep working locally, push everything together at a later
+   checkpoint) — GitHub auth itself is no longer the blocker (see
+   GitHub note above), so this is a scheduling decision to revisit, not
+   a technical one to keep re-litigating.
+3. GitHub tracking board (milestones/issues/sub-issues/project) was
+   fully built for spec 001 and merged via PR #24 — extending it to
+   cover specs 002-004 once they're pushed is still open. CodeRabbit:
+   CLI installed, only `coderabbit auth login` (browser) remains,
+   previously blocked by the account flag — retry now that auth works,
+   not yet re-attempted this session.
 
 ## Standing instructions (fold into CLAUDE.md properly if this section
 keeps persisting across many sessions unchanged — don't let it live here

@@ -99,3 +99,17 @@ the API.
 - None outstanding beyond implementation detail (exact CLI subcommand
   surface, discovery output schema) — those belong in the agent's own spec,
   not this document.
+
+**Breadcrumb from spec 004** (discovery/identity/self-registration
+slice, `agent/discover`+`agent/identity`+`agent/client`): environment
+discovery (responsibility #2 above — OS, IP addresses, DNS servers,
+internet reachability) has real, tested code now, but **nowhere to send
+it** — `core/resource.NodeStatus` only ever modeled hardware facts
+(CPU/memory/disk/network), not environment facts. The discovered values
+are printed by `serendip-agent discover` for a human to see but aren't
+sent by `register`, since there's no `NodeStatus` field for them. This
+was flagged as a known gap in spec 004's plan.md, not an oversight —
+worth resolving whenever `resource-model.md`'s still-unresolved Network
+resource gets designed, or by extending `NodeStatus` directly, whichever
+turns out to fit better once there's a real consumer for these facts
+(e.g. the topology planner, when a future spec builds full enrollment).
