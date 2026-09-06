@@ -3,11 +3,192 @@ package discover
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
+	"net"
+	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// Result is everything one Discover call reports. The first six fields
+// map one-to-one onto core/resource.NodeStatus's hardware facts
+// (agent/client owns that mapping, not this package -- agent/ stays
+// decoupled from core/resource per specs/004-bootstrap-agent/plan.md's
+// resolved wire-format decision). The remaining environment facts have
+// no corresponding NodeStatus fields yet (resource-model.md's Network
+// resource is still unresolved) -- Discover still reports them (printed
+// by the `discover` CLI subcommand for a human to see), they're just
+// not sent anywhere by `register` today.
+type Result struct {
+	CPUCores              int
+	MemoryBytes           int64
+	DiskType              string // "nvme", "ssd", "hdd", or "" if undetermined
+	DiskBytes             int64
+	NetworkMbps           int // highest observed among up, non-loopback interfaces; 0 if none determinable
+	VirtualizationSupport bool
+
+	OS                string
+	IPAddresses       []string
+	DNSServers        []string
+	InternetReachable bool
+}
+
+// Discover reads hardware and environment facts from the local host.
+// Linux-only (specs/004-bootstrap-agent/spec.md Scope-OUT: "discovery on
+// any other OS returns a clear error, not a supported code path") --
+// checked up front rather than letting individual file reads fail
+// haphazardly partway through.
+func Discover(ctx context.Context) (Result, error) {
+	if runtime.GOOS != "linux" {
+		return Result{}, fmt.Errorf("discover: unsupported OS %q, only linux is supported", runtime.GOOS)
+	}
+
+	var res Result
+	res.OS = runtime.GOOS
+	res.CPUCores = runtime.NumCPU()
+
+	meminfo, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return Result{}, fmt.Errorf("discover: read /proc/meminfo: %w", err)
+	}
+	if res.MemoryBytes, err = parseMemTotal(meminfo); err != nil {
+		return Result{}, err
+	}
+
+	cpuinfo, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		return Result{}, fmt.Errorf("discover: read /proc/cpuinfo: %w", err)
+	}
+	if res.VirtualizationSupport, err = parseVirtualizationSupport(cpuinfo); err != nil {
+		return Result{}, err
+	}
+
+	mounts, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return Result{}, fmt.Errorf("discover: read /proc/mounts: %w", err)
+	}
+	device, err := rootBlockDevice(mounts)
+	if err != nil {
+		return Result{}, err
+	}
+	sizeStr, err := os.ReadFile(fmt.Sprintf("/sys/block/%s/size", device))
+	if err != nil {
+		return Result{}, fmt.Errorf("discover: read /sys/block/%s/size: %w", device, err)
+	}
+	rotationalStr, err := os.ReadFile(fmt.Sprintf("/sys/block/%s/queue/rotational", device))
+	if err != nil {
+		return Result{}, fmt.Errorf("discover: read /sys/block/%s/queue/rotational: %w", device, err)
+	}
+	if res.DiskBytes, res.DiskType, err = parseDiskStats(string(sizeStr), string(rotationalStr), device); err != nil {
+		return Result{}, err
+	}
+
+	res.NetworkMbps = discoverNetworkMbps()
+	res.IPAddresses = discoverIPAddresses()
+	res.DNSServers = discoverDNSServers()
+	res.InternetReachable = discoverInternetReachable(ctx)
+
+	return res, nil
+}
+
+// discoverNetworkMbps reads /sys/class/net/<iface>/speed for every up,
+// non-loopback interface and returns the highest value found. Best-
+// effort, not an error path: many virtual/Wi-Fi/containerized
+// interfaces -- including WSL2's own virtual adapter, which is what
+// this spec's own verification runs against (plan.md Risks) -- don't
+// expose a readable speed file, or report the kernel's "-1 = unknown"
+// sentinel. Those are skipped, not treated as failures.
+func discoverNetworkMbps() int {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return 0
+	}
+	best := 0
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		raw, err := os.ReadFile(fmt.Sprintf("/sys/class/net/%s/speed", iface.Name))
+		if err != nil {
+			continue
+		}
+		mbps, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if err != nil || mbps <= 0 {
+			continue
+		}
+		if mbps > best {
+			best = mbps
+		}
+	}
+	return best
+}
+
+// discoverIPAddresses collects addresses from every up, non-loopback
+// interface. Best-effort: an interface whose Addrs() call fails is
+// skipped, not fatal to the whole Discover call.
+func discoverIPAddresses() []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var ips []string
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ips = append(ips, ipNet.IP.String())
+		}
+	}
+	return ips
+}
+
+var nameserverRE = regexp.MustCompile(`^nameserver\s+(\S+)`)
+
+// discoverDNSServers parses /etc/resolv.conf. Best-effort: a missing or
+// unreadable file (some container/VM setups generate this dynamically
+// or symlink it elsewhere) yields an empty result, not an error.
+func discoverDNSServers() []string {
+	data, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		return nil
+	}
+	var servers []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if m := nameserverRE.FindStringSubmatch(line); m != nil {
+			servers = append(servers, m[1])
+		}
+	}
+	return servers
+}
+
+// discoverInternetReachable does one bounded outbound TCP dial -- a
+// reachability probe, not a hard dependency on the target staying up.
+// Dials an IP directly (not a hostname) so a DNS outage doesn't get
+// mistaken for a connectivity outage.
+func discoverInternetReachable(ctx context.Context) bool {
+	dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	var d net.Dialer
+	conn, err := d.DialContext(dialCtx, "tcp", "1.1.1.1:443")
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
 
 // parseMemTotal extracts MemTotal from /proc/meminfo content, returning
 // bytes. /proc/meminfo reports "kB" but the value is actually kibibytes

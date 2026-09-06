@@ -1,8 +1,11 @@
 package discover
 
 import (
+	"context"
 	"os"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func readTestdata(t *testing.T, name string) []byte {
@@ -112,6 +115,44 @@ func TestStripPartitionSuffix(t *testing.T) {
 				t.Errorf("stripPartitionSuffix(%q) = %q, want %q", tt.device, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestDiscover_ReturnsPlausibleResultOnLinux is T003's own Verify line's
+// automated portion ("doesn't panic / returns a Result"); real-value
+// correctness against actual hardware is T008's job in WSL2, which this
+// repo's dev-machine `go test` run can't portably assert.
+func TestDiscover_ReturnsPlausibleResultOnLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Discover only supports linux; real-value verification happens in WSL2 (T008)")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := Discover(ctx)
+	if err != nil {
+		t.Fatalf("Discover() = %v", err)
+	}
+	if res.OS != "linux" {
+		t.Errorf("OS = %q, want %q", res.OS, "linux")
+	}
+	if res.CPUCores <= 0 {
+		t.Errorf("CPUCores = %d, want > 0", res.CPUCores)
+	}
+	if res.MemoryBytes <= 0 {
+		t.Errorf("MemoryBytes = %d, want > 0", res.MemoryBytes)
+	}
+}
+
+// TestDiscover_UnsupportedOS proves spec.md's Scope-OUT: a non-Linux
+// host gets a clear error, not a partially-populated Result from
+// haphazard file-read failures.
+func TestDiscover_UnsupportedOS(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("this test targets the non-linux rejection path")
+	}
+	_, err := Discover(context.Background())
+	if err == nil {
+		t.Fatal("Discover() on non-linux = nil error, want an error")
 	}
 }
 
