@@ -49,15 +49,28 @@ type RelationshipWire struct {
 	TargetID   string `json:"targetId"`
 }
 
-// NodeStatusWire mirrors core/resource.NodeStatus's JSON shape (the
-// hardware-fact fields only -- Conditions aren't set by this agent).
+// ConditionWire mirrors core/resource.Condition's JSON shape. This
+// agent never sets Conditions itself, but Upsert preserves whatever a
+// future setter (e.g. a Node reconciler) puts there -- same
+// round-trip-preservation reasoning as MetadataWire's Labels/OwnerRefs/
+// Relationships above.
+type ConditionWire struct {
+	Type               string    `json:"type"`
+	Status             string    `json:"status"`
+	Reason             string    `json:"reason,omitempty"`
+	Message            string    `json:"message,omitempty"`
+	LastTransitionTime time.Time `json:"lastTransitionTime"`
+}
+
+// NodeStatusWire mirrors core/resource.NodeStatus's JSON shape.
 type NodeStatusWire struct {
-	CPUCores              int    `json:"cpuCores,omitempty"`
-	MemoryBytes           int64  `json:"memoryBytes,omitempty"`
-	DiskType              string `json:"diskType,omitempty"`
-	DiskBytes             int64  `json:"diskBytes,omitempty"`
-	NetworkMbps           int    `json:"networkMbps,omitempty"`
-	VirtualizationSupport bool   `json:"virtualizationSupport,omitempty"`
+	Conditions            []ConditionWire `json:"conditions,omitempty"`
+	CPUCores              int             `json:"cpuCores,omitempty"`
+	MemoryBytes           int64           `json:"memoryBytes,omitempty"`
+	DiskType              string          `json:"diskType,omitempty"`
+	DiskBytes             int64           `json:"diskBytes,omitempty"`
+	NetworkMbps           int             `json:"networkMbps,omitempty"`
+	VirtualizationSupport bool            `json:"virtualizationSupport,omitempty"`
 }
 
 // NodeWire mirrors core/resource.Resource[NodeSpec, NodeStatus]'s JSON
@@ -87,12 +100,13 @@ func New(baseURL, token string) *Client {
 }
 
 // Upsert creates the Node identified by id if it doesn't exist yet, or
-// updates it (Name and Status only -- everything else round-trips
-// unchanged) if it does. One retry on a 409 conflict from the update
-// path: a one-shot CLI invocation doesn't need an unbounded retry loop
-// (plan.md Risks) -- the realistic case this handles is a stale
-// ResourceVersion left over from a slow-running previous invocation,
-// not true concurrent registration.
+// updates it (Name and the hardware fields of Status only -- everything
+// else, including any Conditions a future setter puts on Status,
+// round-trips unchanged) if it does. One retry on a 409 conflict from
+// the update path: a one-shot CLI invocation doesn't need an unbounded
+// retry loop (plan.md Risks) -- the realistic case this handles is a
+// stale ResourceVersion left over from a slow-running previous
+// invocation, not true concurrent registration.
 func (c *Client) Upsert(ctx context.Context, id, name string, status NodeStatusWire) (NodeWire, error) {
 	existing, err := c.get(ctx, id)
 	if errors.Is(err, ErrNotFound) {
@@ -102,6 +116,7 @@ func (c *Client) Upsert(ctx context.Context, id, name string, status NodeStatusW
 		return NodeWire{}, err
 	}
 
+	status.Conditions = existing.Status.Conditions
 	existing.Metadata.Name = name
 	existing.Status = status
 	updated, err := c.update(ctx, existing)
@@ -110,6 +125,7 @@ func (c *Client) Upsert(ctx context.Context, id, name string, status NodeStatusW
 		if err != nil {
 			return NodeWire{}, fmt.Errorf("client: retry after conflict: %w", err)
 		}
+		status.Conditions = existing.Status.Conditions
 		existing.Metadata.Name = name
 		existing.Status = status
 		return c.update(ctx, existing)

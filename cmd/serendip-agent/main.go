@@ -73,7 +73,17 @@ func runRegister(args []string) error {
 	controlPlaneURL := fs.String("control-plane-url", "", "base URL of the Serendip control plane (required)")
 	token := fs.String("token", "", "bearer token for control-plane auth (required)")
 	name := fs.String("name", "", "node name (default: this host's hostname)")
-	stateDir := fs.String("state-dir", "/var/lib/serendip/agent", "directory for persisted agent state")
+	// Default resolution order matches cmd/serendipd's SERENDIP_DB_PATH/
+	// SERENDIP_ADDR pattern: flag > env var > hardcoded fallback.
+	// specs/004-bootstrap-agent/plan.md's resolved decision names
+	// SERENDIP_AGENT_STATE_DIR explicitly -- T009's holistic review
+	// caught that this env var had never actually been wired up despite
+	// being a recorded design decision.
+	defaultStateDir := "/var/lib/serendip/agent"
+	if v := os.Getenv("SERENDIP_AGENT_STATE_DIR"); v != "" {
+		defaultStateDir = v
+	}
+	stateDir := fs.String("state-dir", defaultStateDir, "directory for persisted agent state (env: SERENDIP_AGENT_STATE_DIR)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

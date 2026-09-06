@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/serendip-infra/serendip-infra/agent/client"
 )
@@ -98,6 +99,54 @@ func TestUpsert_UpdatesWhenExisting_CarriesFetchedResourceVersion(t *testing.T) 
 	}
 	if got.Metadata.ResourceVersion != 4 {
 		t.Errorf("Upsert() returned ResourceVersion = %d, want 4", got.Metadata.ResourceVersion)
+	}
+}
+
+// TestUpsert_PreservesExistingConditions is T009's holistic-review fix:
+// Upsert must not silently wipe Conditions a future setter (e.g. a Node
+// reconciler) puts on Status, even though this agent never sets them
+// itself -- same round-trip-preservation principle as
+// Metadata.Labels/OwnerRefs/Relationships.
+func TestUpsert_PreservesExistingConditions(t *testing.T) {
+	existingConditions := []client.ConditionWire{
+		{Type: "Ready", Status: "True", Reason: "Joined", LastTransitionTime: time.Now().UTC()},
+	}
+	existing := client.NodeWire{
+		Metadata: client.MetadataWire{ID: "node-1", Name: "old-name", ResourceVersion: 3},
+		Status:   client.NodeStatusWire{Conditions: existingConditions, CPUCores: 2},
+	}
+
+	var gotPutBody client.NodeWire
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/nodes/node-1":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(existing)
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/nodes/node-1":
+			json.NewDecoder(r.Body).Decode(&gotPutBody)
+			updated := gotPutBody
+			updated.Metadata.ResourceVersion = 4
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(updated)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := client.New(srv.URL, "test-token")
+	// The caller (cmd/serendip-agent) never populates Conditions -- pass
+	// none, same as real usage.
+	if _, err := c.Upsert(t.Context(), "node-1", "new-name", client.NodeStatusWire{CPUCores: 8}); err != nil {
+		t.Fatalf("Upsert() = %v", err)
+	}
+
+	if len(gotPutBody.Status.Conditions) != 1 || gotPutBody.Status.Conditions[0].Type != "Ready" {
+		t.Errorf("PUT body Status.Conditions = %+v, want the pre-existing [%+v] preserved", gotPutBody.Status.Conditions, existingConditions[0])
+	}
+	if gotPutBody.Status.CPUCores != 8 {
+		t.Errorf("PUT body Status.CPUCores = %d, want 8 (the new hardware fact)", gotPutBody.Status.CPUCores)
 	}
 }
 
