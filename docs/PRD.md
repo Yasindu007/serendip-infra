@@ -64,7 +64,10 @@ dev machine, run as a single-node install (`edge-1` topology, just not on
    Environment→Application), capability/provider registries, reconciliation
    engine, audit — spec 001 (+ 002 API, 003 reconciler).
 2. `serendip-agent` bootstraps a K3s node (can be a VM on the dev machine)
-   — spec 004.
+   — spec 004 (discovery/identity/self-registration) + spec 005 (the
+   actual K3s install/uninstall). Originally attributed to spec 004
+   alone; corrected once spec 005 planning found spec 004 had
+   explicitly deferred the install step itself.
 3. At least one real provider live per required capability so the loop is
    genuine, not stubbed: Identity (Thunder, ADR 0006), Secrets (OpenBao),
    Application Platform (OpenChoreo, ADR 0005), Storage (local-path),

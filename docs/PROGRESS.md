@@ -9,84 +9,79 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-09-06
+Last updated: 2026-09-27
 
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** Specs 002, 003, and 004 are committed locally only — decided
-explicitly with the user to keep working locally and push everything
-together at a later checkpoint, now that GitHub auth works again (see
-GitHub note below) — not pushing yet is a choice, not a blocker.
+PR #24.** Specs 002-005 are committed locally only — decided explicitly
+with the user to keep working locally and push everything together at
+a later checkpoint, now that GitHub auth works again (see GitHub note
+below) — not pushing yet is a choice, not a blocker.
 
-**Spec 004 (Bootstrap agent — discovery/identity/self-registration) —
-COMPLETE. All 10 tasks committed locally**, holistic contract-guardian
-review PASS (two non-blocking findings fixed same-session, re-reviewed
-clean). Full picture:
+**Spec 005 (K3s bootstrap) — COMPLETE. All 8 tasks committed locally**,
+holistic contract-guardian review PASS (one non-blocking finding fixed
+same-session). Full picture:
 
-- **Scope, approved before implementation**: NOT the full 8-item
-  `bootstrap-agent.md` responsibility list — only hardware/environment
-  discovery, stable node identity, and self-registration against the
-  *already-existing* `/v1/nodes` API (spec 002). K3s install, full
-  negotiated enrollment (needs a topology planner), and daemon-mode
-  health reporting are explicitly deferred — same "don't build against
-  infra that doesn't exist yet" reasoning specs 002/003 used for real
-  providers and the apply-side of reconciliation. Zero new `api/`/`core/`
-  code — purely additive under `agent/` + `cmd/serendip-agent/`,
-  `core/id` is the only `core/` import (`.claude/scripts/check-imports.sh`
-  extended and verified to actually catch a violation, not just pass).
-- **Researched two WSO2 datacenter repos before starting** (user's
-  request) for any reusable hardware-discovery tricks —
-  `wso2/open-cloud-datacenter`'s `dc-agent` turned out to have no
-  `/proc`/`/sys` discovery code at all (connection-lifecycle-only,
-  pre-discovery-stage); the other repo was inaccessible. One idea noted
-  but deliberately not acted on: `dc-agent`'s node identity is
-  server-issued (a minted token with region/zone baked in), not
-  self-generated like this spec's locally-persisted UUID — worth
-  reconsidering *if* a future full-enrollment spec needs to resist a
-  spoofing/compromised agent, not relevant to this spec's trusted,
-  one-shot, human-invoked scope.
-- **Real Linux facts, not guessed values**: `agent/discover` reads
-  `/proc/meminfo`, `/proc/cpuinfo`, `/proc/mounts`, and
-  `/sys/block/*`/`/sys/class/net/*` directly (zero non-stdlib deps).
-  Parse functions are tested against committed fixture files (portable,
-  no real host needed in CI); the real I/O layer was verified for real
-  in WSL2 — CPU count matched `nproc` exactly, memory matched
-  `/proc/meminfo` exactly. Disk-partition-suffix stripping handles both
-  traditional (`sda2`→`sda`) and NVMe/eMMC (`nvme0n1p2`→`nvme0n1`,
-  `mmcblk0p1`→`mmcblk0`) naming — the latter needed its own regex since
-  a plain trailing-digit strip would wrongly mangle `nvme0n1`.
-- **`agent/client` defines its own wire structs, doesn't import
-  `core/resource`** — confirmed against `core/store/sqlite/store.go`
-  directly (not assumed) that `CreatedAt` is server-preserved,
-  `UpdatedAt`/`Kind` are server-set regardless of client input, and
-  `Create` accepts a client-supplied `Metadata.ID`. `Upsert` does
-  GET-then-POST-or-PUT keyed by the locally-persisted identity, with one
-  retry on a 409 (a one-shot CLI doesn't need an unbounded retry loop).
-- **T009's holistic review (same discipline as specs 002/003's
-  T019/T010) found two real, worth-fixing gaps, no blocking ones**: (1)
-  `plan.md` had named a `SERENDIP_AGENT_STATE_DIR` env var as the
-  `--state-dir` override mechanism, but T006 never actually wired it up
-  — fixed with the same flag-then-env-then-fallback precedence
-  `cmd/serendipd` already uses. (2) `NodeStatusWire` had no `Conditions`
-  field, so `Upsert` would have silently wiped any `Conditions` a future
-  Node reconciler sets — fixed by preserving them across both the
-  initial and retry-after-409 update paths, with a regression test.
-  Binary size measured honestly (not assumed): 8.6MB unstripped / 6.0MB
-  stripped in WSL2, both well under `agent/CLAUDE.md`'s 30MB target.
-- **End-to-end proof, not just unit tests**: built real binaries in
-  WSL2, ran `discover` (values verified against `nproc`/`/proc/meminfo`
-  directly), started a real `serendipd`, ran `register` twice — first
-  created a Node (`resourceVersion=1`), second updated the *same* Node
-  (`resourceVersion=2`, not a duplicate), with `NodeStatus` fields
-  matching standalone `discover` output exactly.
+- **The riskiest spec so far — real, root-level host mutation, not
+  just data/API changes**: `agent bootstrap` shells out to the
+  *official* `get.k3s.io` install script (never reimplementing K3s
+  install logic, constitution rule 10) and its auto-generated
+  `k3s-uninstall.sh`, both gated behind `--confirm`. `--dry-run` is a
+  completely side-effect-free inspection path (traced by hand in
+  review: it returns before any check or exec call, on the very first
+  line of the subcommand). Version explicitly pinned
+  (`v1.36.4+k3s1`, researched current-stable at plan time) rather than
+  trusting the installer's own unset-env "stable channel" resolution.
+- **Cross-checking `docs/PRD.md` against spec 004 found a real
+  staleness bug before any code was written**: PRD's POC scope item 2
+  attributed K3s bootstrapping to spec 004, which had explicitly
+  deferred it — corrected as part of this spec's own docs sync (not
+  silently left wrong).
+- **A real environmental constraint surfaced during planning, not
+  guessed**: `wsl --install`'s distro-catalog fetch from
+  `raw.githubusercontent.com` times out on this dev machine. Worked
+  around with `wsl --export`/`--import` (a pure local operation,
+  cloning the *existing* WSL Ubuntu distro — no network dependency, and
+  it inherits the Go toolchain already set up there for free).
+- **T007's real-host verification actually ran the whole cycle for
+  real** on a disposable WSL2 clone (never the persistent dev distro):
+  built the binary, hit a `go build -buildvcs=false` snag (root had
+  never run git against the Windows-mounted repo path before — a real,
+  diagnosed cause, not papered over), then `bootstrap --confirm`
+  genuinely installed K3s v1.36.4+k3s1, the node reported `Ready`
+  within ~70s, `bootstrap --uninstall --confirm` genuinely removed it
+  (service inactive, binary gone, unit file gone — one benign
+  known-upstream quirk logged: the official uninstall script itself
+  hit `/var/lib/kubelet: Device or resource busy`, a WSL2
+  mount-layering artifact, not something `serendip-agent` caused). The
+  disposable clone was fully destroyed afterward
+  (`wsl --unregister`), confirmed zero k3s trace in the persistent dev
+  distro, and disk space returned to baseline.
+- **T008's holistic review traced every code path in `runBootstrap` by
+  hand** (this spec's core safety property) and confirmed no path
+  reaches a real mutation without both a Linux host and `--confirm` —
+  found one real, fixed gap: `Install`'s download had no bound except
+  Ctrl-C (only `WaitForReady` honored `--timeout`). Fixed with its own
+  separate fixed timeout, since `--timeout` is documented as (and
+  should stay) the post-install Ready-wait budget specifically, not a
+  combined budget `Install` running long could eat into.
+- **K3s's own defaults left enabled** (Traefik, ServiceLB,
+  local-storage, Flannel) rather than pre-disabling them for Serendip's
+  eventual replacements (kgateway, Cilium, Longhorn/local-path) — none
+  of those providers exist yet. Recorded breadcrumb: swapping Flannel
+  for Cilium later likely means a fresh cluster, not a live migration,
+  since K3s's CNI choice is effectively fixed at install time.
 
-**Spec 003 (Reconciliation engine) and spec 002 (HTTP API) — COMPLETE.**
-See their own "what actually got built" sections below; condensed here
-now that spec 004 is current. Spec 003's one notable lesson, still worth
-carrying forward: its holistic review caught a vendor-name-in-a-comment
-constitution violation inside `core/reconcile` (K3s/OpenBao mentioned
-where rule 1 applies unqualified) — fixed, re-reviewed clean.
+**Spec 004 (Bootstrap agent — discovery/identity/self-registration) and
+specs 002-003 — COMPLETE.** See their own "what actually got built"
+sections below; condensed here now that spec 005 is current. Spec 004's
+one notable lesson worth carrying forward: cross-referencing `docs/PRD.md`
+against a spec's actual Scope-OUT is what caught the K3s-bootstrap
+staleness bug spec 005 then fixed — re-reading adjacent docs, not just
+the spec being worked on, is part of the same "check the actual
+commitment, don't assume" discipline as the holistic-review lesson from
+specs 002/003.
 
 **GitHub note (updated 2026-09-06, auth issue resolved)**: `serendipinfra`
 GitHub auth is now working. The PAT-generation flow had a real,
@@ -104,6 +99,32 @@ project,workflow` only when Projects v2 board work or a
 `.github/workflows/*.yml` push is actually needed, not preemptively.
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
+
+## Spec 004 — what actually got built
+
+`agent/{discover,identity,client}` + `cmd/serendip-agent` — hardware/
+environment discovery, stable node identity, self-registration against
+the existing `/v1/nodes` API, 10 tasks, all merged locally:
+
+- `agent/discover`: reads `/proc/meminfo`, `/proc/cpuinfo`,
+  `/proc/mounts`, `/sys/block/*`, `/sys/class/net/*` directly (zero
+  non-stdlib deps). Verified for real in WSL2 — CPU count matched
+  `nproc` exactly, memory matched `/proc/meminfo` exactly.
+  Disk-partition-suffix stripping handles both traditional (`sda2`→`sda`)
+  and NVMe/eMMC (`nvme0n1p2`→`nvme0n1`) naming.
+- `agent/client`: its own wire structs, not an import of
+  `core/resource` — confirmed directly against
+  `core/store/sqlite/store.go` that `Create` accepts a client-supplied
+  `Metadata.ID`. `Upsert` does GET-then-POST-or-PUT keyed by the
+  locally-persisted identity.
+- T009's holistic review found and fixed two gaps: a documented
+  `SERENDIP_AGENT_STATE_DIR` env var that was never wired up, and a
+  `Conditions`-wiping bug in `Upsert` (fixed by preserving them across
+  updates, with a regression test).
+- End-to-end proof in WSL2: `register` run twice against a real
+  `serendipd` created a Node then updated the *same* Node
+  (`resourceVersion` 1→2), `NodeStatus` fields matching standalone
+  `discover` output exactly.
 
 ## Spec 002 — what actually got built
 
@@ -265,24 +286,29 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Spec 004 is done — Phase 2 (Bootstrap agent) is complete.** Per
-   `docs/PRD.md`'s roadmap, Phase 3 is POC validation on the dev machine
-   (not real T470 hardware yet — that's 3b). Check `docs/PRD.md`'s POC
-   scope section for what's actually next in sequence before assuming;
-   the POC needs at least one real provider live per required capability
-   (Identity/Thunder, Secrets/OpenBao, Application Platform/OpenChoreo,
-   Storage/local-path, Gateway/kgateway) plus a demo app deployed
-   end-to-end — that's a bigger jump than specs 001-004's pattern of one
-   self-contained slice each, so it may need breaking into its own
-   sub-specs. Decide and present that breakdown, don't just start coding.
-2. **specs 002/003/004 are still unpushed by deliberate choice** (user
+1. **Spec 005 is done — K3s bootstrap works for real.** Per
+   `docs/PRD.md`'s POC scope (item 3), next is: design the
+   capability-specific Provider Go interface (deliberately left
+   unresolved through 5 specs now — `provider-model.md`'s open
+   question) and build the **first real provider**. User confirmed the
+   sequencing questions already asked (spec 005 before any provider
+   work) — the next decision is *which capability's provider goes
+   first* and hasn't been asked yet. Storage (local-path) was floated
+   as a candidate (simplest, no external identity/network setup) but
+   not confirmed — ask before starting, don't assume. This is a bigger,
+   more architecturally load-bearing decision than specs 001-005's
+   pattern, likely needs its own sub-spec breakdown (Identity/Thunder,
+   Secrets/OpenBao, Application Platform/OpenChoreo, Storage/local-path,
+   Gateway/kgateway all needed for the full POC per PRD item 3, plus a
+   demo app deployed end-to-end per item 4).
+2. **specs 002-005 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not
    a technical one to keep re-litigating.
 3. GitHub tracking board (milestones/issues/sub-issues/project) was
    fully built for spec 001 and merged via PR #24 — extending it to
-   cover specs 002-004 once they're pushed is still open. CodeRabbit:
+   cover specs 002-005 once they're pushed is still open. CodeRabbit:
    CLI installed, only `coderabbit auth login` (browser) remains,
    previously blocked by the account flag — retry now that auth works,
    not yet re-attempted this session.

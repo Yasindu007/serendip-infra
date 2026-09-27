@@ -113,3 +113,30 @@ worth resolving whenever `resource-model.md`'s still-unresolved Network
 resource gets designed, or by extending `NodeStatus` directly, whichever
 turns out to fit better once there's a real consumer for these facts
 (e.g. the topology planner, when a future spec builds full enrollment).
+
+**Breadcrumb from spec 005** (the actual K3s install/uninstall,
+`agent/bootstrap`): responsibility #4 ("Bootstrap — installs and
+configures K3s") is now real, using K3s's own defaults (Traefik,
+ServiceLB, local-storage, Flannel all left enabled) rather than
+pre-disabling them in favor of Serendip's eventual choices (kgateway,
+Cilium, Longhorn/local-path) — those providers don't exist yet, and
+disabling their K3s equivalents first would leave a bootstrapped
+cluster with no gateway/storage/networking at all in the meantime.
+**Real cost worth knowing about**: swapping Flannel for Cilium later
+likely means a fresh cluster, not a live migration — K3s's CNI choice
+is effectively fixed at install time. Whichever future spec introduces
+the Cilium provider should plan for a re-bootstrap, not assume an
+in-place network swap is available. Verified end-to-end on a real
+(disposable) Linux host: install, `Ready` node, and the official
+uninstall script all behave as K3s's own documentation describes — no
+Serendip-specific surprises in either direction.
+
+**Known gap, not an oversight**: no `core/audit` record exists for a
+bootstrap/uninstall action — `core/audit` is wired into `api/`
+middleware and `core/reconcile`'s engine (request-scoped, DB-backed),
+neither of which is architecturally reachable from a standalone,
+pre-cluster host action with no control-plane database in reach yet.
+Worth resolving whenever a "report bootstrap outcome to the control
+plane" flow is designed (a natural extension of spec 004's `register`,
+once there's a control plane to report to at bootstrap time) — not a
+gap this spec's `api/`/`core/`-untouched scope could have closed.
