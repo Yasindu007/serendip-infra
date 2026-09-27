@@ -196,7 +196,14 @@ func runBootstrap(args []string) error {
 		fmt.Fprintln(os.Stderr, "bootstrap: warning:", warning)
 	}
 
-	if err := bootstrap.Install(ctx, opts); err != nil {
+	// Install's own timeout is separate from --timeout (which is
+	// documented as, and only applies to, the post-install Ready-wait
+	// budget) -- a fixed, generous bound so a stalled script/binary
+	// download can't hang bootstrap --confirm indefinitely with only
+	// Ctrl-C as an escape (T008 holistic review finding).
+	installCtx, cancelInstall := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancelInstall()
+	if err := bootstrap.Install(installCtx, opts); err != nil {
 		return err
 	}
 	if err := bootstrap.WaitForReady(ctx, *timeout); err != nil {
