@@ -11,21 +11,21 @@ import (
 	"strings"
 )
 
-// checkLinux rejects any non-Linux host up front -- same reasoning as
+// CheckLinux rejects any non-Linux host up front -- same reasoning as
 // agent/discover.Discover: agent/CLAUDE.md's target is "a bare
 // Debian/Ubuntu host," and letting individual steps fail haphazardly on
 // other OSes is worse than one clear rejection.
-func checkLinux() error {
+func CheckLinux() error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("bootstrap: unsupported OS %q, only linux is supported", runtime.GOOS)
 	}
 	return nil
 }
 
-// checkRoot rejects a non-root invocation -- k3s's install script
+// CheckRoot rejects a non-root invocation -- k3s's install script
 // requires root, and failing fast with a clear message beats letting
 // the install script itself fail confusingly partway through.
-func checkRoot() error {
+func CheckRoot() error {
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("bootstrap: must run as root (or via sudo) to install k3s")
 	}
@@ -58,8 +58,8 @@ func parseSystemdStatus(output []byte, cmdErr error) (ok bool, warning string, e
 	}
 }
 
-// checkSystemd is the thin real-exec wrapper around parseSystemdStatus.
-func checkSystemd() (warning string, err error) {
+// CheckSystemd is the thin real-exec wrapper around parseSystemdStatus.
+func CheckSystemd() (warning string, err error) {
 	out, cmdErr := exec.Command("systemctl", "is-system-running").Output()
 	ok, warning, err := parseSystemdStatus(out, cmdErr)
 	if !ok {
@@ -98,12 +98,12 @@ func isRiskyIPTablesVersion(version string) bool {
 	return major == 1 && minor == 8 && patch <= 4
 }
 
-// checkIPTablesMode is best-effort: an unreadable or unparseable
+// CheckIPTablesMode is best-effort: an unreadable or unparseable
 // iptables --version is not itself an error (nothing to detect, so
 // nothing to warn about) -- only a confirmed risky nf_tables version
 // produces a warning. Never a hard failure (spec.md: "detect and warn,
 // full remediation out of scope").
-func checkIPTablesMode() (warning string, err error) {
+func CheckIPTablesMode() (warning string, err error) {
 	out, cmdErr := exec.Command("iptables", "--version").Output()
 	if cmdErr != nil {
 		return "", nil

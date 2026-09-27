@@ -10,7 +10,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/serendip-infra/serendip-infra/agent/bootstrap"
 	"github.com/serendip-infra/serendip-infra/agent/client"
 	"github.com/serendip-infra/serendip-infra/agent/discover"
 	"github.com/serendip-infra/serendip-infra/agent/identity"
@@ -34,6 +36,8 @@ func run(args []string) error {
 		return runDiscover(args[1:])
 	case "register":
 		return runRegister(args[1:])
+	case "bootstrap":
+		return runBootstrap(args[1:])
 	default:
 		usage()
 		os.Exit(2)
@@ -42,7 +46,7 @@ func run(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: serendip-agent <discover|register> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: serendip-agent <discover|register|bootstrap> [flags]")
 }
 
 // runDiscover prints discovered facts as JSON to stdout. No network
@@ -129,4 +133,88 @@ func runRegister(args []string) error {
 	fmt.Printf("registered node %s (id=%s, resourceVersion=%d)\n",
 		node.Metadata.Name, node.Metadata.ID, node.Metadata.ResourceVersion)
 	return nil
+}
+
+// runBootstrap drives a real K3s single-node install/uninstall --
+// the one host-mutating operation in this whole binary
+// (specs/005-k3s-bootstrap/plan.md). --dry-run always works, no root
+// required, no changes made. Without --confirm, both the install and
+// uninstall paths print the same dry-run summary and return an error
+// rather than mutating anything (agent/CLAUDE.md's hard rule).
+func runBootstrap(args []string) error {
+	fs := flag.NewFlagSet("bootstrap", flag.ExitOnError)
+	dryRun := fs.Bool("dry-run", false, "print what would run, without making any changes (always safe, no root required)")
+	confirm := fs.Bool("confirm", false, "required to actually install or uninstall -- host mutation gate")
+	uninstall := fs.Bool("uninstall", false, "uninstall k3s instead of installing it")
+	version := fs.String("version", bootstrap.DefaultVersion, "k3s version to install (INSTALL_K3S_VERSION)")
+	timeout := fs.Duration("timeout", 5*time.Minute, "how long to wait for the node to become Ready after install")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	opts := bootstrap.InstallOptions{Version: *version}
+
+	if *dryRun {
+		printBootstrapPlan(opts, *uninstall)
+		return nil
+	}
+	if !*confirm {
+		printBootstrapPlan(opts, *uninstall)
+		return fmt.Errorf("bootstrap: refusing to make host changes without --confirm")
+	}
+
+	ctx := context.Background()
+
+	if *uninstall {
+		if err := bootstrap.CheckLinux(); err != nil {
+			return fmt.Errorf("bootstrap: %w", err)
+		}
+		if err := bootstrap.CheckRoot(); err != nil {
+			return fmt.Errorf("bootstrap: %w", err)
+		}
+		if err := bootstrap.Uninstall(ctx); err != nil {
+			return err
+		}
+		fmt.Println("bootstrap: k3s uninstalled")
+		return nil
+	}
+
+	if err := bootstrap.CheckLinux(); err != nil {
+		return fmt.Errorf("bootstrap: %w", err)
+	}
+	if err := bootstrap.CheckRoot(); err != nil {
+		return fmt.Errorf("bootstrap: %w", err)
+	}
+	if warning, err := bootstrap.CheckSystemd(); err != nil {
+		return fmt.Errorf("bootstrap: %w", err)
+	} else if warning != "" {
+		fmt.Fprintln(os.Stderr, "bootstrap: warning:", warning)
+	}
+	if warning, err := bootstrap.CheckIPTablesMode(); err != nil {
+		return fmt.Errorf("bootstrap: %w", err)
+	} else if warning != "" {
+		fmt.Fprintln(os.Stderr, "bootstrap: warning:", warning)
+	}
+
+	if err := bootstrap.Install(ctx, opts); err != nil {
+		return err
+	}
+	if err := bootstrap.WaitForReady(ctx, *timeout); err != nil {
+		return err
+	}
+	fmt.Println("bootstrap: k3s installed and ready")
+	return nil
+}
+
+func printBootstrapPlan(opts bootstrap.InstallOptions, uninstall bool) {
+	if uninstall {
+		fmt.Println("Would run the official k3s uninstall script (/usr/local/bin/k3s-uninstall.sh).")
+		fmt.Println("No changes made (dry-run, or --confirm not given).")
+		return
+	}
+	fmt.Println("Would run the official K3s install script (https://get.k3s.io) with:")
+	for _, e := range bootstrap.InstallEnv(opts) {
+		fmt.Println("  " + e)
+	}
+	fmt.Println("No changes made (dry-run, or --confirm not given).")
 }
