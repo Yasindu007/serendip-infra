@@ -47,11 +47,11 @@ type cluster struct {
 }
 
 type namedContext struct {
-	Name    string  `json:"name"`
-	Context context `json:"context"`
+	Name    string      `json:"name"`
+	Context kubeContext `json:"context"`
 }
 
-type context struct {
+type kubeContext struct {
 	Cluster string `json:"cluster"`
 	User    string `json:"user"`
 }
@@ -92,7 +92,7 @@ func ParseConfig(data []byte) (Config, error) {
 		return Config{}, fmt.Errorf("kubernetes: kubeconfig has no current-context set")
 	}
 
-	var ctx *context
+	var ctx *kubeContext
 	for _, c := range kc.Contexts {
 		if c.Name == kc.CurrentContext {
 			ctx = &c.Context
