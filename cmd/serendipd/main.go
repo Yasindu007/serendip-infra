@@ -18,10 +18,12 @@ import (
 	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/graph"
+	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 )
 
 // resyncEvery/reconcileTimeout are specs/003-reconciliation-engine/plan.md's
@@ -67,6 +69,10 @@ func run() error {
 	srv.Addr = addr
 
 	engine := newReconcileEngine(db, bus)
+
+	if err := wireKubernetes(ctx, os.Getenv("SERENDIP_KUBECONFIG")); err != nil {
+		return fmt.Errorf("kubernetes: %w", err)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -141,6 +147,72 @@ func newReconcileEngine(db *sql.DB, bus event.Bus) *reconcile.Engine {
 			return refs, nil
 		})
 	return engine
+}
+
+// nodeLister is a deliberately trivial, throwaway capability interface
+// proving specs/006-kubernetes-provider-foundation's registry pattern
+// end-to-end: a real Kubernetes-facing implementation, registered under
+// a capability name, looked up and invoked through core/provider's
+// generic any-typed registry. Spec 007 replaces this entirely with the
+// real StorageProvider interface and local-path implementation -- this
+// type is not meant to survive past this spec.
+type nodeLister interface {
+	ListNodeNames(ctx context.Context) ([]string, error)
+}
+
+type kubeNodeLister struct{ client *kubernetes.Client }
+
+func (k *kubeNodeLister) ListNodeNames(ctx context.Context) ([]string, error) {
+	nodes, err := k.client.List(ctx, "/api/v1/nodes")
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(nodes))
+	for i, n := range nodes {
+		names[i] = n.Metadata.Name
+	}
+	return names, nil
+}
+
+// wireKubernetes conditionally sets up Kubernetes access: if
+// kubeconfigPath is empty, no Kubernetes-facing providers are active --
+// a supported, non-fatal startup state (acceptance criterion 4), since
+// not every Serendip install necessarily has a cluster yet at first
+// boot. If set, it also runs this spec's proof-of-concept smoke
+// operation (list real Nodes once, log the count) to confirm the whole
+// kubeconfig-to-API chain is real, not just wired in theory.
+func wireKubernetes(ctx context.Context, kubeconfigPath string) error {
+	if kubeconfigPath == "" {
+		log.Print("serendipd: SERENDIP_KUBECONFIG not set, no Kubernetes-facing providers active")
+		return nil
+	}
+
+	cfg, err := kubernetes.LoadConfig(kubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("load kubeconfig %s: %w", kubeconfigPath, err)
+	}
+	client, err := kubernetes.NewClient(cfg)
+	if err != nil {
+		return fmt.Errorf("build client: %w", err)
+	}
+
+	registry := provider.NewRegistry()
+	registry.Register("kubernetes-smoke-test", &kubeNodeLister{client: client})
+
+	impl, ok := registry.Lookup("kubernetes-smoke-test")
+	if !ok {
+		return fmt.Errorf("internal: just-registered capability not found in registry")
+	}
+	lister, ok := impl.(nodeLister)
+	if !ok {
+		return fmt.Errorf("internal: registered implementation does not satisfy nodeLister")
+	}
+	names, err := lister.ListNodeNames(ctx)
+	if err != nil {
+		return fmt.Errorf("list nodes: %w", err)
+	}
+	log.Printf("serendipd: kubernetes: found %d node(s): %v", len(names), names)
+	return nil
 }
 
 func envOr(key, fallback string) string {
