@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/google/uuid v1.6.0
 	modernc.org/sqlite v1.56.0
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -17,5 +18,4 @@ require (
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
 )
