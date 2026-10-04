@@ -9,79 +9,82 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-09-27
+Last updated: 2026-10-04
 
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** Specs 002-005 are committed locally only — decided explicitly
+PR #24.** Specs 002-006 are committed locally only — decided explicitly
 with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
-**Spec 005 (K3s bootstrap) — COMPLETE. All 8 tasks committed locally**,
-holistic contract-guardian review PASS (one non-blocking finding fixed
-same-session). Full picture:
+**Spec 006 (Kubernetes access foundation + Provider interface pattern)
+— COMPLETE. All 9 tasks committed locally**, holistic contract-guardian
+review PASS (one non-blocking `go.mod`/`go mod tidy` bookkeeping gap
+fixed same-session). Full picture:
 
-- **The riskiest spec so far — real, root-level host mutation, not
-  just data/API changes**: `agent bootstrap` shells out to the
-  *official* `get.k3s.io` install script (never reimplementing K3s
-  install logic, constitution rule 10) and its auto-generated
-  `k3s-uninstall.sh`, both gated behind `--confirm`. `--dry-run` is a
-  completely side-effect-free inspection path (traced by hand in
-  review: it returns before any check or exec call, on the very first
-  line of the subcommand). Version explicitly pinned
-  (`v1.36.4+k3s1`, researched current-stable at plan time) rather than
-  trusting the installer's own unset-env "stable channel" resolution.
-- **Cross-checking `docs/PRD.md` against spec 004 found a real
-  staleness bug before any code was written**: PRD's POC scope item 2
-  attributed K3s bootstrapping to spec 004, which had explicitly
-  deferred it — corrected as part of this spec's own docs sync (not
-  silently left wrong).
-- **A real environmental constraint surfaced during planning, not
-  guessed**: `wsl --install`'s distro-catalog fetch from
-  `raw.githubusercontent.com` times out on this dev machine. Worked
-  around with `wsl --export`/`--import` (a pure local operation,
-  cloning the *existing* WSL Ubuntu distro — no network dependency, and
-  it inherits the Go toolchain already set up there for free).
-- **T007's real-host verification actually ran the whole cycle for
-  real** on a disposable WSL2 clone (never the persistent dev distro):
-  built the binary, hit a `go build -buildvcs=false` snag (root had
-  never run git against the Windows-mounted repo path before — a real,
-  diagnosed cause, not papered over), then `bootstrap --confirm`
-  genuinely installed K3s v1.36.4+k3s1, the node reported `Ready`
-  within ~70s, `bootstrap --uninstall --confirm` genuinely removed it
-  (service inactive, binary gone, unit file gone — one benign
-  known-upstream quirk logged: the official uninstall script itself
-  hit `/var/lib/kubelet: Device or resource busy`, a WSL2
-  mount-layering artifact, not something `serendip-agent` caused). The
-  disposable clone was fully destroyed afterward
-  (`wsl --unregister`), confirmed zero k3s trace in the persistent dev
-  distro, and disk space returned to baseline.
-- **T008's holistic review traced every code path in `runBootstrap` by
-  hand** (this spec's core safety property) and confirmed no path
-  reaches a real mutation without both a Linux host and `--confirm` —
-  found one real, fixed gap: `Install`'s download had no bound except
-  Ctrl-C (only `WaitForReady` honored `--timeout`). Fixed with its own
-  separate fixed timeout, since `--timeout` is documented as (and
-  should stay) the post-install Ready-wait budget specifically, not a
-  combined budget `Install` running long could eat into.
-- **K3s's own defaults left enabled** (Traefik, ServiceLB,
-  local-storage, Flannel) rather than pre-disabling them for Serendip's
-  eventual replacements (kgateway, Cilium, Longhorn/local-path) — none
-  of those providers exist yet. Recorded breadcrumb: swapping Flannel
-  for Cilium later likely means a fresh cluster, not a live migration,
-  since K3s's CNI choice is effectively fixed at install time.
+- **Resolves a question left open since spec 001**:
+  `docs/architecture/provider-model.md`'s "whether `ApplicationProvider`/
+  `InfrastructureProvider` end up as the actual `core/` interface names"
+  sat unresolved through 5 specs because no real provider existed to
+  force the decision. This spec resolves the *mechanism* (not any
+  specific capability's interface shape, still open — spec 007's job):
+  `core/provider.Registry`, an in-memory, capability-agnostic map from
+  capability name to live Go value, populated only by `cmd/serendipd`
+  (the composition root) — the one place allowed to import both `core/`
+  and a specific `providers/` package, preserving constitution rule 2
+  (`core/` imports no `providers/` package, ever) since `core/provider`
+  itself never does. `provider-model.md`'s "Open questions" section
+  rewritten to reflect the actual resolution, not left stale.
+- **`client-go` researched and rejected, with real evidence, not a
+  hunch**: its transitive dependency weight is a documented,
+  upstream-acknowledged problem (Kubernetes' own maintainers have an
+  open issue about it, cited directly in ADR 0008). Built a hand-rolled,
+  generic `providers/kubernetes` REST client instead (~400 LOC):
+  kubeconfig parsing (confirmed field-for-field against K3s's own
+  source via oss-researcher, not assumed — client-cert auth, YAML lists
+  not maps, `preferences: {}` always present) + a minimal
+  `Object`/`ObjectMeta` envelope with raw-JSON spec/status, so this
+  package has zero hardcoded knowledge of any specific Kubernetes
+  object kind.
+- **One new dependency, justified and measured, not estimated**:
+  `sigs.k8s.io/yaml` (ADR 0008) — chosen because its JSON-round-trip
+  design means the *same* struct + `json:` tags work for both the
+  kubeconfig (YAML) and Kubernetes API objects (JSON) this package also
+  needs. Real transitive weight verified by building a throwaway module
+  against it and running `go list -deps`: exactly one additional module
+  actually linked into the build (`go.yaml.in/yaml/v2`).
+- **T008's holistic review's one real finding**: `go.mod` had
+  `sigs.k8s.io/yaml` marked `// indirect` despite being a direct import
+  — a `go mod tidy` bookkeeping gap, not a functional or constitutional
+  issue (ADR 0008's own text already stated the correct intent). Fixed.
+- **T007's real-cluster verification proved the whole chain end-to-end**,
+  not just unit tests, on a disposable WSL2 clone (same `wsl --export`/
+  `--import` approach as spec 005, never the persistent dev distro):
+  `serendipd` started cleanly with `SERENDIP_KUBECONFIG` unset (a
+  supported, non-fatal state); a real K3s cluster was bootstrapped via
+  spec 005's own already-proven `serendip-agent bootstrap --confirm`;
+  `serendipd` run with `SERENDIP_KUBECONFIG` pointed at the real
+  `/etc/rancher/k3s/k3s.yaml` logged `"found 1 node(s): [yasinduds]"`,
+  which exactly matched `kubectl get nodes --no-headers | wc -l`'s real
+  output — not a mocked or assumed result. Clone fully destroyed
+  afterward, zero trace confirmed in the persistent dev distro.
+- **The registration pattern is proven with real (if throwaway) code,
+  not just designed**: a deliberately trivial `nodeLister` capability +
+  `kubeNodeLister` implementation, registered and looked up through
+  `core/provider.Registry` exactly as a real capability would be,
+  clearly marked for replacement by spec 007's real `StorageProvider`.
 
-**Spec 004 (Bootstrap agent — discovery/identity/self-registration) and
-specs 002-003 — COMPLETE.** See their own "what actually got built"
-sections below; condensed here now that spec 005 is current. Spec 004's
+**Specs 002-005 — COMPLETE.** See their own "what actually got built"
+sections below; condensed here now that spec 006 is current. Spec 005's
 one notable lesson worth carrying forward: cross-referencing `docs/PRD.md`
 against a spec's actual Scope-OUT is what caught the K3s-bootstrap
 staleness bug spec 005 then fixed — re-reading adjacent docs, not just
 the spec being worked on, is part of the same "check the actual
 commitment, don't assume" discipline as the holistic-review lesson from
-specs 002/003.
+specs 002/003, now also the mechanism behind spec 006's
+`provider-model.md` resolution above.
 
 **GitHub note (updated 2026-09-06, auth issue resolved)**: `serendipinfra`
 GitHub auth is now working. The PAT-generation flow had a real,
@@ -99,6 +102,36 @@ project,workflow` only when Projects v2 board work or a
 `.github/workflows/*.yml` push is actually needed, not preemptively.
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
+
+## Spec 005 — what actually got built
+
+`agent/bootstrap` + `cmd/serendip-agent`'s `bootstrap` subcommand — real
+K3s single-node install/uninstall, 9 tasks, all merged locally:
+
+- Shells out to the *official* `get.k3s.io` install script and its
+  auto-generated `k3s-uninstall.sh` (never reimplementing K3s install
+  logic), both gated behind `--confirm`; `--dry-run` is completely
+  side-effect-free (traced by hand: returns before any check/exec call).
+  Version explicitly pinned (`v1.36.4+k3s1`).
+- Cross-checking `docs/PRD.md` against spec 004 found a real staleness
+  bug: PRD's POC item 2 attributed K3s bootstrapping to spec 004, which
+  had explicitly deferred it — corrected.
+- `wsl --install`'s distro-catalog fetch timed out on this dev machine
+  (a real, confirmed constraint) — worked around with `wsl --export`/
+  `--import`, a pure local clone of the existing WSL Ubuntu distro, now
+  the established pattern reused by spec 006.
+- T007's real-host verification ran the whole install→verify→uninstall
+  cycle for real on a disposable WSL2 clone (never the persistent dev
+  distro): K3s genuinely installed, node reported `Ready` in ~70s,
+  uninstall genuinely removed it, clone fully destroyed afterward.
+- T008's holistic review traced every code path in `runBootstrap` by
+  hand (this spec's core safety property) and found one real gap:
+  `Install`'s download had no bound except Ctrl-C. Fixed with its own
+  separate timeout.
+- K3s's own defaults left enabled (Traefik, ServiceLB, local-storage,
+  Flannel) since Serendip's eventual replacements don't exist yet.
+  Recorded breadcrumb: swapping Flannel for Cilium later likely means a
+  fresh cluster, not a live migration.
 
 ## Spec 004 — what actually got built
 
@@ -286,29 +319,34 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Spec 005 is done — K3s bootstrap works for real.** Per
-   `docs/PRD.md`'s POC scope (item 3), next is: design the
-   capability-specific Provider Go interface (deliberately left
-   unresolved through 5 specs now — `provider-model.md`'s open
-   question) and build the **first real provider**. User confirmed the
-   sequencing questions already asked (spec 005 before any provider
-   work) — the next decision is *which capability's provider goes
-   first* and hasn't been asked yet. Storage (local-path) was floated
-   as a candidate (simplest, no external identity/network setup) but
-   not confirmed — ask before starting, don't assume. This is a bigger,
-   more architecturally load-bearing decision than specs 001-005's
-   pattern, likely needs its own sub-spec breakdown (Identity/Thunder,
-   Secrets/OpenBao, Application Platform/OpenChoreo, Storage/local-path,
-   Gateway/kgateway all needed for the full POC per PRD item 3, plus a
-   demo app deployed end-to-end per item 4).
-2. **specs 002-005 are still unpushed by deliberate choice** (user
+1. **Spec 006 is done — the Kubernetes access foundation + Provider
+   registry pattern both work for real.** Next is **spec 007: the
+   actual Storage/local-path provider** — user already confirmed
+   Storage (local-path) as the first real capability/provider
+   (2026-10-04) and the two-spec split (006=foundation, 007=the
+   provider itself). Spec 007 needs its own planning pass: define the
+   `StorageProvider` Go interface (deliberately left open by spec 006 —
+   the first real capability interface decision in this project), a new
+   `Volume` resource kind under `core/resource`, a `VolumeReconciler` in
+   `core/reconcile`, and `providers/storage/localpath` wrapping spec
+   006's `providers/kubernetes.Client` — read
+   `specs/006-kubernetes-provider-foundation/plan.md`'s Risks section
+   first (notes local-path-provisioner's `WaitForFirstConsumer` binding
+   mode means a PVC won't bind until a consuming Pod exists, which
+   doesn't exist yet in this project — spec 007 likely needs its own
+   `Immediate`-binding-mode StorageClass, not K3s's bundled default, to
+   get a real Bound result without an Application Platform provider
+   existing first). After Storage: Identity/Thunder, Secrets/OpenBao,
+   Application Platform/OpenChoreo, Gateway/kgateway, each likely its
+   own spec, per `docs/PRD.md`'s POC scope (items 3-4).
+2. **specs 002-006 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not
    a technical one to keep re-litigating.
 3. GitHub tracking board (milestones/issues/sub-issues/project) was
    fully built for spec 001 and merged via PR #24 — extending it to
-   cover specs 002-005 once they're pushed is still open. CodeRabbit:
+   cover specs 002-006 once they're pushed is still open. CodeRabbit:
    CLI installed, only `coderabbit auth login` (browser) remains,
    previously blocked by the account flag — retry now that auth works,
    not yet re-attempted this session.

@@ -95,32 +95,62 @@ like any other, whose implementation is "call out to a system the user
 already runs" instead of "manage a bundled deployment." This is what
 constitution rule 1's "external escape hatch" requires for every capability.
 
+## Registration mechanism (resolved — spec 006)
+
+The "Registration" section above describes the *data* a provider
+declares (name, capabilities, resource requirements, health check,
+upgrade behavior) — that's `core/registry.{Capability,Provider}Registry`,
+persisted via the ordinary resource store, since spec 001. What was
+still unresolved through 5 specs was different: how does a
+capability-specific **Go interface implementation** — real, executable
+code, not a data descriptor — get wired up without `core/` ever
+importing a `providers/` package (constitution rule 2)?
+
+Spec 006 answers this: **`core/provider.Registry`**, a small,
+capability-agnostic, in-memory map from a capability name to a live Go
+value (`Register(capability string, impl any)`,
+`Lookup(capability string) (any, bool)`). The dependency-inversion trick
+is where the import happens: `cmd/serendipd` (the composition root) is
+the one place that imports *both* `core/provider` and a specific
+`providers/` package (e.g. `providers/kubernetes`), constructs the real
+implementation, and calls `Register`. `core/` itself — including
+`core/provider` — never imports anything under `providers/`. Whatever
+capability-specific interface a Reconciler expects (a future
+`StorageProvider`, say) is defined wherever that capability's own code
+lives, type-asserted out of `Registry.Lookup`'s `any` result — `core/
+provider` doesn't know or care what any specific capability's interface
+looks like.
+
+Proven, not just designed: spec 006 registered a deliberately trivial
+`nodeLister` capability (list Kubernetes Nodes) through this exact
+mechanism, end-to-end against a real K3s cluster (`serendipd` logged
+the real node count, matching `kubectl` directly) — the registry
+pattern itself is now load-bearing, tested infrastructure, not an
+untested idea.
+
 ## Open questions
 
-- Whether `ApplicationProvider` / `InfrastructureProvider` end up as the
-  actual `core/` interface names, or get split further per capability (e.g.
-  separate `ClusterProvider` vs. `ComputeProvider`), is undecided — resolve
-  during the relevant spec's plan.md, not by guessing here.
+- Whether `ApplicationProvider` / `InfrastructureProvider` (or a
+  capability-specific interface like `StorageProvider`) end up as the
+  actual `core/` interface names, or get split further per capability,
+  is still undecided — spec 006 resolved *how* such interfaces get
+  registered/wired (above), not *what* any specific one looks like.
+  Resolve each capability's interface shape during that capability's
+  own spec's plan.md (spec 007: Storage), not by guessing here.
 
 **Breadcrumb from spec 003** (`core/reconcile`, the reconciliation
-engine): still doesn't resolve the question above — no real provider
-exists yet, so nothing forced a decision. What it did establish, real
-and load-bearing for whoever answers the question next:
-
-- `HealthCheckContract.Kind` now has one concrete, implemented value:
-  `"tcp"` (dials `Config["address"]` via stdlib `net.Dialer`). An
-  empty/unrecognized `Kind` means "not configured," not an error — that
-  convention is now precedent, not just a comment.
-- The generic dispatch shape that turned out to work:
-  `Reconciler.Reconcile(ctx, graph.ResourceRef) error`, one interface per
-  *kind* being reconciled, not per capability. Whether the eventual
-  capability-specific Provider interface(s) plug in underneath a
-  `Reconciler` implementation (most likely, given how `ClusterReconciler`
-  is structured — it calls a `HealthChecker`, a capability-shaped
-  interface, from inside a kind-shaped `Reconciler`) or need to reshape
-  this dispatch layer is worth checking against whatever the first real
-  provider actually needs, not assumed either way.
-- The observe/verify side (health checking) is now real and working;
-  the apply/provision side (actually creating infrastructure) is still
-  completely unbuilt — that boundary is exactly where the first real
-  provider spec starts, not somewhere upstream of it.
+engine), still relevant: the generic dispatch shape that turned out to
+work is `Reconciler.Reconcile(ctx, graph.ResourceRef) error`, one
+interface per *kind* being reconciled, not per capability. Given spec
+006's resolution above, the likely shape for spec 007 is: a
+`VolumeReconciler` (kind-shaped, lives in `core/reconcile`) that calls
+`core/provider.Registry.Lookup("storage")`, type-asserts to a
+`StorageProvider` interface (capability-shaped, defined somewhere
+`core/reconcile` can reference without importing `providers/` —
+likely alongside the Reconciler itself, mirroring how
+`ClusterReconciler` already calls a capability-shaped `HealthChecker`
+from inside a kind-shaped `Reconciler`), and the real implementation
+registered in `cmd/serendipd` is a `providers/storage/localpath` type
+wrapping spec 006's `providers/kubernetes.Client`. Worth checking
+against what spec 007 actually needs once written, not assumed to be
+exactly right in advance.
