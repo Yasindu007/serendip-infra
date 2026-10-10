@@ -9,30 +9,36 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-10-10
+Last updated: 2026-10-11
 
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** Specs 002-007 are committed locally only — decided explicitly
+PR #24.** Specs 002-009 are committed locally only — decided explicitly
 with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
-**Spec 009 (the real Secrets capability) — functionally COMPLETE,
-T001-T009 all done, not yet committed.** Builds the actual `Secret`
-resource kind / `SecretsProvider` / `SecretReconciler` / `api.SecretHandler`
-on top of spec 008's OpenBao foundation — same split as specs 006→007.
-All of T001-T008 (kind, reconciler, provider adapter, API handler,
-wiring, real-cluster verification, final review) are done; this
-session's work was T009, the docs sync (`docs/architecture/secrets.md`,
-this file). Full detail below, under "Spec 009 — what actually got
-built." **Working tree has all of spec 009's new/changed files
-uncommitted** (`api/secret_handler.go`, `core/reconcile/secrets.go`,
-`core/resource/secrets.go`, `providers/secrets/openbao/provider.go`,
-their tests, `specs/009-secrets-capability/`, plus edits to
-`api/server.go`, `api/acceptance_test.go`, `api/server_test.go`,
-`cmd/serendipd/main.go`) — commit once this docs sync is reviewed.
+**Spec 010 (OpenChoreo deployment foundation) — COMPLETE, T001-T008 all
+done, not yet committed.** Gets a real OpenChoreo control plane + data
+plane running and reachable on top of specs 005/006's Kubernetes-access
+foundation — same foundation/capability split as specs 005+006→007 and
+008→009; the real `Application`/`Component` capability is still a later
+spec's job. Full detail below, under "Spec 010 — what actually got
+built." **Working tree has all of spec 010's new/changed files
+uncommitted** (`providers/application/openchoreo/` and its tests,
+`specs/010-openchoreo-deployment-foundation/`, `docs/decisions/
+0010-helm-shellout-for-openchoreo.md`, `docs/architecture/
+application-platform.md`, plus the edit to `cmd/serendipd/main.go`) —
+commit once this docs sync is reviewed.
+
+**Spec 009 (the real Secrets capability) — COMPLETE and committed**
+(`9343d30`). Builds the actual `Secret` resource kind /
+`SecretsProvider` / `SecretReconciler` / `api.SecretHandler` on top of
+spec 008's OpenBao foundation — same split as specs 006→007. All 9
+tasks done, both reviews PASS, real-cluster verification confirmed on
+a `kind` cluster. Full detail below, under "Spec 009 — what actually
+got built."
 
 **Spec 008 (OpenBao deployment foundation) — COMPLETE and committed**
 (`d32877e` T001, `80e99e1` T002-T006, `88de5d7` T007-T009). All nine
@@ -270,6 +276,109 @@ project,workflow` only when Projects v2 board work or a
 `.github/workflows/*.yml` push is actually needed, not preemptively.
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
+
+## Spec 010 — what actually got built
+
+`providers/application/openchoreo` + `cmd/serendipd` wiring — the
+OpenChoreo deployment foundation, 7 implementation/review tasks plus this
+docs-sync, all functionally complete (uncommitted — see above):
+
+- **A deliberate, ADR-recorded reversal of specs 007/008/009's "no Helm,
+  build Kubernetes objects directly" precedent, scoped to this capability
+  only**: `Deployer.Ensure` shells out to the real `helm` CLI
+  (`os/exec.CommandContext`) to install cert-manager and both OpenChoreo
+  OCI charts, rather than hand-constructing their object graph —
+  OpenChoreo's own first-party distribution mechanism is Helm, and the
+  real surface (CRDs, controller-manager, api-server, a bundled
+  cert-manager dependency) is too large to hand-build safely. New
+  `docs/decisions/0010-helm-shellout-for-openchoreo.md` formalizes this as
+  a per-capability call, not a blanket policy change — Storage/Secrets
+  stay direct-object-construction.
+- **Three real corrections found during real-cluster (`kind`)
+  verification, same "plan.md is a hypothesis" discipline specs 007/008/
+  009 already proved necessary**:
+  1. A Kubernetes CEL-compiler bug (not an OpenChoreo bug) made the
+     control-plane chart's `ClusterAuthzRoleBinding` CRD fail to install
+     on `kind`'s *default* node image (Kubernetes 1.31.0) — reproduced
+     with plain `kubectl apply --dry-run=server`, bypassing Helm entirely,
+     and confirmed absent on Kubernetes 1.34.0. Irrelevant to this
+     project's real target (K3s is already pinned to `v1.36.4+k3s1`,
+     spec 005); fixed by pinning `kind`'s node image to 1.34.0+ for
+     verification, no code change needed.
+  2. The data-plane chart needs `gateway.tls.enabled=false` set
+     explicitly, not just `gateway.enabled=false` — its own
+     `validateHostnames` check is gated on `gateway.tls.enabled` alone,
+     independent of `gateway.enabled`, unlike the control-plane chart's
+     combined gate. Fixed in `Deployer.Ensure`'s data-plane `helm`
+     invocation.
+  3. A genuine, confirmed upstream gap: the chart's own promised "CA
+     extractor hook job" that populates the data plane's trust ConfigMap
+     with the control plane's real CA does not exist anywhere in the
+     chart (confirmed by grepping every template for `kind: Job` — only
+     the unrelated authz bootstrap job exists). The real CA sits in a
+     `cluster-gateway-ca` Secret the chart never reads back out. Fixed
+     with a new `Deployer.ensureDataPlaneTrustsControlPlane` step,
+     inserted between the control-plane and data-plane `helm` calls,
+     that reads the real CA directly from the Secret and writes it into
+     the ConfigMap the data plane's `cluster-agent` actually mounts.
+     **Confirmed working end-to-end**: the data plane's `cluster-agent`
+     logged "server CA certificate loaded successfully" and "connected to
+     control plane," and the `DataPlane` CR's own `status.agentConnection`
+     reported `connected: true, connectedAgents: 1` — the final proof
+     this foundation's control-plane/data-plane connection genuinely
+     works, not just that both Helm installs exited 0.
+  Also corrected: the real control-plane/data-plane Deployment names
+  carry **no Helm-release-name prefix at all** (bare `cluster-gateway`,
+  `controller-manager`, `event-forwarder`, `openchoreo-api`,
+  `cluster-agent-dataplane`), fixed in `readiness.go`'s
+  `expectedDeployments` from an initial guessed-prefixed set.
+- **Scope corrections vs. spec.md's original assumptions, found by
+  pulling and inspecting the real v1.3.1 chart artifacts directly**
+  (`helm pull ... --untar`), not by reading docs: cert-manager is not
+  bundled (this spec now deploys it itself, pinned `1.21.2`); Thunder and
+  kgateway are both confirmed *not* hard prerequisites for the control
+  plane to start, via the charts' own `validate.yaml` placeholder-domain
+  checks (`security.enabled=false`, `gateway.enabled=false`/
+  `gateway.tls.enabled=false`); `backstage.enabled=false` (no `Project`/
+  `Component` exists yet for the developer-portal UI to show); the
+  control-plane chart has six Deployments, not the two spec.md assumed;
+  readiness is Helm's own `--wait`/`--timeout`, not a hand-rolled poll
+  loop (a real simplification versus spec 008's `waitStatefulSetReady`).
+- **`CheckReady` retries 3 times, 2s apart** — added after a
+  `go-reviewer` finding: a single GET immediately after Helm's own
+  `--wait` already reported every Deployment ready can still race a
+  brief apiserver/informer-cache lag, and this check's error propagates
+  all the way to `os.Exit(1)` in `serendipd`'s startup path — a transient
+  blip would otherwise kill the whole daemon over one foundation-stage,
+  smoke-test-only capability.
+- **`providers/application/openchoreo.EnsureDefaultDataPlane`** registers
+  the one `DataPlane` CR this single-cluster install needs, in
+  `openchoreo-control-plane` (confirmed correct against the real cluster,
+  not assumed) — hand-constructed via `providers/kubernetes.Client`, not
+  via OpenChoreo's own `add-default-dataplane.sh` script as spec.md
+  originally assumed.
+- **Registration**: `wireOpenChoreo` (`cmd/serendipd/main.go`, after
+  `wireOpenBao`) registers `openchoreo.Marker{}` — a placeholder, no
+  methods yet — under `"application-platform"` in
+  `core/provider.Registry`. No resource kind, `ApplicationPlatformProvider`
+  interface, or reconciler exists yet; reachable for a direct smoke-test
+  only, same spirit as every prior foundation spec. Zero `core/` changes
+  — confirmed by `contract-guardian`, not just assumed.
+- **T007**: both `contract-guardian` and `go-reviewer` PASS. Full detail
+  (including the disabled-by-default feature set's exact reasoning, the
+  deployment model, and the CA-trust fix) is in new
+  `docs/architecture/application-platform.md`; `docs/architecture/
+  provider-model.md` gained one breadcrumb (first provider whose primary
+  integration mechanism is shelling out to an external CLI tool rather
+  than `providers/kubernetes.Client` alone).
+- **Explicitly deferred** (spec.md's own Scope-OUT, not silently
+  dropped): the `Application`/`Component` resource kinds, any
+  `ApplicationPlatformProvider` interface, and any reconciler (a later
+  spec's job); the Build Plane and Observability Plane; Thunder/kgateway
+  deployment (confirmed not needed yet, not just postponed blindly); any
+  `api/` change; satisfying ADR 0005's actual T470 benchmark gate (this
+  spec produced one current dev-machine data point, not the final
+  benchmark).
 
 ## Spec 009 — what actually got built
 
@@ -581,23 +690,28 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Spec 009 (the real Secrets capability) is functionally COMPLETE**
-   — all tasks T001-T009 done (T009, this docs-sync, finished this
-   session: `docs/architecture/secrets.md` extended, this file
-   updated). All 6 acceptance criteria met, `contract-guardian` +
-   `go-reviewer` both PASS, real-cluster verification confirmed on a
-   `kind` cluster. **Commit the outstanding working-tree changes next**
-   (`api/secret_handler.go`, `core/reconcile/secrets.go`,
-   `core/resource/secrets.go`, `providers/secrets/openbao/provider.go`
-   + their tests, `specs/009-secrets-capability/`, plus the
-   `api/server.go`/`api/acceptance_test.go`/`api/server_test.go`/
-   `cmd/serendipd/main.go` edits).
-2. Remaining POC capabilities per `docs/PRD.md`: Application
-   Platform/OpenChoreo (biggest lift), Gateway/kgateway (nothing to
-   route to yet), eventually Identity/Thunder (once its post-1.0
-   maturity window has passed, ADR 0006). None picked yet for the next
-   spec — decide at the start of the next session.
-3. **specs 002-007 are still unpushed by deliberate choice** (user
+1. **Spec 010 (OpenChoreo deployment foundation) is COMPLETE** — all
+   tasks T001-T008 done (T008, this docs-sync, finished this session:
+   `docs/architecture/application-platform.md` written,
+   `docs/decisions/0010-helm-shellout-for-openchoreo.md` written,
+   `docs/architecture/provider-model.md` + this file updated). All 7
+   acceptance criteria met, `contract-guardian` + `go-reviewer` both
+   PASS, real-cluster verification confirmed on a `kind` cluster
+   including the data plane's `cluster-agent` connecting to the control
+   plane end-to-end. **Commit the outstanding working-tree changes
+   next** (`providers/application/openchoreo/` + tests,
+   `specs/010-openchoreo-deployment-foundation/`,
+   `docs/decisions/0010-helm-shellout-for-openchoreo.md`,
+   `docs/architecture/application-platform.md`, plus the
+   `cmd/serendipd/main.go` edit).
+2. Remaining POC capabilities per `docs/PRD.md`: the real Application
+   Platform capability (`Application`/`Component` resource kinds,
+   `ApplicationPlatformProvider`, reconciler — now unblocked by spec
+   010's foundation), Gateway/kgateway (nothing to route to yet),
+   eventually Identity/Thunder (once its post-1.0 maturity window has
+   passed, ADR 0006). None picked yet for the next spec — decide at the
+   start of the next session.
+3. **specs 002-009 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not

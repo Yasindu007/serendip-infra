@@ -23,6 +23,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/providers/application/openchoreo"
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 	"github.com/serendip-infra/serendip-infra/providers/secrets/openbao"
 	"github.com/serendip-infra/serendip-infra/providers/storage/localpath"
@@ -231,6 +232,10 @@ func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus 
 		return nil, fmt.Errorf("openbao: %w", err)
 	}
 
+	if err := wireOpenChoreo(ctx, client, registry); err != nil {
+		return nil, fmt.Errorf("openchoreo: %w", err)
+	}
+
 	return secretReconciler, nil
 }
 
@@ -282,6 +287,37 @@ func wireOpenBao(ctx context.Context, client *kubernetes.Client, registry *provi
 
 	log.Print("serendipd: kubernetes: secrets provider (openbao) active")
 	return secretReconciler, nil
+}
+
+// wireOpenChoreo deploys OpenChoreo into the cluster (idempotent,
+// spec 010 -- cert-manager, then the control-plane and data-plane
+// Helm charts, each `helm upgrade --install`), registers the default
+// DataPlane CR, confirms readiness, and registers a placeholder
+// marker under the "application-platform" capability. No resource
+// kind/Reconciler is wired here -- there is no Application/Component
+// kind yet for one to drive (a later spec's job); the registered
+// capability is reachable for a direct smoke-test only, same spirit
+// as specs 006/008's own foundation-stage registrations.
+func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, registry *provider.Registry) error {
+	deployer, err := openchoreo.NewDeployer(client)
+	if err != nil {
+		return fmt.Errorf("deployer: %w", err)
+	}
+	if err := deployer.Ensure(ctx); err != nil {
+		return fmt.Errorf("deploy: %w", err)
+	}
+
+	if err := openchoreo.EnsureDefaultDataPlane(ctx, client); err != nil {
+		return fmt.Errorf("default data plane: %w", err)
+	}
+
+	if err := openchoreo.CheckReady(ctx, client); err != nil {
+		return fmt.Errorf("readiness: %w", err)
+	}
+
+	registry.Register("application-platform", openchoreo.Marker{})
+	log.Print("serendipd: kubernetes: application platform provider (openchoreo) active")
+	return nil
 }
 
 func envOr(key, fallback string) string {

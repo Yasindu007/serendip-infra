@@ -204,6 +204,27 @@ capabilities should still only ever need `core/store` from `api/` —
 check for this same structural wall before reaching for
 `core/reconcile` from a handler.
 
+## A provider's integration mechanism need not be the Kubernetes REST API (spec 010)
+
+Every provider since spec 006 (`providers/kubernetes`, `providers/storage/
+localpath`, `providers/secrets/openbao`) talks to its product exclusively
+through `providers/kubernetes.Client` — direct construction of Kubernetes
+API objects. `providers/application/openchoreo` (spec 010) is the first to
+instead shell out to a real external CLI tool (`helm`, via `os/exec`) as its
+primary integration mechanism, using `providers/kubernetes.Client` only for
+the one piece Helm itself can't do (the `DataPlane` CR, the CA-trust
+ConfigMap). ADR 0010 is the authoritative record for why this is justified
+for OpenChoreo specifically and why it does not reopen ADR 0002/0009's "no
+Helm, direct objects" precedent for Storage/Secrets — this is a
+per-capability evaluation, not a new default. The concrete lesson for the
+next capability: check what the upstream product's own first-party
+distribution mechanism actually is before assuming every provider talks to
+`providers/kubernetes.Client` directly — if that mechanism is a real CLI
+tool with its own well-tested idempotency/wait semantics (as `helm upgrade
+--install --wait` has), reuse it per spec 005's "official tooling over
+reimplementation" precedent rather than defaulting to hand-rolled object
+construction out of habit.
+
 ## Open questions
 
 - Whether `ApplicationProvider` / `InfrastructureProvider` end up as
