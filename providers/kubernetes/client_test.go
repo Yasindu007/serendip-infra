@@ -240,6 +240,23 @@ func TestNewClient_InvalidClientCertKeyPair(t *testing.T) {
 	}
 }
 
+func TestClient_ProxyURL(t *testing.T) {
+	client := &Client{baseURL: "https://127.0.0.1:6443"}
+	got := client.ProxyURL("serendip-system", "openbao", 8200)
+	want := "https://127.0.0.1:6443/api/v1/namespaces/serendip-system/services/openbao:8200/proxy"
+	if got != want {
+		t.Errorf("ProxyURL() = %q, want %q", got, want)
+	}
+}
+
+func TestClient_HTTPClient_ReturnsConfiguredInstance(t *testing.T) {
+	httpClient := &http.Client{}
+	client := &Client{http: httpClient}
+	if got := client.HTTPClient(); got != httpClient {
+		t.Errorf("HTTPClient() = %p, want the same instance %p", got, httpClient)
+	}
+}
+
 func TestNewClient_BearerTokenOnly_NoClientCertRequired(t *testing.T) {
 	caPEM, _ := generateTestCertPEM(t)
 	client, err := NewClient(Config{Host: "https://127.0.0.1:6443", CAData: caPEM, BearerToken: "secret"})

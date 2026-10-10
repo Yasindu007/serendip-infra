@@ -73,6 +73,27 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
+// HTTPClient returns the Client's already-TLS-configured, already-
+// authenticated http.Client -- for a capability-specific provider that
+// needs to reach something other than the Kubernetes API itself (e.g.
+// a cluster-internal Service via ProxyURL) without reconstructing
+// kubeconfig-derived TLS config independently.
+func (c *Client) HTTPClient() *http.Client {
+	return c.http
+}
+
+// ProxyURL builds the Kubernetes API server's Service proxy subresource
+// path for the named Service in namespace, on port -- a stable, core
+// Kubernetes API feature that forwards requests through the API
+// server to a cluster-internal (e.g. ClusterIP) Service, reusing
+// whichever authenticated connection the caller already has to the API
+// server itself. The returned URL has no trailing slash; append a
+// path like "/v1/sys/health" to reach that path on the proxied
+// Service.
+func (c *Client) ProxyURL(namespace, service string, port int) string {
+	return fmt.Sprintf("%s/api/v1/namespaces/%s/services/%s:%d/proxy", c.baseURL, namespace, service, port)
+}
+
 func buildTLSConfig(cfg Config) (*tls.Config, error) {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(cfg.CAData) {
