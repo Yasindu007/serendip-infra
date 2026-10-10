@@ -19,16 +19,30 @@ with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
-**Spec 008 (OpenBao deployment foundation) — functionally COMPLETE.**
-T001-T006 implemented and committed (commit `80e99e1`); T007
-(real-cluster verification) and T008 (holistic `contract-guardian` +
-`go-reviewer` review) are both done — see below for T007's detail.
-T008: PASS on both reviews. T009 (this docs-sync: `docs/architecture/
-secrets.md`, this file) is in progress. User picked Secrets/OpenBao as
-the second real capability
-(confirmed 2026-10-10) over Identity/Thunder (still flagged immature,
-ADR 0006), Application Platform/OpenChoreo (biggest lift), Gateway/
-kgateway (nothing to route to yet).
+**Spec 009 (the real Secrets capability) — functionally COMPLETE,
+T001-T009 all done, not yet committed.** Builds the actual `Secret`
+resource kind / `SecretsProvider` / `SecretReconciler` / `api.SecretHandler`
+on top of spec 008's OpenBao foundation — same split as specs 006→007.
+All of T001-T008 (kind, reconciler, provider adapter, API handler,
+wiring, real-cluster verification, final review) are done; this
+session's work was T009, the docs sync (`docs/architecture/secrets.md`,
+this file). Full detail below, under "Spec 009 — what actually got
+built." **Working tree has all of spec 009's new/changed files
+uncommitted** (`api/secret_handler.go`, `core/reconcile/secrets.go`,
+`core/resource/secrets.go`, `providers/secrets/openbao/provider.go`,
+their tests, `specs/009-secrets-capability/`, plus edits to
+`api/server.go`, `api/acceptance_test.go`, `api/server_test.go`,
+`cmd/serendipd/main.go`) — commit once this docs sync is reviewed.
+
+**Spec 008 (OpenBao deployment foundation) — COMPLETE and committed**
+(`d32877e` T001, `80e99e1` T002-T006, `88de5d7` T007-T009). All nine
+tasks done: T001-T006 built the deployment/init/unseal/KV-v2
+foundation, T007 found and fixed three real bugs on a real `kind`
+cluster, T008 passed both `contract-guardian` and `go-reviewer`, T009
+wrote `docs/architecture/secrets.md`. User picked Secrets/OpenBao as
+the second real capability (confirmed 2026-10-10) over Identity/Thunder
+(still flagged immature, ADR 0006), Application Platform/OpenChoreo
+(biggest lift), Gateway/kgateway (nothing to route to yet).
 
 - `docs/decisions/0009-openbao-as-secrets-provider.md` — **Accepted**,
   since corrected once (see below). Governance/maturity check (Linux
@@ -256,6 +270,75 @@ project,workflow` only when Projects v2 board work or a
 `.github/workflows/*.yml` push is actually needed, not preemptively.
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
+
+## Spec 009 — what actually got built
+
+`core/resource/secrets.go` + `core/reconcile/secrets.go` +
+`providers/secrets/openbao/provider.go` + `api/secret_handler.go` +
+`cmd/serendipd`/`api/server.go` wiring — the real Secrets capability on
+top of spec 008's foundation, 9 tasks, all functionally complete
+(uncommitted — see above):
+
+- **`Secret` resource kind** (`core/resource`): `SecretSpec{Path
+  string}` only — no value field, structurally, because every
+  `core/store` mutation writes an unconditional, whole-resource audit
+  snapshot with no redaction (confirmed directly against
+  `core/store/sqlite/store.go`). `Path` is user-chosen, not derived
+  from `Metadata.ID` (unlike `Volume`'s PVC name) — nobody wants to
+  address secrets by opaque UUID.
+- **`SecretsProvider` interface + `SecretReconciler`** (`core/
+  reconcile`): `Exists` (not `Ensure` — nothing to provision, only
+  existence to observe) drives `Reconcile`, which only ever sets one
+  `"Reachable"` existence Condition. `WriteValue`/`ReadValue`/
+  `DeleteWithValue` are three separate **synchronous** methods on
+  `SecretReconciler`, called directly by `api/`, never by the async
+  reconcile loop — a secret's value has no desired state to reconcile
+  toward.
+- **`providers/secrets/openbao.Provider`**: thin adapter wrapping spec
+  008's `*Client`, zero new wire-protocol code.
+- **`api.SecretHandler`**: the generic `ResourceHandler[S,St]`/
+  `mountResource` pattern handles Create/Get/List/Update; `Delete` is
+  overridden to call `DeleteWithValue` (provider delete, then store
+  delete — applying spec 007/`provider-model.md`'s documented lesson
+  about not copying a passive-observer Reconciler's no-op delete
+  branch). Two new routes, `POST`/`GET /v1/secrets/{id}/value`. First
+  `api/` handler ever to depend on a `core/reconcile` type instead of
+  only `core/store` — documented as a one-off, not a new general rule.
+- **A real, named exception to constitution rule 3**: `WriteValue`/
+  `DeleteWithValue` call the `SecretsProvider` synchronously from the
+  API request path, bypassing the async reconcile engine — flagged
+  directly by `contract-guardian`, accepted as deliberate and scoped
+  to exactly these three methods (full reasoning in `docs/
+  architecture/secrets.md`), not a general pattern other handlers
+  should follow.
+- **Audit**: value writes are audited for free by piggybacking
+  `Status.LastSyncedAt` through an ordinary `store.Update` — verified
+  directly against real `audit_log` rows on a `kind` cluster, no
+  plaintext present in `Before`/`After`. Value **reads are explicitly
+  not audited** — piggybacking the same way would bump
+  `ResourceVersion` on every `GET .../value`, breaking optimistic
+  concurrency for unrelated metadata edits; a real read-audit trail
+  needs a non-`ResourceVersion`-affecting append-only path `core/audit`
+  doesn't have yet, recorded as deferred, not dropped.
+- **Real-cluster verification (T007), on `kind`, end to end**: created
+  a `Secret` with no value anywhere in its stored `Spec`/`Status`;
+  wrote and read back a value byte-for-byte equal through the API;
+  independently confirmed against OpenBao's own API (bypassing
+  Serendip) that the value lives at the exact path `SecretSpec`
+  references; inspected real `audit_log` rows directly and confirmed
+  no plaintext leak; deleted the `Secret` and confirmed it's gone from
+  both Serendip and OpenBao.
+- **T008**: both `contract-guardian` and `go-reviewer` PASS (the
+  constitution-rule-3 exception above is `contract-guardian`'s one
+  substantive finding, resolved by documenting it rather than
+  reworking the design).
+- **Explicitly deferred** (spec.md's own Scope-OUT, not silently
+  dropped): secret rotation/versioning/leasing, PKI, the Kubernetes
+  auth method / workload-identity integration, `Application`/
+  `Component` secret injection (needs OpenChoreo, doesn't exist yet),
+  UI/CLI/MCP surfaces, a policy engine gating secret access
+  (`core/policy` doesn't exist yet), and auditing value reads (needs a
+  `core/audit` extension nothing in this codebase has today).
 
 ## Spec 006 — what actually got built
 
@@ -498,19 +581,22 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Spec 008 (OpenBao foundation) is COMPLETE** — all tasks T001-T009
-   done (T009, this docs-sync, finished this session: `docs/
-   architecture/secrets.md` written). All 6 acceptance criteria met,
-   `contract-guardian` + `go-reviewer` both PASS, real-cluster
-   verification confirmed on a `kind` cluster. Commit the outstanding
-   working-tree changes (bootstrap/client/deploy fixes + their tests,
-   ADR 0009's `pebbledb` correction, this docs-sync) next.
-2. Spec 009 (the real `Secret` resource kind/
-   `SecretsProvider`/reconciler built on 008's foundation) — not yet
-   designed. After that, remaining POC capabilities per `docs/PRD.md`:
-   Application Platform/OpenChoreo, Gateway/kgateway, eventually
-   Identity/Thunder (once its post-1.0 maturity window has passed,
-   ADR 0006).
+1. **Spec 009 (the real Secrets capability) is functionally COMPLETE**
+   — all tasks T001-T009 done (T009, this docs-sync, finished this
+   session: `docs/architecture/secrets.md` extended, this file
+   updated). All 6 acceptance criteria met, `contract-guardian` +
+   `go-reviewer` both PASS, real-cluster verification confirmed on a
+   `kind` cluster. **Commit the outstanding working-tree changes next**
+   (`api/secret_handler.go`, `core/reconcile/secrets.go`,
+   `core/resource/secrets.go`, `providers/secrets/openbao/provider.go`
+   + their tests, `specs/009-secrets-capability/`, plus the
+   `api/server.go`/`api/acceptance_test.go`/`api/server_test.go`/
+   `cmd/serendipd/main.go` edits).
+2. Remaining POC capabilities per `docs/PRD.md`: Application
+   Platform/OpenChoreo (biggest lift), Gateway/kgateway (nothing to
+   route to yet), eventually Identity/Thunder (once its post-1.0
+   maturity window has passed, ADR 0006). None picked yet for the next
+   spec — decide at the start of the next session.
 3. **specs 002-007 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
@@ -518,7 +604,7 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
    a technical one to keep re-litigating.
 4. GitHub tracking board (milestones/issues/sub-issues/project) was
    fully built for spec 001 and merged via PR #24 — extending it to
-   cover specs 002-007 once they're pushed is still open. CodeRabbit:
+   cover specs 002-009 once they're pushed is still open. CodeRabbit:
    CLI installed, only `coderabbit auth login` (browser) remains,
    previously blocked by the account flag — retry now that auth works,
    not yet re-attempted this session.

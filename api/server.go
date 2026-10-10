@@ -7,6 +7,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/graph"
+	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/registry"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
@@ -29,7 +30,17 @@ import (
 //
 // apiKeys is the static token-to-actor map for ActorMiddleware -- see its
 // doc comment for why this is intentionally temporary.
-func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string) *http.Server {
+//
+// secretReconciler is nil when SERENDIP_KUBECONFIG is unset
+// (cmd/serendipd's wireKubernetes never ran) -- in that case the
+// "secrets" capability has no real provider behind it yet, so
+// /v1/secrets isn't registered at all (404, not a nil-pointer panic
+// on first use). Every other resource kind's handler only ever needs
+// a store.Store, built independently of any cluster -- Secret is the
+// first kind whose API surface is genuinely unavailable without one,
+// since SecretHandler's value routes have nothing underneath them to
+// call (specs/009-secrets-capability/plan.md resolution 6).
+func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, secretReconciler *reconcile.SecretReconciler) *http.Server {
 	apiMux := http.NewServeMux()
 
 	// 14 explicit instantiations, deliberately not abstracted further
@@ -57,6 +68,15 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string) *http.Serve
 	mountResource[resource.IncidentSpec, resource.IncidentStatus](apiMux, db, bus, resource.KindIncident, "incidents")
 	mountResource[resource.AlertSpec, resource.AlertStatus](apiMux, db, bus, resource.KindAlert, "alerts")
 	mountResource[resource.VolumeSpec, resource.VolumeStatus](apiMux, db, bus, resource.KindVolume, "volumes")
+	// Not mountResource -- SecretHandler isn't the generic
+	// ResourceHandler[S,St] (its Delete and value routes need
+	// secretReconciler, not just a store.Store), and is skipped
+	// entirely when secretReconciler is nil (see this func's own doc
+	// comment).
+	if secretReconciler != nil {
+		secretStore := sqlite.NewStore[resource.SecretSpec, resource.SecretStatus](db, resource.KindSecret).SetBus(bus)
+		NewSecretHandler(secretStore, secretReconciler).Register(apiMux)
+	}
 
 	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
 	NewRegistryHandler(registry.NewCapabilityRegistry(capStore)).Register(apiMux)

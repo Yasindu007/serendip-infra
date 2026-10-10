@@ -1,17 +1,22 @@
 # Secrets
 
-This document describes what spec 008 actually shipped: the OpenBao
-deployment foundation for the Secrets & PKI capability
-(`capability-model.md:40`). ADR 0009 remains the authoritative decision
-record for *why* OpenBao and *why* these implementation constraints —
-this doc adds the supporting detail ADR 0009 intentionally kept out of
-scope (exact manifests, lifecycle mechanics, file paths).
+This document describes the Secrets & PKI capability
+(`capability-model.md:40`) as it actually exists today: spec 008's
+OpenBao deployment foundation (init/unseal, credential custody, KV v2
+mount lifecycle, Service-proxy reachability) plus spec 009's real
+capability built on top of it (the `Secret` resource kind, the
+`SecretsProvider` interface, `SecretReconciler`, and the `api/`
+value-read/write surface). ADR 0009 remains the authoritative decision
+record for *why* OpenBao and *why* the foundation's implementation
+constraints — this doc adds the supporting detail ADR 0009
+intentionally kept out of scope (exact manifests, lifecycle mechanics,
+file paths, and now the real capability's design).
 
-**This is foundation only, not the Secrets capability itself** — same
-split as specs 005+006 (Kubernetes access foundation) vs. spec 007
-(the real Storage capability). There is no `Secret` resource kind, no
-`SecretsProvider` core interface, and no reconciler yet. Spec 009
-builds those on top of what's described here.
+The split below ("Deployment model" through "Service-proxy
+reachability") is spec 008's foundation — same shape as specs 005+006
+(Kubernetes access foundation) vs. spec 007 (the real Storage
+capability). "The `Secret` resource kind" onward is spec 009, the real
+capability.
 
 ## Deployment model
 
@@ -198,28 +203,187 @@ cluster**: `/v1/sys/health` via this path reported
 `initialized=true, sealed=false`, and a KV v2 write/read round-trip
 through the real client returned byte-for-byte identical data.
 
-## Registration — foundation only
+## Registration
 
-`wireOpenBao` registers the resulting `*openbao.Client` under the
-capability name `"secrets"` in `core/provider.Registry`, gated the
-same way the rest of `wireKubernetes` is (`SERENDIP_KUBECONFIG` unset
-⇒ skipped, not failed). **This is reachable for a direct smoke-test
-call only** — same spirit as spec 006's `nodeLister` proof-of-concept
-before spec 007 gave it a real consumer. There is no `Secret` resource
-kind, no `SecretsProvider` core interface in `core/reconcile`, and no
-Reconciler driving it. `core/` has zero changes from this spec.
+`wireOpenBao` now registers a `*providers/secrets/openbao.Provider`
+(not the bare `*openbao.Client` spec 008 registered — superseded, not
+left alongside it) under `"secrets"` in `core/provider.Registry`.
+`cmd/serendipd`'s composition root looks this up, type-asserts it to
+`core/reconcile.SecretsProvider`, and injects it into
+`SecretReconciler` — the same registry pattern every capability since
+spec 006 uses, now with a real consumer.
 
-## Explicitly deferred to spec 009
+## The `Secret` resource kind
 
-- The `Secret` resource kind (`core/resource`).
-- A `SecretsProvider` core interface (`core/reconcile`), mirroring
-  `StorageProvider`'s precedent (`provider-model.md`).
-- A `SecretReconciler` actually driving the capability.
-- Kubernetes auth method / workload-identity integration (relevant to
-  a future Identity/Thunder story).
-- PKI secrets engine, dynamic database credentials, or any OpenBao
-  engine beyond KV v2.
-- HA/Raft mode, multi-replica, auto-unseal — deferred per ADR 0009
+`core/resource/secrets.go` adds `KindSecret` with one field:
+
+```go
+type SecretSpec struct {
+    Path string `json:"path"`
+}
+```
+
+`SecretSpec`/`SecretStatus` structurally cannot hold the secret's
+value — not a style choice. Every `core/store` mutation writes an
+**unconditional, whole-resource JSON snapshot** into the audit log's
+`Before`/`After` columns, with no per-field redaction anywhere in
+`core/audit`/`core/store` (confirmed directly against
+`core/store/sqlite/store.go`). A value in `Spec`/`Status` would be
+captured verbatim, forever, in the audit trail — exactly what a
+dedicated secrets engine is supposed to prevent. `Path` is a
+user-chosen, human-meaningful reference (e.g. `"myapp/db-password"`),
+not derived from `Metadata.ID` the way `Volume`'s PVC name is. The KV
+v2 "mount" concept stays out of `core/` entirely — it's a single
+deployment-wide constant (`openbao.DefaultKVMount`), not a per-`Secret`
+choice.
+
+`SecretStatus` adds one field to the usual `Status`/`Conditions`:
+`LastSyncedAt *time.Time`, set only by a successful value write so
+that write has real `Status` content to audit (see "Audit" below).
+
+## `SecretsProvider` and `SecretReconciler`
+
+```go
+type SecretsProvider interface {
+    Exists(ctx context.Context, sec resource.Secret) (bool, error)
+    WriteValue(ctx context.Context, sec resource.Secret, value map[string]any) error
+    ReadValue(ctx context.Context, sec resource.Secret) (map[string]any, error)
+    Delete(ctx context.Context, sec resource.Secret) error
+}
+```
+
+**`Exists`, not `Ensure`** — a deliberate departure from
+`StorageProvider`'s shape (`provider-model.md`): there's nothing
+analogous to provision here (the KV v2 mount already exists, set up
+once by spec 008's `Bootstrap`), so all a reconcile loop can honestly
+do is observe whether a value exists and report that (constitution
+rule 6). `Reconcile` is thin: `Exists` → one Condition, `"Reachable"`
+(`True`/`"ValueExists"`, `False`/`"NoValueWritten"`, or
+`Unknown`/`"CheckFailed"`) — named `"Reachable"`, not `"Synced"`,
+since there's no desired value in `Spec` to compare against.
+
+**`WriteValue`, `ReadValue`, `DeleteWithValue` are three separate,
+synchronous methods on `SecretReconciler` — called directly by `api/`,
+never from `Reconcile` or the async resync loop.** A secret's value
+has no "desired state" to reconcile toward; routing it through the
+async loop would only add latency and eventual-consistency surprise
+for a caller who just wrote a value and expects to read it back
+immediately. They live on `SecretReconciler` as a convenience (reuse
+its `store`/`provider` fields), doc-commented as synchronous, not
+reconcile-loop, concerns.
+
+**Delete bypasses the reconcile loop entirely, unlike
+`VolumeReconciler`'s.** `VolumeReconciler`'s `ErrNotFound` branch can
+call `provider.Delete` with just the ref's ID because the PVC name is
+*derived* from it; a `Secret`'s `Path` is not derived from anything,
+so once the record is gone, `Path` is gone with it. External cleanup
+must happen *before* the store record is deleted:
+`DeleteWithValue` fetches the `Secret`, calls `provider.Delete`, then
+`store.Delete` — so a failed provider delete leaves the record in
+place for a retry rather than orphaning a live value in OpenBao.
+`Reconcile`'s own `ErrNotFound` branch is consequently a plain no-op.
+
+## `providers/secrets/openbao.Provider`
+
+A thin adapter (`providers/secrets/openbao/provider.go`) wrapping spec
+008's `*Client` — no new wire-protocol code. `Exists` calls
+`ReadSecret`, mapping `ErrSecretNotFound` to `(false, nil)`;
+`WriteValue`/`ReadValue`/`Delete` call `WriteSecret`/`ReadSecret`/
+`DeleteSecret` against the single `DefaultKVMount`. Mirrors
+`providers/storage/localpath.Provider`'s naming/placement exactly.
+
+## `api.SecretHandler` and the value routes
+
+A value cannot live in `Spec`/`Status`, so the generic
+`ResourceHandler[S,St]` pattern can't set, read, or clean one up.
+`api/secret_handler.go` adds `SecretHandler`: Create/Get/List/Update
+delegate to an embedded `*ResourceHandler[...]` (reuse, not
+reimplementation), plus:
+
+```
+POST   /v1/secrets/{id}/value   -> SecretReconciler.WriteValue
+GET    /v1/secrets/{id}/value   -> SecretReconciler.ReadValue
+DELETE /v1/secrets/{id}         -> SecretReconciler.DeleteWithValue (overridden)
+```
+
+**This is the first `api/` handler depending on a `core/reconcile`
+type instead of only `core/store`** (`api/CLAUDE.md`'s prior status
+quo) — because a value's read/write/delete lifecycle can't go through
+the generic whole-resource CRUD pattern at all. Documented as a
+one-off for `Secret`'s specific shape, not a new general rule; the
+next capability should default back to `core/store` directly unless
+it hits the same structural wall.
+
+### A deliberate, bounded exception to constitution rule 3
+
+Constitution rule 3 requires state changes to flow desired state ->
+reconciliation engine -> provider -> verification, with "no imperative
+side-channels that mutate infrastructure directly from an API
+handler." `SecretHandler.WriteValue`/`.Delete` (via `DeleteWithValue`)
+call the `SecretsProvider` synchronously from the HTTP request path,
+bypassing the async reconcile engine — a `contract-guardian` review
+flagged this directly, and it is real.
+
+It is accepted as a **deliberate, narrow exception**, not a violation
+to fix later: a secret's value has no "desired state" to reconcile
+toward, so there's nothing for the engine to diff or converge, and
+routing it through the async loop would add latency and
+eventual-consistency surprise for a caller expecting to read back a
+value they just wrote. The exception is scoped to exactly three
+methods — `SecretReconciler.WriteValue`/`.ReadValue`/
+`.DeleteWithValue` — not a general pattern other handlers should
+follow. A future capability facing the same "no desired state" shape
+should make the same case explicitly in its own plan.md, not assume
+this precedent extends automatically.
+
+## Audit: writes piggyback, reads don't
+
+`WriteValue` sets `Status.LastSyncedAt` and the `"Reachable"`
+Condition, then calls ordinary `store.Update` — that call is the
+entire audit mechanism for value writes, no `core/audit` change
+needed. `Before`/`After` are whole-`Secret` snapshots, safe because
+the value never lives in `Spec`/`Status`; verified directly against
+real `audit_log` rows on a `kind` cluster, no plaintext present.
+
+**Value reads are explicitly not audited.** Piggybacking a `Status`
+bump the same way would bump `ResourceVersion` on every `GET
+.../value`, breaking optimistic concurrency for an unrelated
+read-then-`PUT` metadata edit (a spurious `ErrConflict`). A correct
+read-audit trail needs a genuinely separate, non-`ResourceVersion`-
+affecting append-only path in `core/audit` that doesn't exist today,
+with no concrete consumer asking for it — building it speculatively
+would violate constitution rule 10. Recorded below as future work,
+not a silent gap.
+
+## Explicitly deferred
+
+Spec 008's foundation-level deferrals, now narrowed by spec 009, plus
+spec 009's own Scope-OUT:
+
+- **Auditing value reads** — needs a genuine `core/audit` extension
+  (see above); not built speculatively.
+- **Secret rotation, versioning, leasing, or expiry** — KV v2 keeps
+  multiple versions server-side regardless; this capability only ever
+  reads/writes the latest version.
+- **A policy engine gating who may read/write which secret** —
+  `core/policy` doesn't exist yet; `ActorMiddleware`'s existing
+  (intentionally weak) actor resolution is the only access control,
+  same as every other resource kind today.
+- **Kubernetes auth method / workload-identity integration** —
+  relevant to a future Identity/Thunder story.
+- **PKI secrets engine, dynamic database credentials, or any OpenBao
+  engine beyond KV v2.**
+- **`Application`/`Component` wiring that injects a Secret's value
+  into a running workload** — needs the Application Platform provider
+  (OpenChoreo), which doesn't exist yet.
+- **AI-initiated secret access** — no AI operations engine exists yet
+  to be the caller.
+- **UI/CLI/MCP surfaces** — API only, same precedent as every prior
+  capability.
+- **Multiple concurrent `SecretsProvider` instances / per-Environment
+  provider selection** — one default provider via the registry, same
+  as every capability so far.
+- **HA/Raft mode, multi-replica, auto-unseal** — deferred per ADR 0009
   until a real multi-node profile justifies it.
 
 ## Open questions
@@ -230,3 +394,15 @@ Reconciler driving it. `core/` has zero changes from this spec.
 - **Mode-`0600` file permission is unverified on this Windows dev
   machine** (NTFS has no POSIX bits) — needs a real Linux run to close
   out `bootstrap_test.go`'s `runtime.GOOS`-gated assertion for real.
+- **`DeleteWithValue`'s provider-delete-then-store-delete ordering is
+  not atomic.** If the provider delete succeeds but the subsequent
+  `store.Delete` fails (e.g. a future `graph.ErrHasChildren` once
+  something can own a `Secret`, which nothing does today), OpenBao's
+  value is gone while the Serendip-side record remains, pointing at
+  nothing. Accepted as a real, narrow gap rather than a two-phase
+  commit across two unrelated systems (constitution rule 10) — revisit
+  if `Secret` ever gains children.
+- **A concurrent edit racing `WriteValue`'s internal fetch-then-update**
+  surfaces as an ordinary `ErrConflict`, same as any other optimistic-
+  concurrency race in this codebase — not a new risk class, just a new
+  call site for an existing, already-accepted one.

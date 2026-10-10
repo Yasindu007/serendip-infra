@@ -28,7 +28,7 @@ var allKindPaths = []string{
 
 func TestNewServer_AllKindsRespondToPostAndGet(t *testing.T) {
 	db := newTestDB(t)
-	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"})
+	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil)
 
 	for _, path := range allKindPaths {
 		t.Run(path, func(t *testing.T) {
@@ -67,7 +67,7 @@ func TestNewServer_AllKindsRespondToPostAndGet(t *testing.T) {
 
 func TestNewServer_Healthz_NoAuthRequired(t *testing.T) {
 	db := newTestDB(t)
-	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"})
+	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil) // deliberately no Authorization header
@@ -80,7 +80,7 @@ func TestNewServer_Healthz_NoAuthRequired(t *testing.T) {
 
 func TestNewServer_V1Routes_RequireAuth(t *testing.T) {
 	db := newTestDB(t)
-	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"})
+	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/organizations", nil) // no Authorization header
@@ -96,7 +96,7 @@ func TestNewServer_V1Routes_RequireAuth(t *testing.T) {
 // plain-text 404 -- caught by contract-guardian's holistic final review.
 func TestNewServer_UnmatchedRoute_IsProblemJSON(t *testing.T) {
 	db := newTestDB(t)
-	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"})
+	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil)
 
 	tests := []struct {
 		name string

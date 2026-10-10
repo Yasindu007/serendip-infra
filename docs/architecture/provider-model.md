@@ -170,17 +170,51 @@ includes a `Delete`/teardown method must have its Reconciler's
 `ClusterReconciler`'s no-op pattern by default; check whether this
 capability's provider has state to clean up first.
 
+## A capability's interface shape need not mirror `StorageProvider`'s (spec 009)
+
+`SecretsProvider` (`core/reconcile/secrets.go`) confirms each
+capability gets its own narrow interface, not a shared base shape —
+and shows that shape can genuinely differ from `StorageProvider`'s
+"Ensure provisions, Delete tears down" pattern:
+
+```go
+type SecretsProvider interface {
+    Exists(ctx context.Context, sec resource.Secret) (bool, error)
+    WriteValue(ctx context.Context, sec resource.Secret, value map[string]any) error
+    ReadValue(ctx context.Context, sec resource.Secret) (map[string]any, error)
+    Delete(ctx context.Context, sec resource.Secret) error
+}
+```
+
+`Exists`, not `Ensure` — this capability has nothing to provision
+(OpenBao's KV v2 mount already exists once spec 008's `Bootstrap` has
+run); all a reconcile loop can honestly do is observe whether a value
+exists and report that (constitution rule 6). Don't assume every
+capability interface needs an `Ensure`-shaped method just because
+`StorageProvider` has one — derive the shape from what the capability
+actually does.
+
+`Secret` is also the first case where an `api/` handler depends on a
+`core/reconcile` type (`*SecretReconciler`) instead of only
+`core/store` — `api/CLAUDE.md`'s prior status quo. This is specific to
+a value's lifecycle (read/write/delete) being unable to go through the
+generic whole-resource CRUD pattern at all, not a new general rule;
+documented in full in `docs/architecture/secrets.md`. Most future
+capabilities should still only ever need `core/store` from `api/` —
+check for this same structural wall before reaching for
+`core/reconcile` from a handler.
+
 ## Open questions
 
 - Whether `ApplicationProvider` / `InfrastructureProvider` end up as
-  the actual `core/` interface names for Identity/Secrets/Application-
+  the actual `core/` interface names for Identity/Application-
   Platform/Gateway, or get split further per capability, is still
-  undecided — `StorageProvider` above is one data point (a narrow,
-  two-method interface, specific to the Storage capability, not a
-  shared base type), suggesting each capability likely gets its own
-  narrow interface rather than a shared `InfrastructureProvider` all
-  capabilities implement. Resolve during each capability's own spec's
-  plan.md, not by guessing here.
+  undecided — `StorageProvider` and `SecretsProvider` above are two
+  data points (narrow, capability-specific interfaces with genuinely
+  different method shapes, not a shared base type), confirming each
+  capability likely gets its own narrow interface rather than a shared
+  `InfrastructureProvider` all capabilities implement. Resolve during
+  each capability's own spec's plan.md, not by guessing here.
 - **Real cluster/product behavior can invalidate a design that looked
   sound on paper** (spec 007's entire provisioning mechanism changed
   after real-cluster testing, not during planning) — budget real

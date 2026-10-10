@@ -73,14 +73,21 @@ func run() error {
 	}
 
 	bus := event.NewInProcessBus()
-	srv := api.NewServer(db, bus, apiKeys)
-	srv.Addr = addr
-
 	engine := newReconcileEngine(db, bus)
 
-	if err := wireKubernetes(ctx, os.Getenv("SERENDIP_KUBECONFIG"), db, bus, engine); err != nil {
+	// wireKubernetes runs before api.NewServer (reordered from this
+	// package's original spec-002 sequencing) because api.SecretHandler
+	// (spec 009) needs the *reconcile.SecretReconciler wireKubernetes
+	// constructs -- unlike every prior resource kind, whose
+	// api.ResourceHandler only ever needed a store.Store, built
+	// independently of any Kubernetes-facing wiring.
+	secretReconciler, err := wireKubernetes(ctx, os.Getenv("SERENDIP_KUBECONFIG"), db, bus, engine)
+	if err != nil {
 		return fmt.Errorf("kubernetes: %w", err)
 	}
+
+	srv := api.NewServer(db, bus, apiKeys, secretReconciler)
+	srv.Addr = addr
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -168,24 +175,27 @@ func newReconcileEngine(db *sql.DB, bus event.Bus) *reconcile.Engine {
 // happens once here, in the composition root -- core/reconcile never
 // imports core/provider at all (plan.md's resolved design, mirroring
 // ClusterReconciler's constructor-injected HealthChecker exactly).
-func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus event.Bus, engine *reconcile.Engine) error {
+// Returns the *reconcile.SecretReconciler wireOpenBao constructs (nil
+// if kubeconfigPath is empty) -- api.NewServer's SecretHandler needs
+// it, unlike every other resource kind's handler.
+func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus event.Bus, engine *reconcile.Engine) (*reconcile.SecretReconciler, error) {
 	if kubeconfigPath == "" {
 		log.Print("serendipd: SERENDIP_KUBECONFIG not set, no Kubernetes-facing providers active")
-		return nil
+		return nil, nil
 	}
 
 	cfg, err := kubernetes.LoadConfig(kubeconfigPath)
 	if err != nil {
-		return fmt.Errorf("load kubeconfig %s: %w", kubeconfigPath, err)
+		return nil, fmt.Errorf("load kubeconfig %s: %w", kubeconfigPath, err)
 	}
 	client, err := kubernetes.NewClient(cfg)
 	if err != nil {
-		return fmt.Errorf("build client: %w", err)
+		return nil, fmt.Errorf("build client: %w", err)
 	}
 
 	storageProvider, err := localpath.NewProvider(ctx, client)
 	if err != nil {
-		return fmt.Errorf("storage provider: %w", err)
+		return nil, fmt.Errorf("storage provider: %w", err)
 	}
 
 	registry := provider.NewRegistry()
@@ -193,11 +203,11 @@ func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus 
 
 	impl, ok := registry.Lookup("storage")
 	if !ok {
-		return fmt.Errorf("internal: just-registered capability not found in registry")
+		return nil, fmt.Errorf("internal: just-registered capability not found in registry")
 	}
 	sp, ok := impl.(reconcile.StorageProvider)
 	if !ok {
-		return fmt.Errorf("internal: registered implementation does not satisfy reconcile.StorageProvider")
+		return nil, fmt.Errorf("internal: registered implementation does not satisfy reconcile.StorageProvider")
 	}
 
 	volumes := sqlite.NewStore[resource.VolumeSpec, resource.VolumeStatus](db, resource.KindVolume).SetBus(bus)
@@ -216,35 +226,62 @@ func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus 
 
 	log.Print("serendipd: kubernetes: storage provider (local-path) active")
 
-	if err := wireOpenBao(ctx, client, registry); err != nil {
-		return fmt.Errorf("openbao: %w", err)
+	secretReconciler, err := wireOpenBao(ctx, client, registry, db, bus, engine)
+	if err != nil {
+		return nil, fmt.Errorf("openbao: %w", err)
 	}
 
-	return nil
+	return secretReconciler, nil
 }
 
 // wireOpenBao deploys OpenBao into the cluster (idempotent, spec 008),
-// runs its init/unseal bootstrap, and registers the resulting client
-// under the "secrets" capability. No Reconciler is wired here -- there
-// is no Secret resource kind yet for one to drive (spec 009's job);
-// the registered capability is reachable for a smoke-test call only,
-// same spirit as spec 006's own nodeLister proof-of-concept before
-// spec 007 gave it a real consumer.
-func wireOpenBao(ctx context.Context, client *kubernetes.Client, registry *provider.Registry) error {
+// runs its init/unseal bootstrap, registers the resulting
+// *openbao.Provider adapter (spec 009 -- supersedes spec 008's bare
+// *openbao.Client registration, same "replace, don't leave a parallel
+// path" precedent spec 007 set for spec 006's nodeLister) under the
+// "secrets" capability, constructs the Secret store, and wires a
+// SecretReconciler into engine (mirrors wireKubernetes' own
+// VolumeReconciler wiring block immediately above).
+func wireOpenBao(ctx context.Context, client *kubernetes.Client, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine) (*reconcile.SecretReconciler, error) {
 	if err := openbao.NewDeployer(client).Ensure(ctx); err != nil {
-		return fmt.Errorf("deploy: %w", err)
+		return nil, fmt.Errorf("deploy: %w", err)
 	}
 
 	baoClient := openbao.NewClient(client.ProxyURL(openbao.Namespace, openbao.ServiceName, openbao.ListenPort), client.HTTPClient())
 
 	credentialsPath := envOr("SERENDIP_OPENBAO_CREDENTIALS_PATH", defaultOpenBaoCredentialsPath)
 	if err := openbao.Bootstrap(ctx, baoClient, credentialsPath); err != nil {
-		return fmt.Errorf("bootstrap: %w", err)
+		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
 
-	registry.Register("secrets", baoClient)
+	registry.Register("secrets", openbao.NewProvider(baoClient))
+
+	impl, ok := registry.Lookup("secrets")
+	if !ok {
+		return nil, fmt.Errorf("internal: just-registered capability not found in registry")
+	}
+	secretsProvider, ok := impl.(reconcile.SecretsProvider)
+	if !ok {
+		return nil, fmt.Errorf("internal: registered implementation does not satisfy reconcile.SecretsProvider")
+	}
+
+	secrets := sqlite.NewStore[resource.SecretSpec, resource.SecretStatus](db, resource.KindSecret).SetBus(bus)
+	secretReconciler := reconcile.NewSecretReconciler(secrets, secretsProvider)
+	engine.Register(resource.KindSecret, secretReconciler,
+		func(ctx context.Context) ([]graph.ResourceRef, error) {
+			list, err := secrets.List(ctx, store.ListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			refs := make([]graph.ResourceRef, len(list))
+			for i, s := range list {
+				refs[i] = graph.ResourceRef{Kind: resource.KindSecret, ID: s.Metadata.ID}
+			}
+			return refs, nil
+		})
+
 	log.Print("serendipd: kubernetes: secrets provider (openbao) active")
-	return nil
+	return secretReconciler, nil
 }
 
 func envOr(key, fallback string) string {
