@@ -9,82 +9,89 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-10-04
+Last updated: 2026-10-10
 
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** Specs 002-006 are committed locally only — decided explicitly
+PR #24.** Specs 002-007 are committed locally only — decided explicitly
 with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
-**Spec 006 (Kubernetes access foundation + Provider interface pattern)
-— COMPLETE. All 9 tasks committed locally**, holistic contract-guardian
-review PASS (one non-blocking `go.mod`/`go mod tidy` bookkeeping gap
-fixed same-session). Full picture:
+**Spec 007 (Storage provider — local-path) — COMPLETE. All 10 tasks
+committed locally**, holistic contract-guardian review PASS (one
+non-blocking stale-doc-comment finding fixed same-session). This is the
+**first real, working, end-to-end capability** — the first spec that
+actually provisions real external infrastructure, not just observes it.
+Full picture:
 
-- **Resolves a question left open since spec 001**:
-  `docs/architecture/provider-model.md`'s "whether `ApplicationProvider`/
-  `InfrastructureProvider` end up as the actual `core/` interface names"
-  sat unresolved through 5 specs because no real provider existed to
-  force the decision. This spec resolves the *mechanism* (not any
-  specific capability's interface shape, still open — spec 007's job):
-  `core/provider.Registry`, an in-memory, capability-agnostic map from
-  capability name to live Go value, populated only by `cmd/serendipd`
-  (the composition root) — the one place allowed to import both `core/`
-  and a specific `providers/` package, preserving constitution rule 2
-  (`core/` imports no `providers/` package, ever) since `core/provider`
-  itself never does. `provider-model.md`'s "Open questions" section
-  rewritten to reflect the actual resolution, not left stale.
-- **`client-go` researched and rejected, with real evidence, not a
-  hunch**: its transitive dependency weight is a documented,
-  upstream-acknowledged problem (Kubernetes' own maintainers have an
-  open issue about it, cited directly in ADR 0008). Built a hand-rolled,
-  generic `providers/kubernetes` REST client instead (~400 LOC):
-  kubeconfig parsing (confirmed field-for-field against K3s's own
-  source via oss-researcher, not assumed — client-cert auth, YAML lists
-  not maps, `preferences: {}` always present) + a minimal
-  `Object`/`ObjectMeta` envelope with raw-JSON spec/status, so this
-  package has zero hardcoded knowledge of any specific Kubernetes
-  object kind.
-- **One new dependency, justified and measured, not estimated**:
-  `sigs.k8s.io/yaml` (ADR 0008) — chosen because its JSON-round-trip
-  design means the *same* struct + `json:` tags work for both the
-  kubeconfig (YAML) and Kubernetes API objects (JSON) this package also
-  needs. Real transitive weight verified by building a throwaway module
-  against it and running `go list -deps`: exactly one additional module
-  actually linked into the build (`go.yaml.in/yaml/v2`).
-- **T008's holistic review's one real finding**: `go.mod` had
-  `sigs.k8s.io/yaml` marked `// indirect` despite being a direct import
-  — a `go mod tidy` bookkeeping gap, not a functional or constitutional
-  issue (ADR 0008's own text already stated the correct intent). Fixed.
-- **T007's real-cluster verification proved the whole chain end-to-end**,
-  not just unit tests, on a disposable WSL2 clone (same `wsl --export`/
-  `--import` approach as spec 005, never the persistent dev distro):
-  `serendipd` started cleanly with `SERENDIP_KUBECONFIG` unset (a
-  supported, non-fatal state); a real K3s cluster was bootstrapped via
-  spec 005's own already-proven `serendip-agent bootstrap --confirm`;
-  `serendipd` run with `SERENDIP_KUBECONFIG` pointed at the real
-  `/etc/rancher/k3s/k3s.yaml` logged `"found 1 node(s): [yasinduds]"`,
-  which exactly matched `kubectl get nodes --no-headers | wc -l`'s real
-  output — not a mocked or assumed result. Clone fully destroyed
-  afterward, zero trace confirmed in the persistent dev distro.
-- **The registration pattern is proven with real (if throwaway) code,
-  not just designed**: a deliberately trivial `nodeLister` capability +
-  `kubeNodeLister` implementation, registered and looked up through
-  `core/provider.Registry` exactly as a real capability would be,
-  clearly marked for replacement by spec 007's real `StorageProvider`.
+- **Resolves the capability-specific interface question spec 006
+  deliberately left open**: `StorageProvider` (`core/reconcile/storage.go`)
+  — `Ensure`/`Delete`, using only `core/resource.Volume`, no Kubernetes
+  concept leaking into `core/`. New `Volume` resource kind
+  (`core/resource/storage.go`) — named `Volume`, not `Storage` as
+  `resource-model.md` literally says, specifically to avoid colliding
+  with "Storage" already meaning the *capability* throughout
+  `capability-model.md`/`storage.md`.
+- **Two real design corrections, both discovered via actual real-cluster
+  testing (T008), not caught in planning**:
+  1. **The originally-planned mechanism (an `Immediate`-binding-mode
+     `StorageClass` driving `rancher.io/local-path-provisioner`'s
+     dynamic provisioning) genuinely doesn't work.** Real testing hit
+     `"configuration error, no node was specified"` — confirmed against
+     the provisioner's own source (oss-researcher): its default
+     per-node hostPath mode hard-requires a target node, supplied only
+     via the `volume.kubernetes.io/selected-node` annotation the
+     Kubernetes scheduler sets as part of `WaitForFirstConsumer`'s
+     delayed-binding flow, which `Immediate` mode never populates.
+     Reverting to `WaitForFirstConsumer` doesn't help either — it just
+     restores the original problem (no consuming Pod exists to trigger
+     scheduling). **Fix, confirmed with the user before implementing
+     since it changed the spec's core mechanism**: bypass the
+     provisioner's dynamic-provisioning controller entirely — create a
+     `PersistentVolume` directly (hostPath-backed) and a
+     `PersistentVolumeClaim` that statically binds to it via
+     `spec.volumeName`, standard Kubernetes mechanics that predate
+     dynamic provisioning and need no provisioner or consuming Pod at
+     all. Still "integrate, don't rebuild" (constitution rule 10):
+     Serendip declares standard API objects, kubelet does the real work.
+  2. **Deleting a `Volume` via the API left the real PV/PVC behind** —
+     `VolumeReconciler.Reconcile`'s `store.ErrNotFound` branch (hit on
+     the delete event) just returned `nil`, copying `ClusterReconciler`'s
+     identical branch, correct there (nothing external to clean up for a
+     passive health-checker) but wrong here, the first Reconciler whose
+     provider actually provisions state needing explicit teardown.
+     Fixed: that branch now calls `provider.Delete` with a minimal
+     `Volume` carrying just the deleted ref's ID.
+- **T008's real-cluster verification, run twice** (once before each
+  fix, confirming both problems for real before fixing either) on a
+  disposable WSL2 clone (never the persistent dev distro, same pattern
+  as specs 005/006): after both fixes, a `Volume` created through the
+  live HTTP API reached `Bound` in ~8.7s, confirmed both via the API and
+  directly via `kubectl get pv/pvc`; a genuine 35-second real-time wait
+  past the 30s resync interval with zero drift confirmed
+  `ResourceVersion` stayed unchanged (idempotency, acceptance criterion
+  3, proven through the real `Engine`, not just a unit test); deleting
+  the `Volume` via the API then genuinely removed both the real PVC and
+  PV, confirmed via `kubectl`. Clone fully destroyed afterward
+  (`serendip-agent bootstrap --uninstall --confirm`, then
+  `wsl --unregister`), zero trace confirmed in the persistent dev distro.
+- **Worth remembering for every future Kubernetes-facing provider**:
+  real cluster behavior can invalidate a design that looked sound on
+  paper — this spec's whole mechanism changed after T008, not before.
+  Budget for this when planning Identity/Secrets/Application-Platform/
+  Gateway providers; don't assume plan.md's Approach section is final
+  until real-cluster verification confirms it.
 
-**Specs 002-005 — COMPLETE.** See their own "what actually got built"
-sections below; condensed here now that spec 006 is current. Spec 005's
-one notable lesson worth carrying forward: cross-referencing `docs/PRD.md`
-against a spec's actual Scope-OUT is what caught the K3s-bootstrap
-staleness bug spec 005 then fixed — re-reading adjacent docs, not just
-the spec being worked on, is part of the same "check the actual
-commitment, don't assume" discipline as the holistic-review lesson from
-specs 002/003, now also the mechanism behind spec 006's
-`provider-model.md` resolution above.
+**Specs 002-006 — COMPLETE.** See their own "what actually got built"
+sections below; condensed here now that spec 007 is current. Spec 006's
+one notable lesson worth carrying forward: cross-referencing adjacent
+docs (not just the spec being worked on) is what caught the stale
+`provider-model.md` open-question framing spec 006 then resolved — same
+"check the actual commitment, don't assume" discipline spec 007's own
+T008 corrections above now also exemplify, just discovered via runtime
+testing instead of doc cross-referencing.
 
 **GitHub note (updated 2026-09-06, auth issue resolved)**: `serendipinfra`
 GitHub auth is now working. The PAT-generation flow had a real,
@@ -102,6 +109,31 @@ project,workflow` only when Projects v2 board work or a
 `.github/workflows/*.yml` push is actually needed, not preemptively.
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
+
+## Spec 006 — what actually got built
+
+`providers/kubernetes` + `core/provider` — the Kubernetes access
+foundation + Provider registry pattern, 9 tasks, all merged locally:
+
+- Hand-rolled, generic REST client (`providers/kubernetes`) — not
+  `client-go` (its transitive weight is a documented, upstream-
+  acknowledged problem, cited directly in ADR 0008). Kubeconfig parsing
+  confirmed field-for-field against K3s's own source. Minimal
+  `Object`/`ObjectMeta` envelope, raw-JSON spec/status, zero hardcoded
+  per-kind knowledge.
+- `core/provider.Registry`: in-memory, capability-agnostic map from
+  capability name to live Go value, populated only by `cmd/serendipd`
+  (the composition root) — resolves `provider-model.md`'s "how does a
+  capability interface get wired without `core/` importing `providers/`"
+  question left open since spec 001.
+- One new dependency, justified and measured: `sigs.k8s.io/yaml` (ADR
+  0008) — real transitive weight verified by building a throwaway
+  module and running `go list -deps`, not estimated.
+- T007's real-cluster verification: `serendipd` with
+  `SERENDIP_KUBECONFIG` set genuinely listed real Nodes from a real K3s
+  cluster, matching `kubectl` exactly — proven via a deliberately
+  trivial, throwaway `nodeLister` proof-of-concept (replaced entirely by
+  spec 007's real `StorageProvider`).
 
 ## Spec 005 — what actually got built
 
@@ -319,34 +351,30 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Spec 006 is done — the Kubernetes access foundation + Provider
-   registry pattern both work for real.** Next is **spec 007: the
-   actual Storage/local-path provider** — user already confirmed
-   Storage (local-path) as the first real capability/provider
-   (2026-10-04) and the two-spec split (006=foundation, 007=the
-   provider itself). Spec 007 needs its own planning pass: define the
-   `StorageProvider` Go interface (deliberately left open by spec 006 —
-   the first real capability interface decision in this project), a new
-   `Volume` resource kind under `core/resource`, a `VolumeReconciler` in
-   `core/reconcile`, and `providers/storage/localpath` wrapping spec
-   006's `providers/kubernetes.Client` — read
-   `specs/006-kubernetes-provider-foundation/plan.md`'s Risks section
-   first (notes local-path-provisioner's `WaitForFirstConsumer` binding
-   mode means a PVC won't bind until a consuming Pod exists, which
-   doesn't exist yet in this project — spec 007 likely needs its own
-   `Immediate`-binding-mode StorageClass, not K3s's bundled default, to
-   get a real Bound result without an Application Platform provider
-   existing first). After Storage: Identity/Thunder, Secrets/OpenBao,
-   Application Platform/OpenChoreo, Gateway/kgateway, each likely its
-   own spec, per `docs/PRD.md`'s POC scope (items 3-4).
-2. **specs 002-006 are still unpushed by deliberate choice** (user
+1. **Spec 007 is done — the first real, end-to-end capability (Storage/
+   local-path) works against a real cluster.** Per `docs/PRD.md`'s POC
+   scope (items 3-4), next is picking the **second** real
+   capability/provider: Identity/Thunder, Secrets/OpenBao, Application
+   Platform/OpenChoreo, or Gateway/kgateway — ask the user which one
+   before planning, same as Storage was confirmed explicitly
+   (2026-10-04) rather than assumed. **Budget real-cluster-testing time
+   into whichever is picked next, not just planning time** — spec 007's
+   entire provisioning mechanism changed after real-cluster testing
+   (T008) revealed the planned approach didn't actually work; treat
+   plan.md's Approach section as a hypothesis to verify, not a foregone
+   conclusion, especially for any capability with its own non-trivial
+   upstream product behavior (Thunder/OpenBao/OpenChoreo all qualify).
+   The `StorageProvider` pattern (`core/reconcile/storage.go` +
+   `providers/storage/localpath`) is the concrete precedent to follow
+   for whichever capability's interface comes next.
+2. **specs 002-007 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not
    a technical one to keep re-litigating.
 3. GitHub tracking board (milestones/issues/sub-issues/project) was
    fully built for spec 001 and merged via PR #24 — extending it to
-   cover specs 002-006 once they're pushed is still open. CodeRabbit:
+   cover specs 002-007 once they're pushed is still open. CodeRabbit:
    CLI installed, only `coderabbit auth login` (browser) remains,
    previously blocked by the account flag — retry now that auth works,
    not yet re-attempted this session.

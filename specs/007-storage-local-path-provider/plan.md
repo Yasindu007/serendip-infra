@@ -1,6 +1,34 @@
 # Plan: Spec 007 — Storage provider (local-path)
 
-Status: Draft — awaiting human approval before implementation.
+Status: Implemented. **Correction, 2026-10-10**: the Approach/
+Interfaces sections below describe the plan as originally approved
+(a `StorageClass` with `volumeBindingMode: Immediate` driving
+`rancher.io/local-path-provisioner`'s dynamic provisioning). Real-
+cluster testing (T008) found this genuinely doesn't work — confirmed
+against the provisioner's own source: in its default per-node hostPath
+mode it hard-requires a target node, supplied only via the
+`volume.kubernetes.io/selected-node` annotation the Kubernetes
+scheduler sets as part of `WaitForFirstConsumer`'s delayed-binding
+flow, which `Immediate` mode never populates. What actually shipped,
+confirmed with the user before implementing since it changes this
+spec's core mechanism: **static `PersistentVolume`/
+`PersistentVolumeClaim` binding** — `providers/storage/localpath`
+creates a hostPath-backed PV directly and a PVC that references it by
+name via `spec.volumeName`, bypassing the provisioner's dynamic-
+provisioning controller (and any `StorageClass`) entirely. See
+`providers/storage/localpath/provider.go`'s doc comment for the full
+reasoning and `docs/architecture/provider-model.md`'s breadcrumb for
+what this means for future capability-provider designs. The
+`StorageProvider` interface shape, `VolumeReconciler`, resource kind,
+and every other section below are unaffected — only the provisioning
+*mechanism* changed, not the capability-level contract.
+
+A second, smaller correction: `VolumeReconciler.Reconcile`'s original
+design (below) didn't call `provider.Delete` when a `Volume` was
+deleted via the API — `core/reconcile/volume.go`'s `store.ErrNotFound`
+branch now does, since (unlike `ClusterReconciler`) this is the first
+Reconciler whose provider actually provisions external state that
+needs explicit cleanup.
 
 ## Open-question resolutions
 

@@ -128,29 +128,62 @@ the real node count, matching `kubectl` directly) — the registry
 pattern itself is now load-bearing, tested infrastructure, not an
 untested idea.
 
+## First capability-specific interface — resolved (spec 007)
+
+Spec 007 is the first real answer to "what does a capability-specific
+interface actually look like." `StorageProvider`
+(`core/reconcile/storage.go`):
+
+```go
+type StorageProvider interface {
+    Ensure(ctx context.Context, vol resource.Volume) (bound bool, reason, message string, err error)
+    Delete(ctx context.Context, vol resource.Volume) error
+}
+```
+
+Confirms the breadcrumb below's prediction almost exactly: a
+`VolumeReconciler` (kind-shaped, lives in `core/reconcile`) holds a
+concrete `StorageProvider` (capability-shaped, defined alongside the
+Reconciler in the same package, mirroring `ClusterReconciler`/
+`HealthChecker`'s existing precedent) injected via its constructor —
+**not** looked up from `core/provider.Registry` inside `Reconcile`
+itself. The `Registry.Lookup` + type-assert happens exactly once, in
+`cmd/serendipd`'s composition root, when wiring the Reconciler — this
+turned out to be the right call: it keeps `core/reconcile` free of any
+import of `core/provider` at all, and matches `ClusterReconciler`'s own
+`HealthChecker` injection exactly, rather than introducing a second,
+inconsistent way to obtain a capability implementation.
+
+**A real gap this interface shape surfaced, worth remembering for every
+future capability**: `Delete` is a required method, not optional —
+`ClusterReconciler`'s `HealthChecker` never needed one (a passive
+observer has nothing to tear down), but `StorageProvider` does, because
+it actually provisions real external state. The first implementation
+(`VolumeReconciler`) initially missed wiring `Delete` into the
+reconcile loop at all (the `store.ErrNotFound` branch, hit when the
+Serendip-side resource is deleted, just returned `nil` — copied
+verbatim from `ClusterReconciler`, where that's correct). Real-cluster
+testing caught this: deleting a `Volume` via the API left the real
+`PersistentVolumeClaim` behind. **Any future capability interface that
+includes a `Delete`/teardown method must have its Reconciler's
+`ErrNotFound` branch actually call it** — don't copy
+`ClusterReconciler`'s no-op pattern by default; check whether this
+capability's provider has state to clean up first.
+
 ## Open questions
 
-- Whether `ApplicationProvider` / `InfrastructureProvider` (or a
-  capability-specific interface like `StorageProvider`) end up as the
-  actual `core/` interface names, or get split further per capability,
-  is still undecided — spec 006 resolved *how* such interfaces get
-  registered/wired (above), not *what* any specific one looks like.
-  Resolve each capability's interface shape during that capability's
-  own spec's plan.md (spec 007: Storage), not by guessing here.
-
-**Breadcrumb from spec 003** (`core/reconcile`, the reconciliation
-engine), still relevant: the generic dispatch shape that turned out to
-work is `Reconciler.Reconcile(ctx, graph.ResourceRef) error`, one
-interface per *kind* being reconciled, not per capability. Given spec
-006's resolution above, the likely shape for spec 007 is: a
-`VolumeReconciler` (kind-shaped, lives in `core/reconcile`) that calls
-`core/provider.Registry.Lookup("storage")`, type-asserts to a
-`StorageProvider` interface (capability-shaped, defined somewhere
-`core/reconcile` can reference without importing `providers/` —
-likely alongside the Reconciler itself, mirroring how
-`ClusterReconciler` already calls a capability-shaped `HealthChecker`
-from inside a kind-shaped `Reconciler`), and the real implementation
-registered in `cmd/serendipd` is a `providers/storage/localpath` type
-wrapping spec 006's `providers/kubernetes.Client`. Worth checking
-against what spec 007 actually needs once written, not assumed to be
-exactly right in advance.
+- Whether `ApplicationProvider` / `InfrastructureProvider` end up as
+  the actual `core/` interface names for Identity/Secrets/Application-
+  Platform/Gateway, or get split further per capability, is still
+  undecided — `StorageProvider` above is one data point (a narrow,
+  two-method interface, specific to the Storage capability, not a
+  shared base type), suggesting each capability likely gets its own
+  narrow interface rather than a shared `InfrastructureProvider` all
+  capabilities implement. Resolve during each capability's own spec's
+  plan.md, not by guessing here.
+- **Real cluster/product behavior can invalidate a design that looked
+  sound on paper** (spec 007's entire provisioning mechanism changed
+  after real-cluster testing, not during planning) — budget real
+  verification time, not just planning time, for every future
+  capability's spec, especially ones with non-trivial upstream product
+  behavior of their own (Thunder, OpenBao, OpenChoreo all qualify).

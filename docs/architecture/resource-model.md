@@ -64,6 +64,17 @@ Site → Cluster → Node
   replication mode). Distinct from the control plane's own persistence
   (ADR 0003 governs *Serendip's* store only, not user Databases).
 - **Storage** — a primary or backup storage request. See `storage.md`.
+  Implemented (spec 007) as `core/resource.Volume`
+  (`resource.KindVolume`), not literally named "Storage" as written
+  above — deliberately, to avoid colliding with "Storage" already
+  naming the *capability* throughout `capability-model.md`/`storage.md`.
+  A resource kind and the capability it belongs to sharing one
+  identifier would be confusing in API paths (`/v1/volumes`), logs, and
+  error messages. Spec 007's `Volume` is deliberately minimal (one
+  size, no tier/policy/replication/backup/encryption) — this doc's
+  fuller "primary or backup storage request" concept, including
+  `storage.md`'s `storagePolicy`, remains aspirational until a second
+  storage provider (Longhorn, ADR 0002) gives it a real reason to exist.
 
 ### Operational resources
 
