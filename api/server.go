@@ -56,6 +56,7 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string) *http.Serve
 	mountResource[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](apiMux, db, bus, resource.KindProviderInstance, "provider-instances")
 	mountResource[resource.IncidentSpec, resource.IncidentStatus](apiMux, db, bus, resource.KindIncident, "incidents")
 	mountResource[resource.AlertSpec, resource.AlertStatus](apiMux, db, bus, resource.KindAlert, "alerts")
+	mountResource[resource.VolumeSpec, resource.VolumeStatus](apiMux, db, bus, resource.KindVolume, "volumes")
 
 	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
 	NewRegistryHandler(registry.NewCapabilityRegistry(capStore)).Register(apiMux)

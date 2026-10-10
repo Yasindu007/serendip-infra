@@ -11,15 +11,19 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/event"
 )
 
-// allKindPaths must match server.go's 14 mountResource calls exactly --
+// allKindPaths must match server.go's 15 mountResource calls exactly --
 // this is the smoke-test surface, not a duplicate of T011's deep CRUD
 // proof (that's TestResourceHandler_CRUDCycle, one kind, every verb).
+// "volumes" added by specs/007-storage-local-path-provider T007 --
+// proves the generic ResourceHandler pattern needs zero new code for a
+// new kind, same empirical check this project has run for every kind
+// since spec 002.
 var allKindPaths = []string{
 	"organizations", "teams", "projects", "environments",
 	"sites", "clusters", "nodes",
 	"applications", "components",
 	"capabilities", "providers", "provider-instances",
-	"incidents", "alerts",
+	"incidents", "alerts", "volumes",
 }
 
 func TestNewServer_AllKindsRespondToPostAndGet(t *testing.T) {
