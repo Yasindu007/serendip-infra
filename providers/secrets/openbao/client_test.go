@@ -51,6 +51,63 @@ func TestClient_Health_ParsesSealedUninitialized(t *testing.T) {
 	}
 }
 
+func TestClient_EnsureKVv2Mount_AbsentMount_EnablesIt(t *testing.T) {
+	var enableCalled bool
+	var gotPath string
+	var gotBody map[string]any
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sys/mounts":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"sys/":       map[string]any{"type": "system"},
+				"cubbyhole/": map[string]any{"type": "cubbyhole"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/sys/mounts/secret":
+			enableCalled = true
+			gotPath = r.URL.Path
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	if err := client.EnsureKVv2Mount(context.Background(), "secret"); err != nil {
+		t.Fatalf("EnsureKVv2Mount() = %v", err)
+	}
+	if !enableCalled {
+		t.Fatal("mount was not enabled when absent")
+	}
+	if gotPath != "/v1/sys/mounts/secret" {
+		t.Errorf("enable path = %q, want /v1/sys/mounts/secret", gotPath)
+	}
+	if gotBody["type"] != "kv" {
+		t.Errorf("enable body type = %v, want \"kv\"", gotBody["type"])
+	}
+	opts, ok := gotBody["options"].(map[string]any)
+	if !ok || opts["version"] != "2" {
+		t.Errorf("enable body options = %v, want version=2", gotBody["options"])
+	}
+}
+
+func TestClient_EnsureKVv2Mount_AlreadyPresent_DoesNotReEnable(t *testing.T) {
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			t.Fatalf("unexpected POST %s, want no enable call when the mount already exists", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"sys/":    map[string]any{"type": "system"},
+			"secret/": map[string]any{"type": "kv"},
+		})
+	})
+
+	if err := client.EnsureKVv2Mount(context.Background(), "secret"); err != nil {
+		t.Fatalf("EnsureKVv2Mount() = %v", err)
+	}
+}
+
 func TestClient_Init_SendsExactShareThresholdBody(t *testing.T) {
 	var gotBody initRequest
 	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {

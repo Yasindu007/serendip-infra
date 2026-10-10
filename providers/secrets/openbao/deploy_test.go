@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 )
@@ -32,13 +33,23 @@ func newTestKubeClient(t *testing.T, handler http.HandlerFunc) *kubernetes.Clien
 }
 
 func TestDeployer_Ensure_AllMissing_CreatesAllFiveInDependencyOrder(t *testing.T) {
+	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
 	var created []string
+	statefulSetCreated := false
 	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
+			if r.URL.Path == statefulSetPath && statefulSetCreated {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(kubernetes.Object{Status: json.RawMessage(`{"readyReplicas":1}`)})
+				return
+			}
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		created = append(created, r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "/statefulsets") {
+			statefulSetCreated = true
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(kubernetes.Object{})
@@ -66,11 +77,16 @@ func TestDeployer_Ensure_AllMissing_CreatesAllFiveInDependencyOrder(t *testing.T
 }
 
 func TestDeployer_Ensure_AllAlreadyExist_CreatesNothing(t *testing.T) {
+	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
 	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("unexpected %s %s, want only GET calls when everything already exists", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == statefulSetPath {
+			json.NewEncoder(w).Encode(kubernetes.Object{Status: json.RawMessage(`{"readyReplicas":1}`)})
+			return
+		}
 		json.NewEncoder(w).Encode(kubernetes.Object{})
 	})
 
@@ -81,13 +97,20 @@ func TestDeployer_Ensure_AllAlreadyExist_CreatesNothing(t *testing.T) {
 
 func TestDeployer_Ensure_PartiallyExists_CreatesOnlyMissing(t *testing.T) {
 	// Namespace and ConfigMap already exist; PVC, Service, StatefulSet don't.
+	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
 	exists := map[string]bool{
 		"/api/v1/namespaces/serendip-system":                           true,
 		"/api/v1/namespaces/serendip-system/configmaps/openbao-config": true,
 	}
 	var created []string
+	statefulSetCreated := false
 	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
+			if r.URL.Path == statefulSetPath && statefulSetCreated {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(kubernetes.Object{Status: json.RawMessage(`{"readyReplicas":1}`)})
+				return
+			}
 			if exists[r.URL.Path] {
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(kubernetes.Object{})
@@ -97,6 +120,9 @@ func TestDeployer_Ensure_PartiallyExists_CreatesOnlyMissing(t *testing.T) {
 			return
 		}
 		created = append(created, r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "/statefulsets") {
+			statefulSetCreated = true
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(kubernetes.Object{})
@@ -118,6 +144,73 @@ func TestDeployer_Ensure_PartiallyExists_CreatesOnlyMissing(t *testing.T) {
 		if created[i] != path {
 			t.Errorf("created[%d] = %q, want %q", i, created[i], path)
 		}
+	}
+}
+
+func TestDeployer_Ensure_WaitsAcrossMultipleNotYetReadyPolls(t *testing.T) {
+	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
+	readyAfterPolls := 3
+	polls := 0
+	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if r.URL.Path != statefulSetPath {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(kubernetes.Object{})
+				return
+			}
+			polls++
+			w.Header().Set("Content-Type", "application/json")
+			if polls < readyAfterPolls {
+				json.NewEncoder(w).Encode(kubernetes.Object{Status: json.RawMessage(`{"readyReplicas":0}`)})
+				return
+			}
+			json.NewEncoder(w).Encode(kubernetes.Object{Status: json.RawMessage(`{"readyReplicas":1}`)})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(kubernetes.Object{})
+	})
+
+	d := NewDeployer(client)
+	d.waitReadyPollInterval = time.Millisecond
+	d.waitReadyTimeout = time.Second
+
+	if err := d.Ensure(context.Background()); err != nil {
+		t.Fatalf("Ensure() = %v", err)
+	}
+	if polls != readyAfterPolls {
+		t.Errorf("polls = %d, want exactly %d (stop polling as soon as ready)", polls, readyAfterPolls)
+	}
+}
+
+func TestDeployer_Ensure_TimesOutIfNeverReady(t *testing.T) {
+	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
+	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == statefulSetPath {
+				json.NewEncoder(w).Encode(kubernetes.Object{Status: json.RawMessage(`{"readyReplicas":0}`)})
+				return
+			}
+			json.NewEncoder(w).Encode(kubernetes.Object{})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(kubernetes.Object{})
+	})
+
+	d := NewDeployer(client)
+	d.waitReadyPollInterval = time.Millisecond
+	d.waitReadyTimeout = 20 * time.Millisecond
+
+	err := d.Ensure(context.Background())
+	if err == nil {
+		t.Fatal("Ensure() = nil error, want a timeout error since the StatefulSet never reports ready")
+	}
+	if !strings.Contains(err.Error(), "wait for StatefulSet") {
+		t.Errorf("error = %q, want it to name the wait-for-ready step", err.Error())
 	}
 }
 

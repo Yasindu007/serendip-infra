@@ -13,6 +13,64 @@ instead, with no `spec` at all. Fixed by adding a third raw-JSON field,
 established "plan.md is a hypothesis, implementation can surface real
 gaps" lesson (spec 007's two mid-implementation corrections).
 
+**Second correction, found during T007 real-cluster verification**:
+the originally-planned `storage "file" { path = ... }` OpenBao config
+stanza (below, and ADR 0009) crashes on startup with `unknown storage
+type file` — OpenBao 2.7.0 removed the `file` storage backend
+entirely (confirmed via oss-researcher against OpenBao's own issue
+#4077/PR #4088: their own packaged default config hit this exact crash
+post-2.7.0, fixed by switching to `pebbledb`). Fixed by changing the
+ConfigMap's `server.hcl` to `storage "pebbledb" { path = ... }` — the
+documented non-HA, single-node durable replacement, functionally
+equivalent for every decision already made (still local-disk-backed
+via the same PVC, still non-HA, no Deployer/StatefulSet shape change
+at all beyond the HCL string content). Also switched the StatefulSet's
+container args from `-config=/openbao/config/server.hcl` to
+`-config=/openbao/config` (the directory) — the official image's own
+entrypoint already defaults to loading the whole directory, so passing
+the file explicitly triggered a harmless but needless "ignoring
+duplicate configuration found in directory" warning on every boot.
+ADR 0009 updated to match.
+
+**Third correction, found later in the same T007 pass**: the args
+change above was itself wrong. Real-cluster testing (on two unrelated
+clusters — a K3s cluster and an independent `kind`/Docker cluster,
+ruling out any host-specific cause) showed `openbao-0` crashing
+*deterministically on its very first boot*, every time, with `listen
+tcp4 0.0.0.0:8200: bind: address already in use`. Root cause: the
+entrypoint's own default command is already `bao server
+-config=/openbao/config "$@"` — explicitly also passing
+`-config=/openbao/config` as an arg made that flag appear *twice* in
+the final command line (once from the entrypoint, once from `"$@"`),
+and since `-config` in directory mode scans/merges every config file
+in the directory, processing it twice loaded and bound the listener
+twice within the same process. The "harmless... duplicate
+configuration" warning this was chasing was never actually harmless
+once the flag appeared via two independent sources instead of one.
+Fixed: container args are now just `["server"]`, relying entirely on
+the entrypoint's own default with nothing ever duplicated.
+
+**Fourth correction, also found during T007**: neither this plan nor
+ADR 0009 ever specified *enabling* the KV v2 secrets engine — only
+`-dev` mode auto-mounts one; a production `Init`'d instance mounts
+nothing but its built-in system backends, so `ReadSecret`/
+`WriteSecret` 404'd with "no handler for route" despite matching the
+documented wire protocol exactly. Fixed: `Client.EnsureKVv2Mount(ctx,
+mount)` (idempotent, checks `/v1/sys/mounts` before enabling), called
+unconditionally from `Bootstrap` so a prior partial failure can
+self-heal on a later call.
+
+**Fifth correction, also found during T007**: `Deployer.Ensure`
+returned immediately after creating the StatefulSet, before the Pod
+was actually reachable — `wireOpenBao`'s subsequent `Bootstrap` call
+always raced this and crashed `serendipd` at startup with a genuine
+"no endpoints available" 503. Fixed: `Ensure` now polls the
+StatefulSet's `status.readyReplicas` (90s timeout) before returning.
+
+All three of these final corrections were confirmed fixed end-to-end
+against a real `kind` cluster — see `docs/PROGRESS.md`'s T007 section
+for the full acceptance-criteria walkthrough.
+
 ## Open-question resolutions
 
 1. **OpenBao version: pin `2.7.1`** (confirmed current latest via

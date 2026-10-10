@@ -3,6 +3,28 @@
 Status: Accepted
 Date: 2026-10-10
 
+**Correction, 2026-10-10 (during spec 008 T007 real-cluster
+verification)**: this ADR's Decision section originally named the
+`file` storage backend for standalone mode. Real-cluster testing found
+OpenBao 2.7.0 removed the `file` backend entirely (`unknown storage
+type file` is a genuine, confirmed-upstream fatal startup error, not a
+config mistake — OpenBao's own packaged default config hit the same
+crash post-2.7.0, fixed in their own PR #4088 by switching to
+`pebbledb`). This ADR's storage-backend references below are updated
+to `pebbledb` — the documented non-HA, single-node durable replacement
+for `file`, functionally equivalent for this ADR's purposes (still a
+local-disk-backed, non-HA, single-node backend; no PVC/deployment-mode
+decision below changes). Two further real findings from the same T007
+pass, documented in full in `specs/008-openbao-secrets-foundation/
+plan.md`: (1) the KV v2 REST API section below is correct on the wire
+but incomplete — a production `Init`'d instance never auto-mounts a
+KV v2 engine (only `-dev` mode does), so this spec also had to add an
+explicit idempotent mount-enable step; (2) an intermediate attempt at
+matching the container args to the official image's entrypoint
+"exactly" turned out to double-bind the OpenBao listener and crash
+every Pod on its first boot, confirmed on two independent clusters —
+reverted to the minimal, non-duplicating args.
+
 ## Context
 
 The Secrets & PKI capability (`docs/architecture/capability-model.md:40`,
@@ -76,8 +98,8 @@ Accept OpenBao as the default Secrets & PKI provider
 (`capability-model.md`'s existing `secrets: default: openbao` stands;
 this ADR formalizes it and sets the implementation constraints below).
 
-- **Deployment mode: standalone (file storage + real PVC), not dev,
-  not HA.** Dev mode's ephemeral in-memory storage would make the
+- **Deployment mode: standalone (`pebbledb` storage backend + real
+  PVC), not dev, not HA.** Dev mode's ephemeral in-memory storage would make the
   capability "too stubbed to call implemented" (constitution rule 6);
   HA/Raft multi-replica is explicitly deferred until a real multi-node
   profile exists to justify it, mirroring ADR 0002.

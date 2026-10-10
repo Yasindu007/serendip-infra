@@ -175,6 +175,58 @@ func (c *Client) Unseal(ctx context.Context, key string) (sealed bool, err error
 	return result.Sealed, nil
 }
 
+// mountsResponse is the subset of /v1/sys/mounts' response this
+// provider needs -- just enough to check whether a given mount path
+// already exists. OpenBao/Vault's response duplicates every mount
+// both at the top level (legacy shape, pre-dates the "data" wrapper)
+// and under "data" (current shape) -- this provider only reads the
+// top-level keys, which every version of the API has always included.
+type mountsResponse map[string]json.RawMessage
+
+// EnsureKVv2Mount idempotently enables a KV v2 secrets engine at
+// mount (no trailing slash) -- unlike "-dev" mode, a production
+// OpenBao instance mounts nothing but its built-in system backends
+// (sys/, cubbyhole/, identity/) after Init, so ReadSecret/WriteSecret
+// 404 with "no handler for route" against a fresh instance until this
+// runs at least once. Checks for an existing mount first (GET
+// /v1/sys/mounts) rather than unconditionally POSTing, since OpenBao
+// errors on enabling a path that's already in use -- this makes the
+// call safe to repeat on every Bootstrap call, which matters because
+// an instance can reach "initialized" (permanently, OpenBao's own
+// state) while a later step in the same Bootstrap call still fails,
+// leaving a future restart's Bootstrap call on the "already
+// initialized" branch forever, with no other path back to this check.
+func (c *Client) EnsureKVv2Mount(ctx context.Context, mount string) error {
+	resp, err := c.do(ctx, http.MethodGet, "/v1/sys/mounts", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return unexpectedStatus(resp)
+	}
+	var mounts mountsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&mounts); err != nil {
+		return fmt.Errorf("openbao: decode mounts response: %w", err)
+	}
+	if _, exists := mounts[mount+"/"]; exists {
+		return nil
+	}
+
+	enableResp, err := c.do(ctx, http.MethodPost, "/v1/sys/mounts/"+mount, map[string]any{
+		"type":    "kv",
+		"options": map[string]string{"version": "2"},
+	})
+	if err != nil {
+		return err
+	}
+	defer enableResp.Body.Close()
+	if enableResp.StatusCode != http.StatusNoContent && enableResp.StatusCode != http.StatusOK {
+		return unexpectedStatus(enableResp)
+	}
+	return nil
+}
+
 type kvV2WriteRequest struct {
 	Data map[string]any `json:"data"`
 }

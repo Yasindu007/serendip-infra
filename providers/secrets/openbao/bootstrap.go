@@ -18,6 +18,7 @@ type bootstrapClient interface {
 	Init(ctx context.Context, shares, threshold int) (unsealKeys []string, rootToken string, err error)
 	Unseal(ctx context.Context, key string) (sealed bool, err error)
 	SetToken(token string)
+	EnsureKVv2Mount(ctx context.Context, mount string) error
 }
 
 var _ bootstrapClient = (*Client)(nil)
@@ -77,6 +78,16 @@ func Bootstrap(ctx context.Context, client bootstrapClient, credentialsPath stri
 		if _, err := client.Unseal(ctx, creds.UnsealKey); err != nil {
 			return fmt.Errorf("openbao: unseal: %w", err)
 		}
+	}
+
+	// Checked unconditionally, not just on the fresh-init path: a
+	// production OpenBao instance mounts nothing but its built-in
+	// system backends after Init (unlike "-dev" mode), and an instance
+	// that reached "initialized" on a previous Bootstrap call whose
+	// mount step then failed has no other path back to this check --
+	// "initialized" is permanent, OpenBao-side state.
+	if err := client.EnsureKVv2Mount(ctx, DefaultKVMount); err != nil {
+		return fmt.Errorf("openbao: ensure KV v2 mount %q: %w", DefaultKVMount, err)
 	}
 	return nil
 }

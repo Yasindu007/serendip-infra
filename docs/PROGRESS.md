@@ -19,6 +19,153 @@ with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
+**Spec 008 (OpenBao deployment foundation) — functionally COMPLETE.**
+T001-T006 implemented and committed (commit `80e99e1`); T007
+(real-cluster verification) and T008 (holistic `contract-guardian` +
+`go-reviewer` review) are both done — see below for T007's detail.
+T008: PASS on both reviews. T009 (this docs-sync: `docs/architecture/
+secrets.md`, this file) is in progress. User picked Secrets/OpenBao as
+the second real capability
+(confirmed 2026-10-10) over Identity/Thunder (still flagged immature,
+ADR 0006), Application Platform/OpenChoreo (biggest lift), Gateway/
+kgateway (nothing to route to yet).
+
+- `docs/decisions/0009-openbao-as-secrets-provider.md` — **Accepted**,
+  since corrected once (see below). Governance/maturity check (Linux
+  Foundation + OpenSSF, MPL-2.0, Vault fork, v2.7.1) via oss-researcher.
+  Key decisions: standalone mode (real PVC, not dev/ephemeral, not
+  HA/Raft — deferred per ADR 0002's precedent); no Helm, construct
+  StatefulSet/Service/PVC/ConfigMap directly via the existing
+  `providers/kubernetes.Client` (same precedent as spec 007 bypassing a
+  StorageClass); root token + 1-of-1 unseal key stored in a root-only
+  local file (0600, `/var/lib/serendip/secrets/openbao-init.json`) —
+  documented temporary simplification, same tier as spec 002's static
+  API keys; hand-roll a minimal OpenBao REST client, **rejecting** the
+  official `github.com/openbao/openbao/api/v2` SDK — independently
+  verified (throwaway module + `go list -deps`, same method as ADR
+  0008) to pull in ~20 real packages — same category of problem as the
+  already-rejected `client-go`.
+- `providers/secrets/openbao/{client,bootstrap,deploy}.go` + tests —
+  hand-rolled OpenBao REST client (health/init/unseal/KV v2),
+  `Bootstrap` (init/unseal orchestration + credential-file custody),
+  `Deployer` (idempotent Namespace/ConfigMap/PVC/Service/StatefulSet
+  creation). `providers/kubernetes.Client` gained `Object.Data` (a real
+  gap found implementing T005: ConfigMap's payload lives at a top-level
+  `data` key, which `Spec`/`Status` alone couldn't model) and
+  `HTTPClient()`/`ProxyURL()` (so this provider reaches OpenBao's
+  cluster-internal Service through the Kubernetes API server's
+  Service-proxy subresource — `serendipd` runs outside the cluster).
+  Wired into `cmd/serendipd`'s `wireKubernetes`, registered under the
+  `"secrets"` capability — no reconciler yet, that's spec 009.
+- **Real upstream bug found and fixed during T007**: the originally
+  planned `storage "file"` OpenBao config stanza crashes with `unknown
+  storage type file` — **OpenBao 2.7.0 removed the `file` storage
+  backend entirely** (confirmed via oss-researcher against OpenBao's
+  own issue #4077/PR #4088: their own packaged default config hit this
+  exact crash post-2.7.0, fixed by switching to `pebbledb`). Fixed the
+  same way upstream did — `providers/secrets/openbao/deploy.go`'s
+  `serverConfigHCL` now uses `pebbledb`. ADR 0009 and `plan.md` both
+  updated with this correction. Also added a `startupProbe` (tcpSocket,
+  generous threshold for PebbleDB's WAL replay), `preStop` (5s sleep),
+  and `terminationGracePeriodSeconds: 30` to the StatefulSet, mirroring
+  `openbao-helm`'s own established pattern for container-restart races
+  — applied as good practice. (The container-`args` change made at the
+  same time, passing `-config=/openbao/config` to match the entrypoint's
+  own default "exactly," turned out to be wrong — see T007 below, which
+  found this actually double-bound the listener and reverted it.)
+- **T007 real-cluster verification is now functionally COMPLETE** —
+  after a long detour through what looked like WSL2 host instability
+  across two sessions (a disposable clone's disk filling C: to zero
+  bytes free, repeated idle-triggered `cni0` bridge deaths, a literal
+  WSL service crash, and a full machine reboot), the environment
+  turned out to be a red herring: **switching verification to a
+  `kind`/Docker cluster reproduced the exact same `openbao-0`
+  crash-loop**, proving the real blockers were three genuine,
+  deterministic code bugs, not host flakiness. All three were found
+  and fixed this session, each with unit-test coverage, then confirmed
+  end-to-end against a real `kind` cluster:
+  1. **`Deployer.Ensure` didn't wait for the Pod to be reachable**
+     before returning — it created the StatefulSet and returned
+     immediately, so `wireOpenBao`'s subsequent `Bootstrap` call always
+     raced a Pod that was still pulling its image / replaying
+     PebbleDB's WAL, hit a genuine "no endpoints available" 503, and
+     crashed `serendipd` at startup on every cluster, every time. Fixed:
+     `Ensure` now polls the StatefulSet's `status.readyReplicas` (2s
+     interval, 90s timeout, both overridable per-`Deployer` for tests)
+     and only returns once the Pod is actually ready.
+  2. **The container `args` duplicated the image's own entrypoint
+     default**, causing a deterministic crash on literally the first
+     boot of any Pod, not just a restart race. The official entrypoint
+     already runs `bao server -config=/openbao/config "$@"`; passing
+     `args: ["server", "-config=/openbao/config"]` (an earlier "fix,"
+     reasoned purely from reading the entrypoint source via
+     oss-researcher, never verified against a real cluster until now)
+     made `-config=/openbao/config` appear twice in the final command
+     line. Since `-config` in directory mode scans/merges every config
+     file in that directory, processing it twice loaded and bound the
+     TCP listener twice within the same process, crashing immediately
+     with `listen tcp4 0.0.0.0:8200: bind: address already in use` —
+     reproduced byte-for-byte identically on a from-scratch Pod on two
+     unrelated clusters (K3s and kind), ruling out any restart-timing
+     or host-specific explanation. Fixed: `args` is now just
+     `["server"]`, relying entirely on the entrypoint's own default
+     with nothing ever duplicated.
+  3. **No KV v2 secrets engine was ever mounted.** A production OpenBao
+     instance (unlike `-dev` mode) mounts nothing but its built-in
+     system backends after `Init` — `ReadSecret`/`WriteSecret` 404'd
+     with "no handler for route" until something explicitly enables a
+     KV v2 mount, which neither spec.md, plan.md, nor ADR 0009 had
+     actually called out despite acceptance criterion 4 requiring a
+     working KV v2 round-trip. Fixed: new `Client.EnsureKVv2Mount(ctx,
+     mount)` (idempotent — GETs `/v1/sys/mounts` first, only POSTs to
+     enable if absent), called unconditionally from `Bootstrap` (not
+     just the fresh-init path) specifically so a prior partial failure
+     (`Init` succeeds, a later step fails) can self-heal on the next
+     call, since "initialized" is permanent OpenBao-side state with no
+     other path back to this check.
+  All three fixes are covered by new/updated unit tests
+  (`deploy_test.go`, `bootstrap_test.go`, `client_test.go`) and were
+  independently confirmed end-to-end on a real `kind` cluster: all four
+  K8s objects created, `openbao-0` reached `1/1 Running` with **zero**
+  restarts, `/v1/sys/health` via the Kubernetes Service-proxy
+  subresource reported `initialized=true,sealed=false` (confirming
+  plan.md's open-question-5 mechanism works end-to-end), a simulated
+  restart-while-sealed (sealed via the real API, then `serendipd`
+  killed and re-run) correctly unsealed from the existing credentials
+  file with **no** re-`Init` (file checksum unchanged, acceptance
+  criterion 3), and a KV v2 write/read round-trip through the real
+  client code returned byte-for-byte identical data (acceptance
+  criterion 4) — all automatically, no manual intervention, on a second
+  from-scratch run.
+  **One gap deliberately left unverified**: the credentials file's
+  mode-0600 requirement can't be meaningfully checked on this Windows
+  dev machine (NTFS has no POSIX permission bits) — `bootstrap_test.go`
+  already gates that specific assertion behind `runtime.GOOS ==
+  "linux"` for the same reason. Needs a real Linux run (the eventual
+  T470/WSL target, or any Linux CI) to close out for real, but isn't
+  blocking — the file-writing code path (`os.WriteFile(path, buf,
+  0o600)`) is untouched by anything found this session.
+  **Environment note for future sessions**: `kind` (Docker-based, via
+  Docker Desktop) is now the proven, lower-friction real-cluster
+  verification path for this spec — it avoided every WSL2-specific
+  symptom entirely. Prefer it over hand-rolled `wsl --export`/`--import`
+  clones for specs 009+ unless something specifically needs a real K3s
+  node (e.g. agent/bootstrap work). The `.wslconfig` changes from this
+  session (`memory=8GB`, `processors=4`, `vmIdleTimeout=-1`) are still
+  in place and harmless either way.
+- **T008 (holistic `contract-guardian` + `go-reviewer` review) is now
+  done: PASS.** T009 (this docs-sync — `docs/architecture/secrets.md`
+  written, this file updated) is in progress per tasks.md. The fixes
+  above are still uncommitted working-tree changes — commit once T009
+  wraps up.
+- A process note worth keeping: the Service-proxy mechanism itself
+  (the biggest flagged unknown in plan.md) is **already confirmed
+  working** — `serendipd` reached it and got real, meaningful API
+  responses (503/502 reflecting real upstream state) rather than a
+  connection error, well before the WSL instability derailed the rest
+  of the run. Dynamic PVC provisioning via `WaitForFirstConsumer` also
+  already confirmed working exactly as designed (open-question 6).
+
 **Spec 007 (Storage provider — local-path) — COMPLETE. All 10 tasks
 committed locally**, holistic contract-guardian review PASS (one
 non-blocking stale-doc-comment finding fixed same-session). This is the
@@ -351,28 +498,25 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Spec 007 is done — the first real, end-to-end capability (Storage/
-   local-path) works against a real cluster.** Per `docs/PRD.md`'s POC
-   scope (items 3-4), next is picking the **second** real
-   capability/provider: Identity/Thunder, Secrets/OpenBao, Application
-   Platform/OpenChoreo, or Gateway/kgateway — ask the user which one
-   before planning, same as Storage was confirmed explicitly
-   (2026-10-04) rather than assumed. **Budget real-cluster-testing time
-   into whichever is picked next, not just planning time** — spec 007's
-   entire provisioning mechanism changed after real-cluster testing
-   (T008) revealed the planned approach didn't actually work; treat
-   plan.md's Approach section as a hypothesis to verify, not a foregone
-   conclusion, especially for any capability with its own non-trivial
-   upstream product behavior (Thunder/OpenBao/OpenChoreo all qualify).
-   The `StorageProvider` pattern (`core/reconcile/storage.go` +
-   `providers/storage/localpath`) is the concrete precedent to follow
-   for whichever capability's interface comes next.
-2. **specs 002-007 are still unpushed by deliberate choice** (user
+1. **Spec 008 (OpenBao foundation) is COMPLETE** — all tasks T001-T009
+   done (T009, this docs-sync, finished this session: `docs/
+   architecture/secrets.md` written). All 6 acceptance criteria met,
+   `contract-guardian` + `go-reviewer` both PASS, real-cluster
+   verification confirmed on a `kind` cluster. Commit the outstanding
+   working-tree changes (bootstrap/client/deploy fixes + their tests,
+   ADR 0009's `pebbledb` correction, this docs-sync) next.
+2. Spec 009 (the real `Secret` resource kind/
+   `SecretsProvider`/reconciler built on 008's foundation) — not yet
+   designed. After that, remaining POC capabilities per `docs/PRD.md`:
+   Application Platform/OpenChoreo, Gateway/kgateway, eventually
+   Identity/Thunder (once its post-1.0 maturity window has passed,
+   ADR 0006).
+3. **specs 002-007 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not
    a technical one to keep re-litigating.
-3. GitHub tracking board (milestones/issues/sub-issues/project) was
+4. GitHub tracking board (milestones/issues/sub-issues/project) was
    fully built for spec 001 and merged via PR #24 — extending it to
    cover specs 002-007 once they're pushed is still open. CodeRabbit:
    CLI installed, only `coderabbit auth login` (browser) remains,
