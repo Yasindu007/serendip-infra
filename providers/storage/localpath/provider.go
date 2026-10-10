@@ -2,9 +2,13 @@ package localpath
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
+	"github.com/serendip-infra/serendip-infra/core/reconcile"
+	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 )
 
@@ -100,3 +104,100 @@ func (p *Provider) ensureStorageClass(ctx context.Context) error {
 	})
 	return err
 }
+
+// pvcName derives a deterministic PersistentVolumeClaim name from vol's
+// own Metadata.ID -- no separate K8s object name needs tracking in
+// VolumeStatus, Ensure/Delete can always recompute it. Kubernetes
+// object names must be DNS-1123 subdomains; Serendip's UUIDv7 IDs are
+// already lowercase hex and hyphens, so no sanitization beyond the
+// prefix is needed.
+func pvcName(vol resource.Volume) string {
+	return "vol-" + vol.Metadata.ID
+}
+
+func (p *Provider) pvcPath(vol resource.Volume) string {
+	return fmt.Sprintf("/api/v1/namespaces/%s/persistentvolumeclaims/%s", Namespace, pvcName(vol))
+}
+
+type pvcResources struct {
+	Requests map[string]string `json:"requests"`
+}
+
+type pvcSpecWire struct {
+	AccessModes      []string     `json:"accessModes"`
+	StorageClassName string       `json:"storageClassName"`
+	Resources        pvcResources `json:"resources"`
+}
+
+type pvcStatusWire struct {
+	Phase string `json:"phase,omitempty"`
+}
+
+// Ensure creates vol's backing PersistentVolumeClaim if it doesn't
+// exist yet, then reports its real status.phase -- "Pending", "Bound",
+// or "Lost" are the real, standard Kubernetes PVC phase values, used
+// directly as reason so an operator reading the Volume's Condition sees
+// the real upstream state, not a Serendip-invented label. A
+// freshly-created PVC's response may not yet report a phase at all;
+// that's treated as "Pending", not an error -- it hasn't had a chance
+// to bind yet.
+func (p *Provider) Ensure(ctx context.Context, vol resource.Volume) (bound bool, reason, message string, err error) {
+	path := p.pvcPath(vol)
+	obj, err := p.client.Get(ctx, path)
+	if errors.Is(err, kubernetes.ErrNotFound) {
+		obj, err = p.create(ctx, vol)
+		if err != nil {
+			return false, "", "", fmt.Errorf("localpath: create PVC %s: %w", pvcName(vol), err)
+		}
+	} else if err != nil {
+		return false, "", "", fmt.Errorf("localpath: get PVC %s: %w", pvcName(vol), err)
+	}
+
+	var status pvcStatusWire
+	if len(obj.Status) > 0 {
+		if err := json.Unmarshal(obj.Status, &status); err != nil {
+			return false, "", "", fmt.Errorf("localpath: decode PVC %s status: %w", pvcName(vol), err)
+		}
+	}
+	phase := status.Phase
+	if phase == "" {
+		phase = "Pending"
+	}
+	return phase == "Bound", phase, "", nil
+}
+
+func (p *Provider) create(ctx context.Context, vol resource.Volume) (kubernetes.Object, error) {
+	specBytes, err := json.Marshal(pvcSpecWire{
+		AccessModes:      []string{"ReadWriteOnce"},
+		StorageClassName: storageClassName,
+		Resources: pvcResources{Requests: map[string]string{
+			// A bare integer is a valid Kubernetes resource.Quantity,
+			// interpreted as bytes with no suffix -- no need to format
+			// as "Gi"/"Mi".
+			"storage": strconv.FormatInt(vol.Spec.SizeBytes, 10),
+		}},
+	})
+	if err != nil {
+		return kubernetes.Object{}, fmt.Errorf("marshal PVC spec: %w", err)
+	}
+	createPath := fmt.Sprintf("/api/v1/namespaces/%s/persistentvolumeclaims", Namespace)
+	return p.client.Create(ctx, createPath, kubernetes.Object{
+		APIVersion: "v1",
+		Kind:       "PersistentVolumeClaim",
+		Metadata:   kubernetes.ObjectMeta{Name: pvcName(vol), Namespace: Namespace},
+		Spec:       specBytes,
+	})
+}
+
+// Delete removes vol's backing PersistentVolumeClaim. Already being
+// gone is success, not an error -- matches StorageProvider.Delete's own
+// documented contract.
+func (p *Provider) Delete(ctx context.Context, vol resource.Volume) error {
+	err := p.client.Delete(ctx, p.pvcPath(vol))
+	if errors.Is(err, kubernetes.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+var _ reconcile.StorageProvider = (*Provider)(nil)
