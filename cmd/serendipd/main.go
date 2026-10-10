@@ -24,6 +24,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
+	"github.com/serendip-infra/serendip-infra/providers/secrets/openbao"
 	"github.com/serendip-infra/serendip-infra/providers/storage/localpath"
 )
 
@@ -36,6 +37,12 @@ const (
 	resyncEvery      = 30 * time.Second
 	reconcileTimeout = 10 * time.Second
 )
+
+// defaultOpenBaoCredentialsPath follows agent/identity's existing
+// /var/lib/serendip/ state-root convention (spec 004) -- a new,
+// Serendip-owned path, not reused from K3s's own /etc/rancher/k3s/
+// (ADR 0009's open-question 2).
+const defaultOpenBaoCredentialsPath = "/var/lib/serendip/secrets/openbao-init.json"
 
 func main() {
 	if err := run(); err != nil {
@@ -208,6 +215,35 @@ func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus 
 		})
 
 	log.Print("serendipd: kubernetes: storage provider (local-path) active")
+
+	if err := wireOpenBao(ctx, client, registry); err != nil {
+		return fmt.Errorf("openbao: %w", err)
+	}
+
+	return nil
+}
+
+// wireOpenBao deploys OpenBao into the cluster (idempotent, spec 008),
+// runs its init/unseal bootstrap, and registers the resulting client
+// under the "secrets" capability. No Reconciler is wired here -- there
+// is no Secret resource kind yet for one to drive (spec 009's job);
+// the registered capability is reachable for a smoke-test call only,
+// same spirit as spec 006's own nodeLister proof-of-concept before
+// spec 007 gave it a real consumer.
+func wireOpenBao(ctx context.Context, client *kubernetes.Client, registry *provider.Registry) error {
+	if err := openbao.NewDeployer(client).Ensure(ctx); err != nil {
+		return fmt.Errorf("deploy: %w", err)
+	}
+
+	baoClient := openbao.NewClient(client.ProxyURL(openbao.Namespace, openbao.ServiceName, openbao.ListenPort), client.HTTPClient())
+
+	credentialsPath := envOr("SERENDIP_OPENBAO_CREDENTIALS_PATH", defaultOpenBaoCredentialsPath)
+	if err := openbao.Bootstrap(ctx, baoClient, credentialsPath); err != nil {
+		return fmt.Errorf("bootstrap: %w", err)
+	}
+
+	registry.Register("secrets", baoClient)
+	log.Print("serendipd: kubernetes: secrets provider (openbao) active")
 	return nil
 }
 

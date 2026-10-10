@@ -113,6 +113,35 @@ func TestClient_Create(t *testing.T) {
 	}
 }
 
+func TestClient_Create_ConfigMapDataFieldRoundTrips(t *testing.T) {
+	var gotBody Object
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(gotBody)
+	})
+
+	req := Object{
+		APIVersion: "v1",
+		Kind:       "ConfigMap",
+		Metadata:   ObjectMeta{Name: "cm-1", Namespace: "default"},
+		Data:       json.RawMessage(`{"server.hcl":"listener \"tcp\" {}"}`),
+	}
+	got, err := client.Create(context.Background(), "/api/v1/namespaces/default/configmaps", req)
+	if err != nil {
+		t.Fatalf("Create() = %v", err)
+	}
+	if string(gotBody.Data) != string(req.Data) {
+		t.Errorf("request body Data = %s, want %s", gotBody.Data, req.Data)
+	}
+	if string(got.Data) != string(req.Data) {
+		t.Errorf("response Data = %s, want %s", got.Data, req.Data)
+	}
+}
+
 func TestClient_Delete(t *testing.T) {
 	var gotMethod, gotPath string
 	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {

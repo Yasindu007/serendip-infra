@@ -39,6 +39,10 @@ type Object struct {
 	Metadata   ObjectMeta      `json:"metadata"`
 	Spec       json.RawMessage `json:"spec,omitempty"`
 	Status     json.RawMessage `json:"status,omitempty"`
+	// Data is a top-level field some kinds (ConfigMap, Secret) carry
+	// instead of a nested Spec -- left as raw JSON for the same reason
+	// Spec/Status are: this package has no per-kind schema knowledge.
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // listResult mirrors a Kubernetes List response's envelope -- the
