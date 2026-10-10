@@ -12,7 +12,7 @@ import (
 	"net/http"
 )
 
-// ErrNotFound is returned by Get/GetRaw/Delete when the Kubernetes API
+// ErrNotFound is returned by Get/Delete when the Kubernetes API
 // responds 404 -- callers (capability-specific providers) use this to
 // distinguish "doesn't exist yet, create it" from a real failure,
 // mirroring core/store.ErrNotFound's existing sentinel-error pattern.
@@ -137,50 +137,6 @@ func (c *Client) Get(ctx context.Context, path string) (Object, error) {
 		return Object{}, fmt.Errorf("kubernetes: decode GET %s response: %w", path, err)
 	}
 	return obj, nil
-}
-
-// GetRaw fetches the raw JSON body at path, for object kinds that don't
-// fit Object's spec/status envelope convention -- e.g. StorageClass,
-// whose configuration fields (provisioner, volumeBindingMode,
-// reclaimPolicy) are top-level, not nested under "spec" like every
-// other kind this project has touched so far. Returns ErrNotFound on a
-// 404.
-func (c *Client) GetRaw(ctx context.Context, path string) (json.RawMessage, error) {
-	resp, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, ErrNotFound
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, unexpectedStatus(resp)
-	}
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("kubernetes: read GET %s response: %w", path, err)
-	}
-	return raw, nil
-}
-
-// CreateRaw POSTs body (any JSON-marshalable value) to path and returns
-// the raw JSON response -- the RawMessage counterpart to Create, for
-// object kinds that don't fit Object's envelope (see GetRaw).
-func (c *Client) CreateRaw(ctx context.Context, path string, body any) (json.RawMessage, error) {
-	resp, err := c.do(ctx, http.MethodPost, path, body)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return nil, unexpectedStatus(resp)
-	}
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("kubernetes: read POST %s response: %w", path, err)
-	}
-	return raw, nil
 }
 
 // Create POSTs obj to the given collection path (e.g.
