@@ -24,6 +24,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
+	"github.com/serendip-infra/serendip-infra/providers/storage/localpath"
 )
 
 // resyncEvery/reconcileTimeout are specs/003-reconciliation-engine/plan.md's
@@ -70,7 +71,7 @@ func run() error {
 
 	engine := newReconcileEngine(db, bus)
 
-	if err := wireKubernetes(ctx, os.Getenv("SERENDIP_KUBECONFIG")); err != nil {
+	if err := wireKubernetes(ctx, os.Getenv("SERENDIP_KUBECONFIG"), db, bus, engine); err != nil {
 		return fmt.Errorf("kubernetes: %w", err)
 	}
 
@@ -149,39 +150,18 @@ func newReconcileEngine(db *sql.DB, bus event.Bus) *reconcile.Engine {
 	return engine
 }
 
-// nodeLister is a deliberately trivial, throwaway capability interface
-// proving specs/006-kubernetes-provider-foundation's registry pattern
-// end-to-end: a real Kubernetes-facing implementation, registered under
-// a capability name, looked up and invoked through core/provider's
-// generic any-typed registry. Spec 007 replaces this entirely with the
-// real StorageProvider interface and local-path implementation -- this
-// type is not meant to survive past this spec.
-type nodeLister interface {
-	ListNodeNames(ctx context.Context) ([]string, error)
-}
-
-type kubeNodeLister struct{ client *kubernetes.Client }
-
-func (k *kubeNodeLister) ListNodeNames(ctx context.Context) ([]string, error) {
-	nodes, err := k.client.List(ctx, "/api/v1/nodes")
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, len(nodes))
-	for i, n := range nodes {
-		names[i] = n.Metadata.Name
-	}
-	return names, nil
-}
-
 // wireKubernetes conditionally sets up Kubernetes access: if
 // kubeconfigPath is empty, no Kubernetes-facing providers are active --
-// a supported, non-fatal startup state (acceptance criterion 4), since
-// not every Serendip install necessarily has a cluster yet at first
-// boot. If set, it also runs this spec's proof-of-concept smoke
-// operation (list real Nodes once, log the count) to confirm the whole
-// kubeconfig-to-API chain is real, not just wired in theory.
-func wireKubernetes(ctx context.Context, kubeconfigPath string) error {
+// a supported, non-fatal startup state, since not every Serendip
+// install necessarily has a cluster yet at first boot. If set,
+// constructs the real local-path Storage provider (spec 007, replacing
+// spec 006's throwaway Node-listing proof-of-concept entirely -- not
+// left alongside it), registers it in the core/provider.Registry, and
+// wires a VolumeReconciler into engine. The Lookup + type-assert
+// happens once here, in the composition root -- core/reconcile never
+// imports core/provider at all (plan.md's resolved design, mirroring
+// ClusterReconciler's constructor-injected HealthChecker exactly).
+func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus event.Bus, engine *reconcile.Engine) error {
 	if kubeconfigPath == "" {
 		log.Print("serendipd: SERENDIP_KUBECONFIG not set, no Kubernetes-facing providers active")
 		return nil
@@ -196,22 +176,38 @@ func wireKubernetes(ctx context.Context, kubeconfigPath string) error {
 		return fmt.Errorf("build client: %w", err)
 	}
 
-	registry := provider.NewRegistry()
-	registry.Register("kubernetes-smoke-test", &kubeNodeLister{client: client})
+	storageProvider, err := localpath.NewProvider(ctx, client)
+	if err != nil {
+		return fmt.Errorf("storage provider: %w", err)
+	}
 
-	impl, ok := registry.Lookup("kubernetes-smoke-test")
+	registry := provider.NewRegistry()
+	registry.Register("storage", storageProvider)
+
+	impl, ok := registry.Lookup("storage")
 	if !ok {
 		return fmt.Errorf("internal: just-registered capability not found in registry")
 	}
-	lister, ok := impl.(nodeLister)
+	sp, ok := impl.(reconcile.StorageProvider)
 	if !ok {
-		return fmt.Errorf("internal: registered implementation does not satisfy nodeLister")
+		return fmt.Errorf("internal: registered implementation does not satisfy reconcile.StorageProvider")
 	}
-	names, err := lister.ListNodeNames(ctx)
-	if err != nil {
-		return fmt.Errorf("list nodes: %w", err)
-	}
-	log.Printf("serendipd: kubernetes: found %d node(s): %v", len(names), names)
+
+	volumes := sqlite.NewStore[resource.VolumeSpec, resource.VolumeStatus](db, resource.KindVolume).SetBus(bus)
+	engine.Register(resource.KindVolume, reconcile.NewVolumeReconciler(volumes, sp),
+		func(ctx context.Context) ([]graph.ResourceRef, error) {
+			list, err := volumes.List(ctx, store.ListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			refs := make([]graph.ResourceRef, len(list))
+			for i, v := range list {
+				refs[i] = graph.ResourceRef{Kind: resource.KindVolume, ID: v.Metadata.ID}
+			}
+			return refs, nil
+		})
+
+	log.Print("serendipd: kubernetes: storage provider (local-path) active")
 	return nil
 }
 
