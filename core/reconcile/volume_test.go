@@ -166,16 +166,38 @@ func TestVolumeReconciler_NoDrift_IsIdempotent_NoAdditionalUpdate(t *testing.T) 
 	}
 }
 
-func TestVolumeReconciler_DeletedVolumeSinceEvent_IsNotAnError(t *testing.T) {
+// TestVolumeReconciler_DeletedVolumeSinceEvent_CallsProviderDelete is a
+// real architectural gap this spec's T008 real-cluster testing
+// surfaced: unlike ClusterReconciler (a passive observer with nothing
+// to clean up), this Reconciler's provider actually provisions real
+// external storage -- "the Serendip-side record is gone" must still
+// trigger StorageProvider.Delete on the backing PV/PVC, not silently
+// no-op. Confirmed via a real disposable K3s cluster: deleting a
+// Volume through the API left the real PVC/PV behind until this fix.
+func TestVolumeReconciler_DeletedVolumeSinceEvent_CallsProviderDelete(t *testing.T) {
 	volumes := newVolumeTestStore(t)
 	provider := &fakeStorageProvider{}
 	r := reconcile.NewVolumeReconciler(volumes, provider)
 
 	err := r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindVolume, ID: "does-not-exist"})
 	if err != nil {
-		t.Errorf("Reconcile(nonexistent volume) = %v, want nil (deleted since the event fired is not an error)", err)
+		t.Errorf("Reconcile(nonexistent volume) = %v, want nil", err)
 	}
 	if provider.ensureCalls != 0 {
 		t.Errorf("provider.Ensure call count = %d, want 0 (should never be called for a missing Volume)", provider.ensureCalls)
+	}
+	if provider.deleteCalls != 1 {
+		t.Errorf("provider.Delete call count = %d, want 1 (cleanup must still happen for a resource gone from the store)", provider.deleteCalls)
+	}
+}
+
+func TestVolumeReconciler_DeletedVolumeSinceEvent_PropagatesProviderDeleteError(t *testing.T) {
+	volumes := newVolumeTestStore(t)
+	provider := &fakeStorageProvider{deleteErr: errors.New("connection refused")}
+	r := reconcile.NewVolumeReconciler(volumes, provider)
+
+	err := r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindVolume, ID: "does-not-exist"})
+	if err == nil {
+		t.Error("Reconcile(nonexistent volume) = nil, want the provider's Delete error propagated so the next resync/retry can try again")
 	}
 }

@@ -38,7 +38,15 @@ var _ Reconciler = (*VolumeReconciler)(nil)
 func (r *VolumeReconciler) Reconcile(ctx context.Context, ref graph.ResourceRef) error {
 	vol, err := r.volumes.Get(ctx, ref.ID)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil // deleted since the event/resync fired; nothing to do
+		// Deleted since the event/resync fired -- unlike ClusterReconciler
+		// (a passive observer with nothing to clean up), this Reconciler's
+		// provider actually provisioned real external storage, so "the
+		// Serendip-side record is gone" must still trigger Delete on the
+		// backing PV/PVC. pvcName/pvName only ever read Metadata.ID, so a
+		// minimal Volume carrying just the ref's ID is sufficient --
+		// nothing else about the deleted Volume's Spec/Status is needed
+		// or available anymore.
+		return r.provider.Delete(ctx, resource.Volume{Metadata: resource.Metadata{ID: ref.ID}})
 	}
 	if err != nil {
 		return err
