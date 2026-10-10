@@ -6,10 +6,17 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 )
+
+// ErrNotFound is returned by Get/GetRaw/Delete when the Kubernetes API
+// responds 404 -- callers (capability-specific providers) use this to
+// distinguish "doesn't exist yet, create it" from a real failure,
+// mirroring core/store.ErrNotFound's existing sentinel-error pattern.
+var ErrNotFound = errors.New("kubernetes: object not found")
 
 // ObjectMeta is the subset of Kubernetes' metadata every object shares,
 // enough to address, create, and identify one.
@@ -112,12 +119,16 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*http.R
 }
 
 // Get fetches the object at path (e.g. "/api/v1/nodes/my-node").
+// Returns ErrNotFound on a 404.
 func (c *Client) Get(ctx context.Context, path string) (Object, error) {
 	resp, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return Object{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return Object{}, ErrNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		return Object{}, unexpectedStatus(resp)
 	}
@@ -126,6 +137,50 @@ func (c *Client) Get(ctx context.Context, path string) (Object, error) {
 		return Object{}, fmt.Errorf("kubernetes: decode GET %s response: %w", path, err)
 	}
 	return obj, nil
+}
+
+// GetRaw fetches the raw JSON body at path, for object kinds that don't
+// fit Object's spec/status envelope convention -- e.g. StorageClass,
+// whose configuration fields (provisioner, volumeBindingMode,
+// reclaimPolicy) are top-level, not nested under "spec" like every
+// other kind this project has touched so far. Returns ErrNotFound on a
+// 404.
+func (c *Client) GetRaw(ctx context.Context, path string) (json.RawMessage, error) {
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, unexpectedStatus(resp)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("kubernetes: read GET %s response: %w", path, err)
+	}
+	return raw, nil
+}
+
+// CreateRaw POSTs body (any JSON-marshalable value) to path and returns
+// the raw JSON response -- the RawMessage counterpart to Create, for
+// object kinds that don't fit Object's envelope (see GetRaw).
+func (c *Client) CreateRaw(ctx context.Context, path string, body any) (json.RawMessage, error) {
+	resp, err := c.do(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, unexpectedStatus(resp)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("kubernetes: read POST %s response: %w", path, err)
+	}
+	return raw, nil
 }
 
 // Create POSTs obj to the given collection path (e.g.
@@ -146,13 +201,19 @@ func (c *Client) Create(ctx context.Context, path string, obj Object) (Object, e
 	return created, nil
 }
 
-// Delete removes the object at path.
+// Delete removes the object at path. Returns ErrNotFound on a 404 --
+// callers that want "already gone is fine" semantics check for it
+// explicitly (the generic client reports what actually happened; a
+// specific provider's business logic decides whether that's an error).
 func (c *Client) Delete(ctx context.Context, path string) error {
 	resp, err := c.do(ctx, http.MethodDelete, path, nil)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusNoContent {
 		return unexpectedStatus(resp)
 	}

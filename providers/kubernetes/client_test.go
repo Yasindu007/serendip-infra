@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -58,6 +59,103 @@ func TestClient_Get_UnexpectedStatus(t *testing.T) {
 	_, err := client.Get(context.Background(), "/api/v1/nodes/node-1")
 	if err == nil {
 		t.Fatal("Get() = nil error, want an error for a 404 response")
+	}
+}
+
+func TestClient_Get_404ReturnsErrNotFound(t *testing.T) {
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	_, err := client.Get(context.Background(), "/api/v1/nodes/node-1")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Get() error = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestClient_Delete_404ReturnsErrNotFound(t *testing.T) {
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	err := client.Delete(context.Background(), "/api/v1/nodes/node-1")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Delete() error = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestClient_GetRaw(t *testing.T) {
+	var gotPath string
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"name":"serendip-local-path"},"provisioner":"rancher.io/local-path","volumeBindingMode":"Immediate"}`))
+	})
+
+	raw, err := client.GetRaw(context.Background(), "/apis/storage.k8s.io/v1/storageclasses/serendip-local-path")
+	if err != nil {
+		t.Fatalf("GetRaw() = %v", err)
+	}
+	if gotPath != "/apis/storage.k8s.io/v1/storageclasses/serendip-local-path" {
+		t.Errorf("request path = %q, want %q", gotPath, "/apis/storage.k8s.io/v1/storageclasses/serendip-local-path")
+	}
+	var decoded struct {
+		Provisioner       string `json:"provisioner"`
+		VolumeBindingMode string `json:"volumeBindingMode"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal(raw) = %v", err)
+	}
+	if decoded.Provisioner != "rancher.io/local-path" {
+		t.Errorf("provisioner = %q, want %q (a top-level field, not nested under spec)", decoded.Provisioner, "rancher.io/local-path")
+	}
+	if decoded.VolumeBindingMode != "Immediate" {
+		t.Errorf("volumeBindingMode = %q, want %q", decoded.VolumeBindingMode, "Immediate")
+	}
+}
+
+func TestClient_GetRaw_404ReturnsErrNotFound(t *testing.T) {
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	_, err := client.GetRaw(context.Background(), "/apis/storage.k8s.io/v1/storageclasses/serendip-local-path")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetRaw() error = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestClient_CreateRaw(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"name":"serendip-local-path"}}`))
+	})
+
+	// A top-level-fields-not-under-spec struct, exactly what a
+	// StorageClass create body looks like on the wire.
+	body := map[string]any{
+		"apiVersion":        "storage.k8s.io/v1",
+		"kind":              "StorageClass",
+		"metadata":          map[string]string{"name": "serendip-local-path"},
+		"provisioner":       "rancher.io/local-path",
+		"volumeBindingMode": "Immediate",
+	}
+	raw, err := client.CreateRaw(context.Background(), "/apis/storage.k8s.io/v1/storageclasses", body)
+	if err != nil {
+		t.Fatalf("CreateRaw() = %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/apis/storage.k8s.io/v1/storageclasses" {
+		t.Errorf("request = %s %s, want POST /apis/storage.k8s.io/v1/storageclasses", gotMethod, gotPath)
+	}
+	if gotBody["provisioner"] != "rancher.io/local-path" {
+		t.Errorf("request body provisioner = %v, want %q", gotBody["provisioner"], "rancher.io/local-path")
+	}
+	if len(raw) == 0 {
+		t.Error("CreateRaw() returned empty response body")
 	}
 }
 
