@@ -287,14 +287,16 @@ client's `Object` envelope does not model.
   need delete-and-recreate. Reported as `Unsupported`.
 - **Non-external visibility** (`internal`/`namespace`), TLS, custom domains:
   see `gateway.md`. Only `external` HTTP exposure exists.
+- ~~Retrying a failed DELETE after the Serendip record is gone~~: fixed after
+  spec 012. The reconcile engine now remembers refs whose `Reconcile`
+  failed and retries them on every resync until they succeed, so a teardown
+  that fails while the cluster is unreachable completes once it's back.
+  Verified on a real cluster with the node stopped during the delete.
 - **Mapping Serendip Organization/Project onto OpenChoreo namespaces**
   (multi-tenancy; one fixed org namespace today).
 - **Secret injection** into Components (spec 009 `Secret`s are not wired in).
 - **Multi-environment promotion** (one `development` Environment, a
   single-environment pipeline).
-- **Retrying a failed DELETE** after the Serendip record is gone: the engine
-  has no retry for a deleted ID, so a failed DELETE call (not a slow
-  finalizer) orphans the CR. Same engine-level gap as `Volume`.
 - **Live reconciliation of platform defaults**: repaired on `serendipd`
   restart only.
 - **Status lag of up to ~30s**: OpenChoreo-side progress is not a Serendip

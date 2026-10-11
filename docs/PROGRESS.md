@@ -383,10 +383,9 @@ Application Platform capability, T001-T010 all done (`7d255dd`). Detail:
   benchmark).
 - **Explicitly deferred**: port-less (worker) Components, ingress
   visibility (done in spec 012), Serendip Organization/Project to OpenChoreo namespace mapping,
-  Secret injection, multi-environment promotion, retrying a failed DELETE
-  after the Serendip record is gone (engine-level, same as Volume), live
-  reconciliation of platform defaults (restart repairs), ~30s status lag
-  (no requeue).
+  Secret injection, multi-environment promotion, live reconciliation of
+  platform defaults (restart repairs), ~30s status lag (no requeue). The
+  failed-DELETE retry gap was fixed after spec 012 (see "Post-012 fixes").
 
 ## Spec 010 — what actually got built
 
@@ -796,26 +795,41 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Commit spec 012** (working tree only today; run `contract-guardian`
-   first per the standing rule).
-2. **Open issue, pre-existing since spec 010, not fixed in 012**:
-   `providers/internal/helm` runs `helm` without `--kubeconfig`, so Helm uses
-   the default kubeconfig context, not `SERENDIP_KUBECONFIG`. It only worked in
-   verification because both pointed at the same cluster. Affects both
-   Helm-based providers (OpenChoreo, kgateway). Needs its own small fix.
-3. **T470 benchmark now strongly recommended next**: footprint keeps growing
-   (kind node about 1.67 GiB) and Traefik still idles unused. ADR 0005's gate
-   is still unmet.
-4. Other capability candidates (none picked; decide at the start of the next
+### Post-012 fixes (committed after spec 012, `7959511`)
+
+- **Helm targeted the wrong cluster.** `providers/internal/helm` ran `helm`
+  without `--kubeconfig`, so Helm used the default kubeconfig context, not
+  `SERENDIP_KUBECONFIG` (pre-existing since spec 010). Fixed with
+  `helm.WithKubeconfig`; both Deployers now take the kubeconfig path.
+  Verified on kind with `KUBECONFIG` pointing at a nonexistent file: all five
+  Helm installs still succeeded against `SERENDIP_KUBECONFIG`'s cluster.
+- **A failed teardown orphaned external state forever.** A deleted record's
+  ref never reappears in a resync list, so a delete that failed once (e.g.
+  the cluster unreachable) was never retried. This had been a known gap
+  since spec 007. The engine now keeps refs whose `Reconcile` failed and
+  re-enqueues them on every resync until they succeed. Verified on kind: a
+  Component deleted while the node was stopped was torn down automatically
+  on the first resync after the node came back.
+
+1. **T470 benchmark is the recommended next step**: the footprint keeps
+   growing (kind node about 1.67 GiB) and Traefik still idles unused. ADR
+   0005's gate is still unmet. It needs the real reference hardware, so it
+   can only be prepared (a harness under `profiles/edge-1/bench/`, per
+   constitution rule 9), not run, from this dev machine.
+2. **HTTPS**: the natural path is cert-manager (already installed) issuing
+   certificates for an HTTPS listener on the existing gateway, not a second
+   proxy such as Caddy. It needs a decision on where trusted names come from
+   on an edge-1 laptop with no public DNS. Its own spec.
+3. Other capability candidates (none picked; decide at the start of the next
    session): `Secret` injection into Components (spec 009 meets spec 011);
    disabling Traefik to serve on 80/443 (needs a migration story); TLS;
    Identity/Thunder, still gated by ADR 0006's maturity window.
-5. **specs 002-012 are still unpushed by deliberate choice** (user
+4. **specs 002-012 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not
    a technical one to keep re-litigating.
-6. GitHub tracking board (milestones/issues/sub-issues/project) was
+5. GitHub tracking board (milestones/issues/sub-issues/project) was
    fully built for spec 001 and merged via PR #24 — extending it to
    cover specs 002-012 once they're pushed is still open. CodeRabbit:
    CLI installed, only `coderabbit auth login` (browser) remains,

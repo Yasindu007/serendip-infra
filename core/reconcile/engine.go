@@ -39,6 +39,13 @@ type Engine struct {
 	regs             map[resource.Kind]registration
 	workCh           chan graph.ResourceRef
 	ready            chan struct{}
+
+	// failed holds refs whose last Reconcile returned an error. Resync
+	// retries them alongside the listed refs, because a ref whose record
+	// was deleted never appears in a list again -- without this, a
+	// teardown that fails once (provider unreachable during a delete) would
+	// orphan the external state forever. Only touched from Run's goroutine.
+	failed map[graph.ResourceRef]struct{}
 }
 
 // NewEngine returns an Engine that bounds each Reconcile call to
@@ -52,6 +59,7 @@ func NewEngine(bus event.Bus, resyncEvery, reconcileTimeout time.Duration) *Engi
 		regs:             make(map[resource.Kind]registration),
 		workCh:           make(chan graph.ResourceRef, 256),
 		ready:            make(chan struct{}),
+		failed:           make(map[graph.ResourceRef]struct{}),
 	}
 }
 
@@ -113,6 +121,12 @@ func (e *Engine) Run(ctx context.Context) error {
 // same way an event does -- one code path for both triggers, so a full
 // queue during a resync burst degrades identically to an event burst.
 func (e *Engine) resyncAll(ctx context.Context) {
+	for ref := range e.failed {
+		select {
+		case e.workCh <- ref:
+		default:
+		}
+	}
 	for kind, reg := range e.regs {
 		refs, err := reg.list(ctx)
 		if err != nil {
@@ -139,6 +153,9 @@ func (e *Engine) reconcileOne(ctx context.Context, ref graph.ResourceRef) {
 	reconcileCtx = audit.WithActor(reconcileCtx, ActorName)
 
 	if err := reg.reconciler.Reconcile(reconcileCtx, ref); err != nil {
-		log.Printf("reconcile: %s/%s: %v", ref.Kind, ref.ID, err)
+		e.failed[ref] = struct{}{}
+		log.Printf("reconcile: %s/%s: %v (will retry on next resync)", ref.Kind, ref.ID, err)
+		return
 	}
+	delete(e.failed, ref)
 }
