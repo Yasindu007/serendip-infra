@@ -20,15 +20,10 @@ a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
 **Spec 011 (Application Platform capability) — COMPLETE, T001-T010 all
-done, both final reviews (`contract-guardian`, `go-reviewer`) PASS, NOT
-yet committed.** The real `Application`/`Component` capability on top of
-spec 010's foundation. Working tree holds all of it: `core/resource/
-app.go`, `core/reconcile/application.go`, `providers/application/
-openchoreo/{names,defaults,provider,gatewayapi}.go` (+ tests, `deploy.go`
-edit, new `VERSIONS.md`), `providers/kubernetes/client.go` (`Patch`),
-`cmd/serendipd/main.go`, `specs/011-application-platform-capability/`, and
-the docs sync. Full detail below, under "Spec 011 — what actually got
-built."
+done, both final reviews (`contract-guardian`, `go-reviewer`) PASS,
+committed (`7d255dd`).** The real `Application`/`Component` capability on
+top of spec 010's foundation. Full detail below, under "Spec 011 — what
+actually got built."
 
 **Spec 010 (OpenChoreo deployment foundation) — COMPLETE and committed**
 (`436380c`, T001-T008). A real OpenChoreo control plane + data plane
@@ -285,8 +280,8 @@ standing instruction not to use it for this project stands.
 `core/resource/app.go` + `core/reconcile/application.go` +
 `providers/application/openchoreo/{names,defaults,provider,gatewayapi}.go`
 + `providers/kubernetes` `Patch` + `cmd/serendipd` wiring — the real
-Application Platform capability, T001-T010 all done (uncommitted — see
-above). Detail: `docs/architecture/application-platform.md`.
+Application Platform capability, T001-T010 all done (`7d255dd`). Detail:
+`docs/architecture/application-platform.md`.
 
 - **Resource kinds**: `ComponentSpec{Image, Ports[{Name,Port}], Env}`;
   `ApplicationSpec` still empty (pure grouping). No `api/` change (generic
@@ -747,21 +742,18 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Commit spec 011** (run `contract-guardian` first per the standing
-   rule if anything changed since the T009 review). Working tree files are
-   listed under "Current phase."
-2. Next capability candidates (none picked; decide at the start of the next
+1. Next capability candidates (none picked; decide at the start of the next
    session): Gateway/kgateway (now has Components to route to, and the
    Gateway API CRDs are already installed as a prerequisite); `Secret`
    injection into Components (spec 009 `Secret`s meet spec 011
    `Component`s); Identity/Thunder, still gated by ADR 0006's maturity
    window.
-3. **specs 002-011 are still unpushed by deliberate choice** (user
+2. **specs 002-011 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not
    a technical one to keep re-litigating.
-4. GitHub tracking board (milestones/issues/sub-issues/project) was
+3. GitHub tracking board (milestones/issues/sub-issues/project) was
    fully built for spec 001 and merged via PR #24 — extending it to
    cover specs 002-011 once they're pushed is still open. CodeRabbit:
    CLI installed, only `coderabbit auth login` (browser) remains,
