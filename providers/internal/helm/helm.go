@@ -26,6 +26,19 @@ func Run(ctx context.Context, args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// WithKubeconfig returns a Runner that targets the cluster in the given
+// kubeconfig file. Without it helm uses $KUBECONFIG or ~/.kube/config,
+// which can be a different cluster from the one serendipd itself talks to.
+// An empty path returns run unchanged.
+func WithKubeconfig(run Runner, kubeconfigPath string) Runner {
+	if kubeconfigPath == "" {
+		return run
+	}
+	return func(ctx context.Context, args ...string) ([]byte, error) {
+		return run(ctx, append([]string{"--kubeconfig", kubeconfigPath}, args...)...)
+	}
+}
+
 // CheckAvailable confirms `helm` resolves on $PATH -- checked once at
 // Deployer construction so a missing binary is reported clearly as a host
 // prerequisite, not discovered deep inside the first real install call.

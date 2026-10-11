@@ -234,12 +234,12 @@ func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus 
 		return nil, fmt.Errorf("openbao: %w", err)
 	}
 
-	gateway, err := wireGateway(ctx, client, registry)
+	gateway, err := wireGateway(ctx, client, kubeconfigPath, registry)
 	if err != nil {
 		return nil, fmt.Errorf("gateway: %w", err)
 	}
 
-	if err := wireOpenChoreo(ctx, client, registry, db, bus, engine, gateway); err != nil {
+	if err := wireOpenChoreo(ctx, client, kubeconfigPath, registry, db, bus, engine, gateway); err != nil {
 		return nil, fmt.Errorf("openchoreo: %w", err)
 	}
 
@@ -252,14 +252,14 @@ func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus 
 // so neither provider imports the other. A gateway that never becomes
 // ready fails startup, the same contract as the application platform's
 // own readiness check.
-func wireGateway(ctx context.Context, client *kubernetes.Client, registry *provider.Registry) (reconcile.GatewayEndpoint, error) {
+func wireGateway(ctx context.Context, client *kubernetes.Client, kubeconfigPath string, registry *provider.Registry) (reconcile.GatewayEndpoint, error) {
 	host := envOr("SERENDIP_GATEWAY_HOST", "localhost")
 	nodePort, err := parseNodePort(os.Getenv("SERENDIP_GATEWAY_NODE_PORT"))
 	if err != nil {
 		return reconcile.GatewayEndpoint{}, err
 	}
 
-	deployer, err := kgateway.NewDeployer(client)
+	deployer, err := kgateway.NewDeployer(client, kubeconfigPath)
 	if err != nil {
 		return reconcile.GatewayEndpoint{}, fmt.Errorf("deployer: %w", err)
 	}
@@ -361,8 +361,8 @@ func wireOpenBao(ctx context.Context, client *kubernetes.Client, registry *provi
 // *openchoreo.Provider under "application-platform", and wires
 // ApplicationReconciler/ComponentReconciler into engine (mirrors
 // wireOpenBao's wiring block).
-func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine, gateway reconcile.GatewayEndpoint) error {
-	deployer, err := openchoreo.NewDeployer(client)
+func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, kubeconfigPath string, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine, gateway reconcile.GatewayEndpoint) error {
+	deployer, err := openchoreo.NewDeployer(client, kubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("deployer: %w", err)
 	}

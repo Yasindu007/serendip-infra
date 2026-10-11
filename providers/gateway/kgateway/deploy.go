@@ -31,11 +31,11 @@ type Deployer struct {
 }
 
 // NewDeployer fails fast if `helm` isn't on $PATH.
-func NewDeployer(client *kubernetes.Client) (*Deployer, error) {
+func NewDeployer(client *kubernetes.Client, kubeconfigPath string) (*Deployer, error) {
 	if err := helm.CheckAvailable(); err != nil {
 		return nil, fmt.Errorf("kgateway: %w", err)
 	}
-	return &Deployer{run: helm.Run, client: client, ensureCRDs: gatewayapi.EnsureCRDs}, nil
+	return &Deployer{run: helm.WithKubeconfig(helm.Run, kubeconfigPath), client: client, ensureCRDs: gatewayapi.EnsureCRDs}, nil
 }
 
 // Ensure is idempotent: helm upgrade --install is a no-op for an

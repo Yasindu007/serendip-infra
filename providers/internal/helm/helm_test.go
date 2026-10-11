@@ -26,6 +26,28 @@ func TestRun_PropagatesExitError(t *testing.T) {
 	}
 }
 
+func TestWithKubeconfig_PrependsFlag(t *testing.T) {
+	var got []string
+	base := func(ctx context.Context, args ...string) ([]byte, error) {
+		got = args
+		return nil, nil
+	}
+	if _, err := WithKubeconfig(base, "/etc/serendip/kubeconfig")(context.Background(), "upgrade", "--install", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, " ") != "--kubeconfig /etc/serendip/kubeconfig upgrade --install x" {
+		t.Errorf("args = %v", got)
+	}
+
+	got = nil
+	if _, err := WithKubeconfig(base, "")(context.Background(), "version"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, " ") != "version" {
+		t.Errorf("empty path args = %v, want unchanged", got)
+	}
+}
+
 func TestCheckAvailable_MissingBinary(t *testing.T) {
 	t.Setenv("PATH", "")
 	if err := CheckAvailable(); err == nil {

@@ -49,11 +49,11 @@ type Deployer struct {
 // $PATH -- a required host prerequisite (this package's own doc
 // comment), reported clearly at construction rather than discovered
 // deep inside Ensure's first install call.
-func NewDeployer(client *kubernetes.Client) (*Deployer, error) {
+func NewDeployer(client *kubernetes.Client, kubeconfigPath string) (*Deployer, error) {
 	if err := helm.CheckAvailable(); err != nil {
 		return nil, fmt.Errorf("openchoreo: %w", err)
 	}
-	return &Deployer{run: helm.Run, client: client}, nil
+	return &Deployer{run: helm.WithKubeconfig(helm.Run, kubeconfigPath), client: client}, nil
 }
 
 // Ensure installs, in order, cert-manager (a real prerequisite
