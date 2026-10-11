@@ -38,7 +38,10 @@ Organization → Team → Project → Environment → Application → Component
   Environment's Database is HA, that one isn't").
 - **Application** — a deployable unit a developer thinks in terms of.
 - **Component** — a piece of an Application (e.g. `frontend`, `backend`,
-  `worker`); the unit that actually maps to a workload.
+  `worker`); the unit that actually maps to a workload. Its spec (spec 011)
+  has an `image`, `ports` (`[{name, port}]`) and a plain `env` map; it is
+  owned by exactly one Application via its owner ref.
+  `Application` still has no spec fields: it is pure grouping.
 
 ### Infrastructure tree
 

@@ -296,3 +296,74 @@ func TestNewClient_BearerTokenOnly_NoClientCertRequired(t *testing.T) {
 		t.Errorf("client.token = %q, want %q", client.token, "secret")
 	}
 }
+
+func TestClient_Patch(t *testing.T) {
+	var gotMethod, gotPath, gotContentType string
+	var gotBody map[string]any
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotContentType = r.Method, r.URL.Path, r.Header.Get("Content-Type")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(Object{
+			APIVersion: "v1", Kind: "Namespace",
+			Metadata: ObjectMeta{Name: "ns-1", Labels: map[string]string{"a": "b"}, ResourceVersion: "7"},
+		})
+	})
+
+	patch := map[string]any{"metadata": map[string]any{"labels": map[string]string{"a": "b"}}}
+	got, err := client.Patch(context.Background(), "/api/v1/namespaces/ns-1", patch)
+	if err != nil {
+		t.Fatalf("Patch() = %v", err)
+	}
+	if gotMethod != http.MethodPatch || gotPath != "/api/v1/namespaces/ns-1" {
+		t.Errorf("request = %s %s, want PATCH /api/v1/namespaces/ns-1", gotMethod, gotPath)
+	}
+	if gotContentType != "application/merge-patch+json" {
+		t.Errorf("Content-Type = %q, want application/merge-patch+json", gotContentType)
+	}
+	labels, _ := gotBody["metadata"].(map[string]any)["labels"].(map[string]any)
+	if labels["a"] != "b" {
+		t.Errorf("request body = %v, want metadata.labels.a=b", gotBody)
+	}
+	if got.Metadata.ResourceVersion != "7" || got.Metadata.Labels["a"] != "b" {
+		t.Errorf("Patch() returned %+v, want decoded patched object", got.Metadata)
+	}
+}
+
+func TestClient_Patch_404ReturnsErrNotFound(t *testing.T) {
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	_, err := client.Patch(context.Background(), "/api/v1/namespaces/ns-1", map[string]any{})
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Patch() error = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestClient_Patch_UnexpectedStatus(t *testing.T) {
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.Write([]byte(`{"message":"invalid"}`))
+	})
+	_, err := client.Patch(context.Background(), "/api/v1/namespaces/ns-1", map[string]any{})
+	if err == nil || errors.Is(err, ErrNotFound) {
+		t.Errorf("Patch() error = %v, want a non-ErrNotFound error for 422", err)
+	}
+}
+
+func TestClient_Create_StillSendsJSONContentType(t *testing.T) {
+	var gotContentType string
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"x"}}`))
+	})
+	if _, err := client.Create(context.Background(), "/api/v1/namespaces/default/configmaps", Object{}); err != nil {
+		t.Fatalf("Create() = %v", err)
+	}
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotContentType)
+	}
+}

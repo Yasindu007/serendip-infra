@@ -14,23 +14,28 @@ Last updated: 2026-10-11
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** Specs 002-009 are committed locally only — decided explicitly
+PR #24.** Specs 002-010 are committed locally only (spec 011 not yet) — decided explicitly
 with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
-**Spec 010 (OpenChoreo deployment foundation) — COMPLETE, T001-T008 all
-done, not yet committed.** Gets a real OpenChoreo control plane + data
-plane running and reachable on top of specs 005/006's Kubernetes-access
+**Spec 011 (Application Platform capability) — COMPLETE, T001-T010 all
+done, both final reviews (`contract-guardian`, `go-reviewer`) PASS, NOT
+yet committed.** The real `Application`/`Component` capability on top of
+spec 010's foundation. Working tree holds all of it: `core/resource/
+app.go`, `core/reconcile/application.go`, `providers/application/
+openchoreo/{names,defaults,provider,gatewayapi}.go` (+ tests, `deploy.go`
+edit, new `VERSIONS.md`), `providers/kubernetes/client.go` (`Patch`),
+`cmd/serendipd/main.go`, `specs/011-application-platform-capability/`, and
+the docs sync. Full detail below, under "Spec 011 — what actually got
+built."
+
+**Spec 010 (OpenChoreo deployment foundation) — COMPLETE and committed**
+(`436380c`, T001-T008). A real OpenChoreo control plane + data plane
+running and reachable on top of specs 005/006's Kubernetes-access
 foundation — same foundation/capability split as specs 005+006→007 and
-008→009; the real `Application`/`Component` capability is still a later
-spec's job. Full detail below, under "Spec 010 — what actually got
-built." **Working tree has all of spec 010's new/changed files
-uncommitted** (`providers/application/openchoreo/` and its tests,
-`specs/010-openchoreo-deployment-foundation/`, `docs/decisions/
-0010-helm-shellout-for-openchoreo.md`, `docs/architecture/
-application-platform.md`, plus the edit to `cmd/serendipd/main.go`) —
-commit once this docs sync is reviewed.
+008→009; spec 011 is its capability. Full detail below, under "Spec 010 —
+what actually got built."
 
 **Spec 009 (the real Secrets capability) — COMPLETE and committed**
 (`9343d30`). Builds the actual `Secret` resource kind /
@@ -174,10 +179,8 @@ the second real capability (confirmed 2026-10-10) over Identity/Thunder
   session (`memory=8GB`, `processors=4`, `vmIdleTimeout=-1`) are still
   in place and harmless either way.
 - **T008 (holistic `contract-guardian` + `go-reviewer` review) is now
-  done: PASS.** T009 (this docs-sync — `docs/architecture/secrets.md`
-  written, this file updated) is in progress per tasks.md. The fixes
-  above are still uncommitted working-tree changes — commit once T009
-  wraps up.
+  done: PASS.** T009 (docs-sync, `docs/architecture/secrets.md`) done;
+  everything committed (`88de5d7`).
 - A process note worth keeping: the Service-proxy mechanism itself
   (the biggest flagged unknown in plan.md) is **already confirmed
   working** — `serendipd` reached it and got real, meaningful API
@@ -277,11 +280,70 @@ project,workflow` only when Projects v2 board work or a
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
 
+## Spec 011 — what actually got built
+
+`core/resource/app.go` + `core/reconcile/application.go` +
+`providers/application/openchoreo/{names,defaults,provider,gatewayapi}.go`
++ `providers/kubernetes` `Patch` + `cmd/serendipd` wiring — the real
+Application Platform capability, T001-T010 all done (uncommitted — see
+above). Detail: `docs/architecture/application-platform.md`.
+
+- **Resource kinds**: `ComponentSpec{Image, Ports[{Name,Port}], Env}`;
+  `ApplicationSpec` still empty (pure grouping). No `api/` change (generic
+  handlers pick the fields up via JSON).
+- **`ApplicationPlatformProvider`** (`core/reconcile`): `EnsureApplication`/
+  `DeleteApplication`/`EnsureComponent`/`DeleteComponent`, plus
+  `ApplicationReconciler` and `ComponentReconciler`. Both not-found
+  branches call `Delete*` (spec 007 lesson). One `Ready` Condition per kind
+  with neutral reasons `Deployed`/`Progressing`/`DeployFailed`/
+  `Unsupported`/`InvalidSpec`/`WaitingForApplication`/`EnsureFailed`;
+  written only when `{Status, Reason}` changes. Resolves provider-model.md's
+  `ApplicationProvider` naming question (third narrow-interface data point).
+- **Mapping**: Application ↔ OpenChoreo `Project` + `ProjectReleaseBinding`
+  (1:1); Component ↔ `Component` (autoDeploy) + `Workload`; OpenChoreo makes
+  ComponentRelease/ReleaseBinding/RenderedRelease itself. Names are
+  `app-`/`cmp-` + 10 hex of `sha256(Serendip ID)` so delete works from the
+  ID alone and cell-namespace names stay short.
+- **Corrected upstream fact**: OpenChoreo 1.3.1 has no Organization CRD; a
+  namespace labeled `openchoreo.dev/control-plane=true` is the org boundary.
+  `openchoreo-control-plane` is reused (DataPlane/default lives there).
+  `EnsurePlatformDefaults` (startup, not reconciled) ensures the label,
+  `ClusterProjectType/serendip-default`, trimmed
+  `ClusterComponentType/serendip-service`, `Environment/development`, and
+  single-environment `DeploymentPipeline/serendip` (accepted on a real
+  cluster).
+- **Real-cluster finding (kind, k8s 1.34.0)**: OpenChoreo's RenderedRelease
+  controller lists Gateway/HTTPRoute and fails every reconcile without
+  Gateway API CRDs even with `gateway.enabled=false`, so nothing became
+  Ready. Fixed by `EnsureGatewayAPICRDs` (v1.3.0 standard CRDs only,
+  sha256-verified download, skipped if all 5 exist, never upgrades). A
+  prerequisite, not ingress. Known limitation: fresh installs need
+  github.com access.
+- **Review-driven**: `observedGeneration` staleness check, `Progressing`
+  right after a Workload patch, plus the bound-ComponentRelease workload
+  snapshot check (a real-cluster rerun showed the patch rule alone races a
+  self-triggered reconcile), port validation to `InvalidSpec`,
+  CRD-download skip.
+- **Verified on kind**: Application Ready ~30s; Component Progressing to
+  Deployed ~30s; nginx Pod 1/1, env delivered, HTTP served; idempotent over
+  2 resyncs (ResourceVersion, audit rows, Workload generation unchanged);
+  image update patched the Workload once and rolled out (old Pod serves
+  meanwhile); Component delete cleaned everything in ~7s; Application
+  cascade delete removed Project and cell namespace in ~20s. Footprint: kind
+  node ~1.06 GiB full stack idle, `serendipd` ~30 MB (not the ADR 0005 T470
+  benchmark).
+- **Explicitly deferred**: port-less (worker) Components, ingress
+  visibility, Serendip Organization/Project to OpenChoreo namespace mapping,
+  Secret injection, multi-environment promotion, retrying a failed DELETE
+  after the Serendip record is gone (engine-level, same as Volume), live
+  reconciliation of platform defaults (restart repairs), ~30s status lag
+  (no requeue).
+
 ## Spec 010 — what actually got built
 
 `providers/application/openchoreo` + `cmd/serendipd` wiring — the
 OpenChoreo deployment foundation, 7 implementation/review tasks plus this
-docs-sync, all functionally complete (uncommitted — see above):
+docs-sync, all complete and committed (`436380c`):
 
 - **A deliberate, ADR-recorded reversal of specs 007/008/009's "no Helm,
   build Kubernetes objects directly" precedent, scoped to this capability
@@ -358,12 +420,9 @@ docs-sync, all functionally complete (uncommitted — see above):
   via OpenChoreo's own `add-default-dataplane.sh` script as spec.md
   originally assumed.
 - **Registration**: `wireOpenChoreo` (`cmd/serendipd/main.go`, after
-  `wireOpenBao`) registers `openchoreo.Marker{}` — a placeholder, no
-  methods yet — under `"application-platform"` in
-  `core/provider.Registry`. No resource kind, `ApplicationPlatformProvider`
-  interface, or reconciler exists yet; reachable for a direct smoke-test
-  only, same spirit as every prior foundation spec. Zero `core/` changes
-  — confirmed by `contract-guardian`, not just assumed.
+  `wireOpenBao`) originally registered a method-less `openchoreo.Marker{}`
+  under `"application-platform"`; spec 011 deleted it and registers the
+  real provider. Zero `core/` changes in spec 010 itself.
 - **T007**: both `contract-guardian` and `go-reviewer` PASS. Full detail
   (including the disabled-by-default feature set's exact reasoning, the
   deployment model, and the CA-trust fix) is in new
@@ -372,12 +431,10 @@ docs-sync, all functionally complete (uncommitted — see above):
   integration mechanism is shelling out to an external CLI tool rather
   than `providers/kubernetes.Client` alone).
 - **Explicitly deferred** (spec.md's own Scope-OUT, not silently
-  dropped): the `Application`/`Component` resource kinds, any
-  `ApplicationPlatformProvider` interface, and any reconciler (a later
-  spec's job); the Build Plane and Observability Plane; Thunder/kgateway
-  deployment (confirmed not needed yet, not just postponed blindly); any
-  `api/` change; satisfying ADR 0005's actual T470 benchmark gate (this
-  spec produced one current dev-machine data point, not the final
+  dropped): the real `Application`/`Component` capability (done in spec
+  011); the Build Plane and Observability Plane; Thunder/kgateway
+  deployment; satisfying ADR 0005's actual T470 benchmark gate (spec 010
+  and 011 each produced a dev-machine data point, not the final
   benchmark).
 
 ## Spec 009 — what actually got built
@@ -385,8 +442,8 @@ docs-sync, all functionally complete (uncommitted — see above):
 `core/resource/secrets.go` + `core/reconcile/secrets.go` +
 `providers/secrets/openbao/provider.go` + `api/secret_handler.go` +
 `cmd/serendipd`/`api/server.go` wiring — the real Secrets capability on
-top of spec 008's foundation, 9 tasks, all functionally complete
-(uncommitted — see above):
+top of spec 008's foundation, 9 tasks, all complete and committed
+(`9343d30`):
 
 - **`Secret` resource kind** (`core/resource`): `SecretSpec{Path
   string}` only — no value field, structurally, because every
@@ -690,35 +747,23 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. **Spec 010 (OpenChoreo deployment foundation) is COMPLETE** — all
-   tasks T001-T008 done (T008, this docs-sync, finished this session:
-   `docs/architecture/application-platform.md` written,
-   `docs/decisions/0010-helm-shellout-for-openchoreo.md` written,
-   `docs/architecture/provider-model.md` + this file updated). All 7
-   acceptance criteria met, `contract-guardian` + `go-reviewer` both
-   PASS, real-cluster verification confirmed on a `kind` cluster
-   including the data plane's `cluster-agent` connecting to the control
-   plane end-to-end. **Commit the outstanding working-tree changes
-   next** (`providers/application/openchoreo/` + tests,
-   `specs/010-openchoreo-deployment-foundation/`,
-   `docs/decisions/0010-helm-shellout-for-openchoreo.md`,
-   `docs/architecture/application-platform.md`, plus the
-   `cmd/serendipd/main.go` edit).
-2. Remaining POC capabilities per `docs/PRD.md`: the real Application
-   Platform capability (`Application`/`Component` resource kinds,
-   `ApplicationPlatformProvider`, reconciler — now unblocked by spec
-   010's foundation), Gateway/kgateway (nothing to route to yet),
-   eventually Identity/Thunder (once its post-1.0 maturity window has
-   passed, ADR 0006). None picked yet for the next spec — decide at the
-   start of the next session.
-3. **specs 002-009 are still unpushed by deliberate choice** (user
+1. **Commit spec 011** (run `contract-guardian` first per the standing
+   rule if anything changed since the T009 review). Working tree files are
+   listed under "Current phase."
+2. Next capability candidates (none picked; decide at the start of the next
+   session): Gateway/kgateway (now has Components to route to, and the
+   Gateway API CRDs are already installed as a prerequisite); `Secret`
+   injection into Components (spec 009 `Secret`s meet spec 011
+   `Component`s); Identity/Thunder, still gated by ADR 0006's maturity
+   window.
+3. **specs 002-011 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not
    a technical one to keep re-litigating.
 4. GitHub tracking board (milestones/issues/sub-issues/project) was
    fully built for spec 001 and merged via PR #24 — extending it to
-   cover specs 002-009 once they're pushed is still open. CodeRabbit:
+   cover specs 002-011 once they're pushed is still open. CodeRabbit:
    CLI installed, only `coderabbit auth login` (browser) remains,
    previously blocked by the account flag — retry now that auth works,
    not yet re-attempted this session.

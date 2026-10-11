@@ -18,11 +18,12 @@ doc explains the *design intent* behind those rules.
 
 ## Illustrative interface shape
 
-The exact Go signatures are not yet finalized (see `specs/001-resource-model`,
-which scopes only the Provider Registry descriptor, not live interfaces).
-The shape below is the design intent carried from the founding discussion and
-should be treated as a draft to refine during implementation, not as
-already-shipped code:
+**Superseded sketch.** The `ApplicationProvider`/`InfrastructureProvider`
+code below is the founding-discussion sketch, kept for history. It was never
+shipped: real interfaces are narrow and per-capability (`StorageProvider`,
+`SecretsProvider`, `ApplicationPlatformProvider`; see the sections below).
+Read it as design intent about the observe/plan/apply/verify shape only, not
+as names or signatures:
 
 ```go
 // core/provider/application.go
@@ -225,17 +226,36 @@ tool with its own well-tested idempotency/wait semantics (as `helm upgrade
 reimplementation" precedent rather than defaulting to hand-rolled object
 construction out of habit.
 
+## Application Platform: a third narrow interface (spec 011)
+
+The Application Platform capability did not become `ApplicationProvider`.
+The real interface is `ApplicationPlatformProvider`
+(`core/reconcile/application.go`), four methods over two resource kinds:
+
+```go
+type ApplicationPlatformProvider interface {
+    EnsureApplication(ctx, app resource.Application) (ready bool, reason, message string, err error)
+    DeleteApplication(ctx, app resource.Application) error
+    EnsureComponent(ctx, app resource.Application, comp resource.Component) (ready bool, reason, message string, err error)
+    DeleteComponent(ctx, comp resource.Component) error
+}
+```
+
+`Ensure*` has `StorageProvider.Ensure`'s return shape (provisions real state,
+reports readiness); each kind has its own reconciler. Third data point, after
+`StorageProvider` and `SecretsProvider`, that each capability gets its own
+narrow interface with a shape derived from what it does, not a shared base
+type. Both reconcilers' not-found branches call `Delete*`, per the spec 007
+lesson above. Detail: `application-platform.md`.
+
+Breadcrumb for future providers: an upstream product may need CRDs installed
+even for a feature you have disabled. OpenChoreo's controller lists Gateway
+API kinds regardless of `gateway.enabled=false` and never became Ready
+without those CRDs. Chart toggles do not prove a feature's CRDs are
+unneeded; check on a real cluster.
+
 ## Open questions
 
-- Whether `ApplicationProvider` / `InfrastructureProvider` end up as
-  the actual `core/` interface names for Identity/Application-
-  Platform/Gateway, or get split further per capability, is still
-  undecided — `StorageProvider` and `SecretsProvider` above are two
-  data points (narrow, capability-specific interfaces with genuinely
-  different method shapes, not a shared base type), confirming each
-  capability likely gets its own narrow interface rather than a shared
-  `InfrastructureProvider` all capabilities implement. Resolve during
-  each capability's own spec's plan.md, not by guessing here.
 - **Real cluster/product behavior can invalidate a design that looked
   sound on paper** (spec 007's entire provisioning mechanism changed
   after real-cluster testing, not during planning) — budget real

@@ -16,12 +16,24 @@ type ApplicationStatus struct {
 
 type Application = Resource[ApplicationSpec, ApplicationStatus]
 
-// ComponentSpec has no fields yet in spec 001. A Component's runs-on and
-// depends-on relationships (resource-model.md "Relationships") are
-// declared through Metadata.Relationships on the envelope, not through
-// Spec fields here -- there is no separate relationship-declaration
-// mechanism (specs/001-resource-model/plan.md).
-type ComponentSpec struct{}
+// ComponentSpec describes one already-built container image as a
+// deployable workload. Building images from source is out of scope here;
+// Image must already be pullable. A Component's runs-on and depends-on
+// relationships (resource-model.md "Relationships") are declared through
+// Metadata.Relationships on the envelope, not through Spec fields
+// (specs/001-resource-model/plan.md).
+type ComponentSpec struct {
+	Image string            `json:"image"`
+	Ports []ComponentPort   `json:"ports,omitempty"`
+	Env   map[string]string `json:"env,omitempty"`
+}
+
+// ComponentPort is one port the Component's container listens on. Name
+// is a DNS label identifying the port within its Component.
+type ComponentPort struct {
+	Name string `json:"name"`
+	Port int32  `json:"port"`
+}
 
 type ComponentStatus struct {
 	Status

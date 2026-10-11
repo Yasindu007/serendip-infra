@@ -24,7 +24,12 @@ type ObjectMeta struct {
 	Name            string            `json:"name,omitempty"`
 	Namespace       string            `json:"namespace,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
 	ResourceVersion string            `json:"resourceVersion,omitempty"`
+	// Generation is server-set and read-only; sending it on create is
+	// harmless (ignored), and it's what status.observedGeneration is
+	// compared against.
+	Generation int64 `json:"generation,omitempty"`
 }
 
 // Object is the minimal envelope every Kubernetes API object shares.
@@ -116,6 +121,10 @@ func buildTLSConfig(cfg Config) (*tls.Config, error) {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
+	return c.doWithContentType(ctx, method, path, body, "application/json")
+}
+
+func (c *Client) doWithContentType(ctx context.Context, method, path string, body any, contentType string) (*http.Response, error) {
 	var reqBody io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -130,7 +139,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*http.R
 		return nil, fmt.Errorf("kubernetes: build %s %s request: %w", method, path, err)
 	}
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
@@ -199,6 +208,30 @@ func (c *Client) Delete(ctx context.Context, path string) error {
 		return unexpectedStatus(resp)
 	}
 	return nil
+}
+
+// Patch applies patch to the object at path as a JSON merge patch (RFC
+// 7386) and returns the resulting object. Merge patch rather than PUT
+// because a PUT would round-trip through Object, silently dropping every
+// metadata field this package doesn't model (finalizers, annotations,
+// ownerReferences). Returns ErrNotFound on a 404.
+func (c *Client) Patch(ctx context.Context, path string, patch any) (Object, error) {
+	resp, err := c.doWithContentType(ctx, http.MethodPatch, path, patch, "application/merge-patch+json")
+	if err != nil {
+		return Object{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return Object{}, ErrNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return Object{}, unexpectedStatus(resp)
+	}
+	var patched Object
+	if err := json.NewDecoder(resp.Body).Decode(&patched); err != nil {
+		return Object{}, fmt.Errorf("kubernetes: decode PATCH %s response: %w", path, err)
+	}
+	return patched, nil
 }
 
 // List fetches every object at a collection path (e.g.

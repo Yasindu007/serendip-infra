@@ -232,7 +232,7 @@ func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus 
 		return nil, fmt.Errorf("openbao: %w", err)
 	}
 
-	if err := wireOpenChoreo(ctx, client, registry); err != nil {
+	if err := wireOpenChoreo(ctx, client, registry, db, bus, engine); err != nil {
 		return nil, fmt.Errorf("openchoreo: %w", err)
 	}
 
@@ -292,13 +292,12 @@ func wireOpenBao(ctx context.Context, client *kubernetes.Client, registry *provi
 // wireOpenChoreo deploys OpenChoreo into the cluster (idempotent,
 // spec 010 -- cert-manager, then the control-plane and data-plane
 // Helm charts, each `helm upgrade --install`), registers the default
-// DataPlane CR, confirms readiness, and registers a placeholder
-// marker under the "application-platform" capability. No resource
-// kind/Reconciler is wired here -- there is no Application/Component
-// kind yet for one to drive (a later spec's job); the registered
-// capability is reachable for a direct smoke-test only, same spirit
-// as specs 006/008's own foundation-stage registrations.
-func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, registry *provider.Registry) error {
+// DataPlane CR and the platform defaults Applications/Components deploy
+// through (spec 011), confirms readiness, registers the real
+// *openchoreo.Provider under "application-platform", and wires
+// ApplicationReconciler/ComponentReconciler into engine (mirrors
+// wireOpenBao's wiring block).
+func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine) error {
 	deployer, err := openchoreo.NewDeployer(client)
 	if err != nil {
 		return fmt.Errorf("deployer: %w", err)
@@ -310,12 +309,56 @@ func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, registry *pr
 	if err := openchoreo.EnsureDefaultDataPlane(ctx, client); err != nil {
 		return fmt.Errorf("default data plane: %w", err)
 	}
+	if err := openchoreo.EnsureGatewayAPICRDs(ctx, client); err != nil {
+		return fmt.Errorf("gateway api crds: %w", err)
+	}
+	if err := openchoreo.EnsurePlatformDefaults(ctx, client); err != nil {
+		return fmt.Errorf("platform defaults: %w", err)
+	}
 
 	if err := openchoreo.CheckReady(ctx, client); err != nil {
 		return fmt.Errorf("readiness: %w", err)
 	}
 
-	registry.Register("application-platform", openchoreo.Marker{})
+	registry.Register("application-platform", openchoreo.NewProvider(client))
+
+	impl, ok := registry.Lookup("application-platform")
+	if !ok {
+		return fmt.Errorf("internal: just-registered capability not found in registry")
+	}
+	platform, ok := impl.(reconcile.ApplicationPlatformProvider)
+	if !ok {
+		return fmt.Errorf("internal: registered implementation does not satisfy reconcile.ApplicationPlatformProvider")
+	}
+
+	apps := sqlite.NewStore[resource.ApplicationSpec, resource.ApplicationStatus](db, resource.KindApplication).SetBus(bus)
+	components := sqlite.NewStore[resource.ComponentSpec, resource.ComponentStatus](db, resource.KindComponent).SetBus(bus)
+
+	engine.Register(resource.KindApplication, reconcile.NewApplicationReconciler(apps, platform),
+		func(ctx context.Context) ([]graph.ResourceRef, error) {
+			list, err := apps.List(ctx, store.ListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			refs := make([]graph.ResourceRef, len(list))
+			for i, a := range list {
+				refs[i] = graph.ResourceRef{Kind: resource.KindApplication, ID: a.Metadata.ID}
+			}
+			return refs, nil
+		})
+	engine.Register(resource.KindComponent, reconcile.NewComponentReconciler(components, apps, platform),
+		func(ctx context.Context) ([]graph.ResourceRef, error) {
+			list, err := components.List(ctx, store.ListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			refs := make([]graph.ResourceRef, len(list))
+			for i, c := range list {
+				refs[i] = graph.ResourceRef{Kind: resource.KindComponent, ID: c.Metadata.ID}
+			}
+			return refs, nil
+		})
+
 	log.Print("serendipd: kubernetes: application platform provider (openchoreo) active")
 	return nil
 }

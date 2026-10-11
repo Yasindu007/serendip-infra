@@ -1,235 +1,290 @@
 # Application Platform
 
 This document describes the Application Platform capability
-(`capability-model.md:46`) as it actually exists today: spec 010's
-OpenChoreo deployment foundation only. ADR 0005 remains the authoritative
-decision record for *why* OpenChoreo; ADR 0010 is the authoritative record
-for *why this foundation shells out to `helm`* instead of following ADR
-0002/0009's direct-object-construction precedent. This doc adds the
-supporting detail those ADRs intentionally kept out of scope (the real
-deployment shape, the disabled-by-default feature set, the CR this
-foundation registers).
+(`capability-model.md:46`) as it exists today: spec 010's OpenChoreo
+deployment foundation plus spec 011's real capability on top of it
+(`Application`/`Component` resources, `ApplicationPlatformProvider`, two
+reconcilers). ADR 0005 is the authoritative record for *why* OpenChoreo;
+ADR 0010 for *why the foundation shells out to `helm`* (a per-capability
+exception to ADR 0002/0009's direct-object-construction precedent).
 
-There is no real capability yet — no `Application`/`Component` resource
-kind, no `ApplicationPlatformProvider` core interface, no reconciler. This
-mirrors specs 005+006 (Kubernetes access foundation, consumed by spec 007)
-and 008 (OpenBao deployment foundation, consumed by spec 009): spec 010 gets
-a real OpenChoreo control plane and data plane running and reachable; a
-later spec builds the actual capability on top of it.
+Code: `providers/application/openchoreo/` (provider side),
+`core/reconcile/application.go` (interface + reconcilers),
+`core/resource/app.go` (resource kinds), `cmd/serendipd` `wireOpenChoreo`
+(wiring). Pinned versions: `providers/application/openchoreo/VERSIONS.md`.
 
-## Deployment model
+## The capability (spec 011)
 
-Three Helm releases, installed in order by `providers/application/
-openchoreo.Deployer.Ensure` via the real `helm` CLI (ADR 0010 — a deliberate,
-scoped exception to ADR 0002/0009's "no Helm" precedent):
+### Object chain
 
-1. **cert-manager** (`oci://quay.io/jetstack/charts/cert-manager`,
-   `1.21.2`, namespace `cert-manager`, `--set crds.enabled=true`). A real
-   prerequisite, confirmed by inspecting the pulled chart artifacts
-   directly: neither OpenChoreo chart's `templates/` contains a single
-   cert-manager controller/webhook/CRD template — only `Certificate`/
-   `Issuer` *objects* that assume a real cert-manager controller is already
-   running. spec.md originally assumed cert-manager was bundled by the
-   control-plane chart; it is not.
-2. **OpenChoreo control plane**
-   (`oci://ghcr.io/openchoreo/helm-charts/openchoreo-control-plane`,
-   `1.3.1`, namespace `openchoreo-control-plane`).
-3. **OpenChoreo data plane**
-   (`oci://ghcr.io/openchoreo/helm-charts/openchoreo-data-plane`, `1.3.1`,
-   namespace `openchoreo-data-plane`).
+Everything OpenChoreo-side lives in one org namespace,
+`openchoreo-control-plane`.
 
-Control plane and data plane are **co-located on one cluster** — the same
-K3s cluster, different namespaces — confirmed by oss-researcher as an
-officially documented, supported topology, not a workaround.
-`--create-namespace` on every release creates each namespace; no shared
-namespace is reused, unlike `serendip-system` (Storage/Secrets).
+| Serendip | OpenChoreo | Created by |
+|---|---|---|
+| `Application` | `Project` + its one `ProjectReleaseBinding` (env `development`) | Serendip provider |
+| `Component` | `Component` (`autoDeploy: true`, `componentType: deployment/serendip-service`) + `Workload` | Serendip provider |
+| (none) | `ComponentRelease`, `ReleaseBinding` (`<component>-development`), `RenderedRelease` | OpenChoreo's own controllers |
+| (none) | Deployment, Service, env ConfigMap | OpenChoreo, into the Project's cell namespace |
 
-Each release runs with `--wait --timeout <5m|10m|10m>`, so readiness is
-**Helm's own well-tested wait logic**, not a hand-rolled poll loop — a real
-simplification versus `providers/secrets/openbao/deploy.go`'s
-`waitStatefulSetReady`, which exists only because that spec built Kubernetes
-objects directly with no Helm release to `--wait` on. `helm upgrade
---install` is itself idempotent, so `Ensure` has no separate GET-then-install
-check the way spec 007/008's Deployers do — a second call against an
-already-installed release at the same version is a cheap no-op Helm performs
-internally. `NewDeployer` fails fast (`exec.LookPath("helm")`) if `helm`
-isn't on `$PATH`, naming it a required host prerequisite, checked at
-construction rather than discovered deep inside the first install call.
+Mapping is 1:1 Application to Project. Each Project gets its own data-plane
+"cell" namespace (OpenChoreo names it like
+`dp-openchoreo-co-app-<hash>-development-<hash>` and truncates long names
+itself, confirmed on a real cluster), so Applications are isolated from each
+other, and deleting an Application is deleting one Project. Serendip's own
+`Organization`/`Team`/`Project` kinds are not mapped to anything yet.
 
-The control-plane chart has six Deployments
-(`backstage`, `cluster-gateway`, `controller-manager`, `event-forwarder`,
-`openchoreo-api`, `portal-assistant`), not the two spec.md originally
-assumed. With `backstage`/`gateway` disabled (below), the Deployments this
-foundation actually verifies ready are `cluster-gateway`,
-`controller-manager`, `event-forwarder`, `openchoreo-api`, plus an `authz`
-bootstrap `Job` (a Helm hook — runs once, reports `Complete`, already
-covered by `--wait` on the control-plane release, not a Deployment). The
-data-plane chart's only real Deployment with `gateway` disabled is
-`cluster-agent-dataplane`. None of these names carry a Helm-release-name
-prefix — confirmed against a real install, correcting an initial guess that
-assumed one.
+Provider calls (`Provider`, `provider.go`) only use
+`providers/kubernetes.Client`: GET-or-create for each object, never helm.
+`EnsureComponent` creates the Component CR (immutable fields never patched;
+if its owner project differs from the requested Application it returns
+`Unsupported`), then the Workload. An existing Workload is compared on only
+the fields Serendip owns (image, env, endpoints) and merge-patched only on
+real difference, so a no-drift reconcile makes no writes on either side.
+Every port becomes a `TCP` endpoint. Workload env is OpenChoreo's
+`[{key,value}]` list, sorted by key; OpenChoreo delivers it via the type's
+env-config ConfigMap and `envFrom`.
 
-## Disabled-by-default feature set
+### Corrected upstream facts
 
-Three flags are set on the OpenChoreo charts, each turning off a real
-dependency this foundation spec explicitly defers rather than removes —
-confirmed via the charts' own `validate.yaml`/`_helpers.tpl` validation
-logic (which hard-fails `helm install` on a placeholder-domain default),
-not assumed:
+Spec 010's earlier version of this doc listed an `Organization` CRD. That
+was wrong. OpenChoreo 1.3.1 has **no Organization CRD**: a namespace labeled
+`openchoreo.dev/control-plane=true` is the org boundary. Serendip reuses
+`openchoreo-control-plane` as that namespace because `DataPlane/default`
+already lives there and an Environment resolves its `dataPlaneRef` by name in
+its own namespace. Cost: workload *definitions* (not the workloads, which run
+in cell namespaces) share a namespace with the control plane's Deployments;
+accepted at edge-1, revisit with multi-tenancy.
 
-- **`security.enabled=false`** (control plane). The default,
-  `security.enabled=true`, hard-fails validation because
-  `security.oidc.issuer` defaults to the placeholder domain
-  `http://thunder.openchoreo.invalid`. Thunder is not a hard prerequisite for
-  the control plane to start — confirmed empirically, not inferred from
-  docs. Real Thunder-backed auth is a future Identity spec's job.
-- **`backstage.enabled=false`** (control plane). Backstage (the
-  developer-portal UI) defaults to enabled and additionally requires a
-  credentials Secret (`backend-secret`, `client-secret`, `jenkins-api-key`)
-  and non-placeholder hostnames/`baseUrl` — none of which this spec can
-  meaningfully provide, since there's nothing to show until `Project`/
-  `Component` CRs exist. Deferred for "no consumer yet," the same reason as
-  the Build Plane (ADR 0005), not a resource-footprint decision.
-- **`gateway.enabled=false`** (both charts), **plus
-  `gateway.tls.enabled=false`** (data plane only). This `gateway` block
-  creates Gateway API `Gateway` objects referencing
-  `gatewayClassName: "kgateway"` for **application traffic routing** — a
-  data-plane/runtime concern with nothing to route to yet (no `Component`
-  exists). The control-plane chart's placeholder-domain check is gated on
-  `gateway.enabled AND gateway.tls.enabled` together, so
-  `gateway.enabled=false` alone suffices there; the data-plane chart's
-  equivalent check (`_helpers.tpl`'s `validateHostnames`) is gated on
-  `gateway.tls.enabled` **alone**, independent of `gateway.enabled` — a real
-  discrepancy found during real-cluster verification, not assumed from
-  planning, so the data-plane `helm` invocation sets both flags explicitly.
-  kgateway deployment is deferred entirely to whichever future spec actually
-  deploys a workload. (OpenChoreo's own internal `clusterGateway` — the
-  control-plane/data-plane agent connection below — is a separate, always-on
-  component with cluster-internal DNS names that never hit this check; it is
-  not kgateway and this spec does not touch its defaults.)
+The control-plane chart seeds none of the Environment, DeploymentPipeline,
+ClusterProjectType or ClusterComponentType objects; Serendip creates its own.
 
-All three are confirmed-safe, first-class chart toggles, not hacks — the
-same "intentionally weak, temporary, documented" pattern this codebase
-already uses for `SERENDIP_API_KEYS` (`api/middleware.go`).
+### Platform defaults
 
-## `DataPlane` CR registration and CA trust bootstrapping
+`EnsurePlatformDefaults` runs once at startup (like `EnsureDefaultDataPlane`;
+GET-then-create, not reconciled):
 
-Nothing can actually deploy through OpenChoreo until a `DataPlane` custom
-resource exists pointing at the (here, co-located) data-plane cluster.
-`providers/application/openchoreo.EnsureDefaultDataPlane` idempotently
-GET-then-Creates exactly one, named `default`, in the
-**`openchoreo-control-plane`** namespace (confirmed correct against a real
-cluster — the control plane's `controller-manager` accepted it and updated
-`status.conditions` to `Created: True`):
+- Label on the org namespace (merge-patched only if missing).
+- `ClusterProjectType/serendip-default`: its template creates the cell
+  namespace. Copied from v1.3.1 `samples/getting-started/all.yaml`.
+- `ClusterComponentType/serendip-service` (`workloadType: deployment`): a
+  trimmed copy of the sample's `service` type that renders a Deployment, a
+  ClusterIP Service, and an env ConfigMap consumed via `envFrom`. Dropped:
+  HTTPRoutes and their visibility validations (no gateway ingress),
+  ExternalSecrets (external-secrets not installed; secret injection out of
+  scope), file-mount config, command/args, and the workflow/trait
+  allow-lists (nothing uses them). Kept: the "at least one endpoint"
+  validation, which is why port-less Components are unsupported (below).
+- `Environment/development` pointing at `DataPlane/default`.
+- `DeploymentPipeline/serendip`, single environment. A pipeline with an empty
+  `targetEnvironmentRefs` was confirmed accepted on a real cluster
+  (`Available=True`).
 
-```json
-{
-  "apiVersion": "openchoreo.dev/v1alpha1",
-  "kind": "DataPlane",
-  "metadata": {"name": "default", "namespace": "openchoreo-control-plane"},
-  "spec": {
-    "clusterAgent": {
-      "clientCA": {
-        "secretKeyRef": {
-          "name": "cluster-agent-tls",
-          "namespace": "openchoreo-data-plane",
-          "key": "ca.crt"
-        }
-      }
-    }
-  }
-}
-```
+The cluster-scoped types are `serendip-` prefixed so they cannot collide with
+an operator who also applied OpenChoreo's own getting-started sample.
 
-Constructed directly via the existing generic `providers/kubernetes.Client`
-(spec 006) — not by shelling out to OpenChoreo's own
-`add-default-dataplane.sh` script, spec.md's original assumption. Once the
-CRD schema and the cert Secret's real name/namespace/key were traced
-directly from the pulled chart artifacts, hand-construction turned out to be
-exactly as reliable as the script, and avoids a second external-script
-dependency beyond `helm` itself.
+### Names
 
-**The real, confirmed CA-trust gap this foundation works around**: the
-control-plane chart's own comment promises a "CA extractor hook job" that
-populates a `cluster-gateway-ca` ConfigMap with the real cert-manager-issued
-CA, so the data plane's `cluster-agent` can trust the control plane's
-`cluster-gateway`. No such job exists anywhere in the chart — grepping every
-template for `kind: Job` finds exactly one Job (the unrelated authz
-bootstrap job), and `controller-manager`'s own logs show zero CA-sync
-activity. The ConfigMap the chart does create
-(`templates/cluster-gateway/ca-configmap-placeholder.yaml`) contains a
-literal, permanent placeholder string. The real CA sits the whole time in a
-`cluster-gateway-ca` **Secret** (type `kubernetes.io/tls`) the chart never
-reads back out — and separately, that ConfigMap is namespace-scoped, so even
-single-cluster co-location doesn't make it visible across namespaces for
-free.
+Cluster object names derive from the Serendip ID alone:
+`app-<h>` (Project), `cmp-<h>` (Component, Workload), with `<h>` the first 10
+hex chars of `sha256(ID)`. Two reasons. The reconciler's delete branch only
+has the ID (and a cascade delete of an Application emits one delete event per
+child Component). And the raw 36-char UUID plus the org namespace would blow
+past Kubernetes' 63-char namespace limit in OpenChoreo's cell-namespace name.
+`serendip.dev/id` and `serendip.dev/name` labels are for `kubectl` debugging
+only; nothing reads them back.
 
-`Deployer.ensureDataPlaneTrustsControlPlane` is inserted between the
-control-plane and data-plane `helm` calls to fix this: it ensures the
-`openchoreo-data-plane` namespace exists, reads the real CA directly out of
-the control plane's `cluster-gateway-ca` Secret, and creates the data
-plane's own `cluster-gateway-ca` **ConfigMap** with that real value —
-bypassing the chart's broken placeholder mechanism entirely rather than
-waiting on something that doesn't exist. Confirmed working end-to-end
-against a real cluster: the data plane's `cluster-agent` logged "server CA
-certificate loaded successfully" and "connected to control plane," and the
-`DataPlane` CR's own `status.agentConnection` showed `connected: true,
-connectedAgents: 1`.
+### Ready conditions
 
-## `CheckReady` retry behavior
+Each kind has one `Ready` Condition with provider-neutral reasons (no product
+vocabulary in `core/`; upstream detail goes in `Message`):
 
-`providers/application/openchoreo.CheckReady` is a second, independent
-confirmation beyond trusting Helm's own `--wait` exit code — it GETs each
-Deployment in `expectedDeployments` and confirms `status.readyReplicas >= 1`.
-It retries the whole check up to **3 attempts, 2 seconds apart**, added
-after a `go-reviewer` finding during the final review pass: a single GET
-immediately after Helm's own `--wait` already reported every Deployment
-ready can still race a brief apiserver/informer-cache lag, and `CheckReady`'s
-error propagates all the way up through `wireOpenChoreo` /
-`wireKubernetes` / `run()` to `os.Exit(1)` — a transient blip would
-otherwise kill the whole `serendipd` daemon, not just this one
-(reconciler-less, smoke-test-only) capability. Three attempts absorbs that
-class of blip without meaningfully slowing the genuine-failure case (a truly
-broken Deployment still fails after ~4 seconds, not hangs).
+| Reason | Set by | Meaning |
+|---|---|---|
+| `Deployed` | provider | Upstream `Ready=True` (workload running / cell namespace ready) |
+| `Progressing` | provider | Created, not ready yet |
+| `DeployFailed` | provider | Upstream reports a failure that won't converge on its own |
+| `Unsupported` | provider | Valid spec this provider can't run (no ports; moving a Component to another Application) |
+| `InvalidSpec` | reconciler | Empty image, bad/duplicate port name, port outside 1-65535, no or multiple Application owner refs |
+| `WaitingForApplication` | reconciler | Owning Application missing or not `Ready=True`; provider not called |
+| `EnsureFailed` | reconciler | Provider returned an error (API call failed) |
 
-## Registration
+Upstream mapping (`mapReady`): a Component reads the `ReleaseBinding` `Ready`
+condition (a missing ReleaseBinding is `Progressing`, since autoDeploy has not
+created it yet); an Application reads the `ProjectReleaseBinding` `Ready`
+condition. `Ready=True` is `Deployed`. A reason in `failureReasons`
+(`ResourceApplyFailed`, `RenderingFailed`, `ResourcesDegraded`,
+`NamespaceDegraded`, `EnvironmentNotFound`, `DataPlaneNotFound`,
+`DataPlaneNotConfigured`, `ProjectNotFound`, `ComponentNotFound`,
+`InvalidReleaseConfiguration`, `ReleaseOwnershipConflict`,
+`ReleaseUpdateFailed`, `JobFailed`) is `DeployFailed`. Anything else not-ready,
+including `ResourcesProgressing`/`ResourcesNotReady`, is `Progressing`. Three
+honesty rules keep an update from looking `Deployed` before it is:
 
-`wireOpenChoreo` (`cmd/serendipd/main.go`, called from `wireKubernetes`
-after `wireOpenBao`) runs `Deployer.Ensure`, then
-`EnsureDefaultDataPlane`, then `CheckReady`, then registers
-`openchoreo.Marker{}` — a placeholder value with no methods, nothing to
-type-assert against yet — under `"application-platform"` in
-`core/provider.Registry`. Reachable for a direct smoke-test only, the same
-spirit as every prior foundation spec's own registration (spec 006's
-`nodeLister`, spec 008's bare `*openbao.Client`). Gated the same way every
-other Kubernetes-facing wiring already is: `SERENDIP_KUBECONFIG` unset ⇒ the
-whole sequence is skipped, not failed.
+- A `Ready` condition whose `observedGeneration` is older than the object's
+  `metadata.generation` is `Progressing`, because it describes a stale spec.
+- Right after Serendip patches a Workload, `EnsureComponent` returns
+  `Progressing` without reading the ReleaseBinding.
+- The ReleaseBinding's `Ready` is only trusted once the `ComponentRelease` it
+  points at (`spec.releaseName`) has a `spec.workload` snapshot equal to the
+  desired workload. Otherwise the result is `Progressing`.
 
-## What does not exist yet
+The third rule is what actually closes the gap: the second rule alone wasn't
+enough on a real cluster. The reconciler's own status write publishes an event
+that re-runs the reconcile within milliseconds of the patch. OpenChoreo takes
+about 80 ms to cut a new release and retarget the binding, so the re-run saw
+the old release still `Ready` and briefly reported `Deployed`. Each Component
+reconcile therefore makes one extra GET, for the bound ComponentRelease.
 
-Per spec.md's Scope-OUT, explicitly deferred to a later spec, not silently
-dropped:
+Reconcilers write only when `{Status, Reason}` changes (`Message` excluded,
+since upstream text churns), so an unchanged Component produces no `Update`,
+audit row, or `ResourceVersion` bump. There is no `CheckReady`-style retry
+loop: every 30s resync retries for free.
 
-- **The `Application`/`Component` resource kinds, any
-  `ApplicationPlatformProvider` core interface, and any reconciler** — the
-  split this document opens with. A later spec builds the real capability
-  on top of this foundation, the same split as specs 006→007 and 008→009.
-- **The Build Plane** (Argo Workflows-based CI) — per ADR 0005's own
-  mitigation; pre-built images/external CI is the assumed path until a
-  profile has budget for it.
-- **The Observability Plane.**
-- **Thunder and kgateway deployment** — both confirmed not hard
-  prerequisites (above); deploying either is a future spec's job once
-  something exists for them to serve.
-- **Any change to `api/`** — pure `providers/` + `cmd/serendipd` wiring; no
-  resource kind exists yet for `api/` to expose.
+Both reconcilers' not-found branches call `Delete*` with an ID-only resource.
+Delete issues a DELETE on the Project/Component (404 is success) and returns;
+OpenChoreo's finalizers do the teardown asynchronously.
+
+### Gateway API CRDs prerequisite (real-cluster finding)
+
+OpenChoreo's RenderedRelease controller lists Gateway and HTTPRoute objects in
+the data plane on every reconcile, and fails every reconcile with "not found"
+when those CRDs are missing, **even with `gateway.enabled=false` on both
+charts**. Result: no release ever reported status and nothing became Ready.
+
+`EnsureGatewayAPICRDs` (run in `wireOpenChoreo` after `EnsureDefaultDataPlane`,
+before `EnsurePlatformDefaults`) installs Gateway API **v1.3.0 standard-channel
+CRDs only**: no controller, no Gateway objects. It downloads the pinned GitHub
+release `standard-install.yaml`, verifies its sha256, and creates each CRD that
+does not exist. If all 5 CRDs already exist it skips the download entirely;
+existing CRDs are never upgraded or downgraded (a cluster running its own
+gateway controller keeps its version).
+
+This is a prerequisite, not ingress: external reachability stays out of scope.
+**Known limitation:** a fresh install needs network access to github.com;
+air-gapped installs need the manifest embedded or mirrored later.
+
+### Observed rollout semantics
+
+During an image update the old Pod keeps serving. Serendip patches the
+Workload once and reports `Progressing` until the ReleaseBinding is bound to a
+release cut from the new spec and is `Ready`, then `Deployed`. In the
+verification run, `Progressing` held from the update until the new Pod was
+serving, about 29s (one resync).
+
+## Deployment foundation (spec 010)
+
+### Deployment model
+
+Three Helm releases installed in order by `Deployer.Ensure` via the real
+`helm` CLI (ADR 0010), each with `--wait` and `--create-namespace`:
+
+1. **cert-manager** (`oci://quay.io/jetstack/charts/cert-manager`, `1.21.2`,
+   `--set crds.enabled=true`). A real prerequisite: neither OpenChoreo chart
+   bundles a cert-manager controller, only objects that assume one.
+2. **OpenChoreo control plane** (`oci://ghcr.io/openchoreo/helm-charts/
+   openchoreo-control-plane`, `1.3.1`, ns `openchoreo-control-plane`).
+3. **OpenChoreo data plane** (`.../openchoreo-data-plane`, `1.3.1`, ns
+   `openchoreo-data-plane`).
+
+Control and data plane are co-located on one cluster (an officially supported
+topology). Readiness is Helm's own `--wait`; `helm upgrade --install` is
+idempotent so there is no separate GET-then-install. `NewDeployer` fails fast
+if `helm` is not on `$PATH`. The Deployments verified ready are
+`cluster-gateway`, `controller-manager`, `event-forwarder`, `openchoreo-api`
+and the data plane's `cluster-agent-dataplane` (bare names, no release prefix).
+
+### Disabled-by-default feature set
+
+Each disabled flag turns off a dependency deferred rather than removed:
+
+- `security.enabled=false` (control plane). The default hard-fails validation
+  on the placeholder issuer `http://thunder.openchoreo.invalid`. Thunder is
+  not a prerequisite; real auth is a future Identity spec.
+- `backstage.enabled=false` (control plane). Needs credentials and real
+  hostnames; the developer-portal UI is deferred (no consumer).
+- `gateway.enabled=false` (both charts) plus `gateway.tls.enabled=false` (data
+  plane). The data-plane chart's hostname check is gated on `gateway.tls.enabled`
+  alone, found on a real cluster. kgateway is deferred. (OpenChoreo's internal
+  `clusterGateway` is separate and always on.)
+
+### `DataPlane` CR and CA-trust bootstrapping
+
+`EnsureDefaultDataPlane` GET-then-creates `DataPlane/default` in
+`openchoreo-control-plane`, with `spec.clusterAgent.clientCA.secretKeyRef`
+pointing at `cluster-agent-tls` / `ca.crt` in `openchoreo-data-plane`. It is
+built directly with `providers/kubernetes.Client` rather than by shelling out
+to OpenChoreo's `add-default-dataplane.sh`.
+
+The control-plane chart promises a "CA extractor hook job" to populate the
+data plane's trust ConfigMap; no such job exists (the only Job is the unrelated
+authz bootstrap), and the ConfigMap it ships holds a permanent placeholder. The
+real CA sits in a `cluster-gateway-ca` Secret the chart never reads.
+`Deployer.ensureDataPlaneTrustsControlPlane`, run between the two chart
+installs, copies it from that Secret into the data plane's
+`cluster-gateway-ca` ConfigMap. Confirmed: the agent logged "connected to
+control plane" and `DataPlane.status.agentConnection` showed
+`connected: true, connectedAgents: 1`.
+
+### `CheckReady`
+
+A second confirmation after Helm's `--wait`: GETs each expected Deployment and
+requires `readyReplicas >= 1`, retrying 3 times 2s apart (a `go-reviewer`
+finding: its error propagates to `os.Exit(1)`, so one informer-cache blip must
+not kill the daemon).
+
+### Startup wiring
+
+`wireOpenChoreo` (called from `wireKubernetes` after `wireOpenBao`; skipped
+entirely when `SERENDIP_KUBECONFIG` is unset) runs, in order: `Deployer.Ensure`,
+`EnsureDefaultDataPlane`, `EnsureGatewayAPICRDs`, `EnsurePlatformDefaults`,
+`CheckReady`. It then registers `openchoreo.NewProvider(client)` under
+`"application-platform"`, does the single Lookup and type-assert to
+`reconcile.ApplicationPlatformProvider`, and registers the Application and
+Component reconcilers with the engine (30s resync, 10s per-reconcile timeout).
+`providers/kubernetes.Client` gained `Patch` (JSON merge patch) for this: it
+labels the namespace and updates Workloads without round-tripping fields the
+client's `Object` envelope does not model.
+
+## Not done / deferred
+
+- **Port-less (worker) Components.** The `serendip-service` type requires an
+  endpoint, and `componentType` is immutable upstream, so supporting both would
+  need delete-and-recreate. Reported as `Unsupported`.
+- **Ingress / external visibility.** Only the default cluster-internal
+  endpoint visibility is usable; no kgateway, no Gateway or HTTPRoute objects.
+- **Mapping Serendip Organization/Project onto OpenChoreo namespaces**
+  (multi-tenancy; one fixed org namespace today).
+- **Secret injection** into Components (spec 009 `Secret`s are not wired in).
+- **Multi-environment promotion** (one `development` Environment, a
+  single-environment pipeline).
+- **Retrying a failed DELETE** after the Serendip record is gone: the engine
+  has no retry for a deleted ID, so a failed DELETE call (not a slow
+  finalizer) orphans the CR. Same engine-level gap as `Volume`.
+- **Live reconciliation of platform defaults**: repaired on `serendipd`
+  restart only.
+- **Status lag of up to ~30s**: OpenChoreo-side progress is not a Serendip
+  event and the engine has no per-resource requeue.
+- **Build Plane, Observability Plane, Thunder, kgateway deployment**
+  (ADR 0005 and prior scope).
+
+## Real-cluster verification (spec 011, kind, Kubernetes 1.34.0)
+
+- Application `Ready` about 30s after create; Component `Progressing` then
+  `Deployed` in about 30s.
+- Real nginx Pod 1/1 Running, env var delivered, HTTP served.
+- Idempotency held across 2 resyncs: Component `ResourceVersion`, audit rows
+  and Workload generation unchanged.
+- Image update patched the Workload once and rolled out.
+- Component delete removed the Pod, Service, ConfigMap and all OpenChoreo
+  objects in about 7s; Application cascade delete removed the Project and
+  cell namespace in about 20s.
+- Footprint data point: kind node about 1.06 GiB with the full stack idle,
+  `serendipd` about 30 MB. This is **not** ADR 0005's T470 benchmark.
 
 ## Open questions
 
-- **Resource footprint is a real, current dev-machine data point, not a
-  T470 benchmark.** ADR 0005's own numbers were already flagged unverified
-  when written; this spec produces one real number on whatever hardware its
-  `kind`-cluster verification ran on, but does not satisfy ADR 0005's T470
-  benchmark gate — that needs real reference hardware.
-- **CNCF Sandbox governance / WSO2 commit concentration** — standing watch
-  item per ADR 0005, not re-litigated here.
+- ADR 0005's T470 footprint benchmark gate is still unmet (above).
+- CNCF Sandbox governance / WSO2 commit concentration: standing watch item
+  per ADR 0005.
+- Air-gapped Gateway API CRD source (embed vs mirror).

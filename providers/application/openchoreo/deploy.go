@@ -28,15 +28,6 @@ const (
 	DataPlaneNamespace    = "openchoreo-data-plane"
 )
 
-// Marker is registered under the "application-platform" capability
-// once Deployer.Ensure, EnsureDefaultDataPlane, and CheckReady all
-// succeed -- a placeholder value (no methods, nothing to type-assert
-// yet) satisfying this spec's "reachable for a smoke-test only" bar,
-// same spirit as every prior foundation spec's own registration. A
-// later spec's real ApplicationPlatformProvider interface replaces
-// this once Application/Component resource kinds exist to drive one.
-type Marker struct{}
-
 // Deployer installs cert-manager and both OpenChoreo charts via `helm
 // upgrade --install`, which is itself idempotent -- unlike specs
 // 007/008's hand-built-object Deployers, there is no separate
