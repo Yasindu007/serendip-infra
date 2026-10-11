@@ -1,0 +1,8 @@
+# The harness writes serendipd's database, log, and OpenBao credentials
+# (root token + unseal key) next to its results. Only result.json and
+# summary.md are results; the rest must never be committed.
+*.db
+*.db-shm
+*.db-wal
+openbao-init.json
+serendipd.log

@@ -62,3 +62,19 @@ reasons to reject it:
   without replacement, or the T470 benchmark fails outright), the
   KubeVela+Crossplane+Argo combination is the documented fallback to
   re-evaluate first, per the original comparison.
+
+## Benchmark status (2026-10-11, spec 013)
+
+The gate above is **still open**: there's no reference-hardware number yet.
+A simulated-T470 run (`profiles/edge-1/bench/002-edge1-footprint.md`; a kind
+node throttled to an i5-6300U-class CPU on the dev machine, explicitly not
+the gate) measured OpenChoreo, as Serendip deploys it, at **about 55–58 MiB
+for the control plane and about 7 MiB for the data plane**. Backstage,
+security/Thunder, the gateway block and observability are all disabled in
+that configuration. The whole edge-1 stack idled at about 1.3 GiB.
+
+That is far below the "~2 CPU/4GB" estimate in Risks, which described a
+fuller install. Enabling Backstage, Thunder, or observability later needs
+re-measuring. The fallback trigger ("the T470 benchmark fails outright") is
+not triggered on this evidence, but stays undecidable until the real T470
+run.

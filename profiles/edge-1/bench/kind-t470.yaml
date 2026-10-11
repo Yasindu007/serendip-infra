@@ -1,0 +1,12 @@
+# kind cluster for the simulated-T470 edge-1 benchmark (spec 013).
+# Port 30080 is the gateway's NodePort (ADR 0011), mapped so exposed
+# Components are reachable from the host exactly as on a real node.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - containerPort: 30080
+    hostPort: 30080
+    listenAddress: "127.0.0.1"
+    protocol: TCP

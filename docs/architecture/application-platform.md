@@ -315,8 +315,11 @@ client's `Object` envelope does not model.
 - Component delete removed the Pod, Service, ConfigMap and all OpenChoreo
   objects in about 7s; Application cascade delete removed the Project and
   cell namespace in about 20s.
-- Footprint data point: kind node about 1.06 GiB with the full stack idle,
-  `serendipd` about 30 MB. This is **not** ADR 0005's T470 benchmark.
+- Footprint: see `profiles/edge-1/bench/002-edge1-footprint.md` (spec 013,
+  simulated T470, two runs). OpenChoreo measured about 55–58 MiB for the
+  control plane and about 7 MiB for the data plane, and the whole edge-1
+  stack about 1.3 GiB. This is still **not** ADR 0005's reference-hardware
+  gate.
 
 ## Open questions
 

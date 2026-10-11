@@ -193,7 +193,13 @@ Cluster pre-seeded with Gateway API v1.3.0 CRDs.
 
 ## Footprint
 
-Dev machine (Docker Desktop, 8 GB), not the T470 benchmark: kgateway
+The systematic numbers are in `profiles/edge-1/bench/002-edge1-footprint.md`
+(spec 013, simulated T470, still not the reference-hardware gate): kgateway
+is **about 52 MiB** at idle on a throttled node. The earlier one-off reading
+below was taken with `docker stats`, which counts page cache, so it runs
+higher.
+
+Earlier one-off reading (dev machine, Docker Desktop, 8 GB): kgateway
 controller about 50 MB, Envoy proxy about 19 MB, about 70 MB and about 1% CPU
 idle in total. The whole kind node idled at about 1.67 GiB with the full
 stack; `serendipd` about 21 MB. Traefik still idles unused on K3s. Details in

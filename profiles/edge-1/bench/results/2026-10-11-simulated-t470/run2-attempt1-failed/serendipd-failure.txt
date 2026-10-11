@@ -1,0 +1,2 @@
+2026/10/11 15:18:58 serendipd: kubernetes: storage provider (local-path) active
+serendipd: kubernetes: openbao: deploy: openbao: wait for StatefulSet openbao ready: kubernetes: GET /apis/apps/v1/namespaces/serendip-system/statefulsets/openbao: Get "https://127.0.0.1:51824/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao": context deadline exceeded

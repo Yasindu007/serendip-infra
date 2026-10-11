@@ -19,9 +19,11 @@ with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
+**Spec 013 (edge-1 benchmark harness, simulated T470) — COMPLETE.** See "Next up".
+
 **Spec 012 (Gateway capability, kgateway) — COMPLETE, T001-T011 all done,
-both final reviews (`contract-guardian`, `go-reviewer`) PASS, NOT yet
-committed** (working tree only). Components can now be exposed outside the
+both final reviews (`contract-guardian`, `go-reviewer`) PASS, committed
+(`7959511`).** Components can now be exposed outside the
 cluster. Full detail below, under "Spec 012 — what actually got built."
 
 **Spec 011 (Application Platform capability) — COMPLETE, T001-T010 all
@@ -811,11 +813,42 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
   Component deleted while the node was stopped was torn down automatically
   on the first resync after the node came back.
 
-1. **T470 benchmark is the recommended next step**: the footprint keeps
-   growing (kind node about 1.67 GiB) and Traefik still idles unused. ADR
-   0005's gate is still unmet. It needs the real reference hardware, so it
-   can only be prepared (a harness under `profiles/edge-1/bench/`, per
-   constitution rule 9), not run, from this dev machine.
+### Spec 013 (edge-1 benchmark harness + simulated T470) — complete
+
+- **Harness:** `cmd/bench-edge1`.
+  - One command, reading the kubelet Summary API through the API server, so
+    nothing is installed in the cluster. It works on kind and K3s, and on
+    Windows and Linux.
+  - It reports per-group memory/CPU, node overhead, the largest pods,
+    `serendipd`'s footprint, the rule-4 line, the 16 GB verdict, and timings.
+  - Subcommands: `compare` and `render`.
+  - Setup script and README: `profiles/edge-1/bench/`.
+- **Simulated-T470 results**, in `profiles/edge-1/bench/002-edge1-footprint.md`.
+  These are a kind node at 4 threads / 2.0 CPUs; not the gate.
+  - The whole stack idles at **about 1.3 GiB**, of which Serendip-deployed
+    components are about 220 MiB.
+  - The Kubernetes API server is about 540–580 MiB, the single largest cost,
+    because it serves about 60 CRDs.
+  - **Rule 4 PASS** (`serendipd` 23–25 MiB).
+  - **16 GB fits comfortably** (about 10% of the budget with 10 light apps;
+    about 22 apps of 256 MiB would still be comfortable).
+  - OpenChoreo measured about 62 MiB against ADR 0005's "~2 CPU/4GB"
+    estimate (Backstage, Thunder and observability are off).
+  - Memory repeatable within tolerance; one CPU group (Kubernetes system)
+    26 mcores apart vs ±25, kept as a FAIL.
+- **The real T470 run is still the open gate.** It's one command once the
+  hardware exists (README).
+
+1. **Spec 014 — reconciliation hardening**, agreed with the user, informed by
+   the benchmark:
+   - faster re-checks while something is `Progressing`/`Pending`
+     (time-to-`Serving` is always exactly the 30 s resync);
+   - periodic re-ensure of platform defaults and the gateway (today they're
+     repaired only on restart);
+   - server-side apply, so dropped fields are actually removed;
+   - **new from the benchmark:** `serendipd` exits on startup if a provider
+     isn't ready within its wait (one transient image-pull `EOF` from
+     quay.io killed a run). Startup should retry provider setup instead.
 2. **HTTPS**: the natural path is cert-manager (already installed) issuing
    certificates for an HTTPS listener on the existing gateway, not a second
    proxy such as Caddy. It needs a decision on where trusted names come from

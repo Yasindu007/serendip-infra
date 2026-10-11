@@ -126,6 +126,14 @@ of the class name, not the Application Platform design.
 
 ## Measured footprint
 
+**Superseded by the systematic benchmark:** `profiles/edge-1/bench/002-edge1-footprint.md`
+(spec 013, simulated T470, two runs). kgateway measured **about 52 MiB**
+(controller plus proxy) at idle on a throttled node, about 4% of the node,
+so the "disproportionate footprint" fallback is not triggered. The one-off
+reading below was taken with `docker stats`, which counts page cache. The
+benchmark uses the kubelet's working set, which is why its numbers are
+lower.
+
 Spec 012 T009, measured 2026-10-11 on a kind cluster (Kubernetes 1.34,
 dev machine, Docker Desktop, 8 GB). This is not the T470 benchmark.
 
