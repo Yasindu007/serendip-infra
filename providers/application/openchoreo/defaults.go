@@ -72,11 +72,78 @@ func EnsurePlatformDefaults(ctx context.Context, client *kubernetes.Client) erro
 		return fmt.Errorf("openchoreo: label namespace %s: %w", ControlPlaneNamespace, err)
 	}
 	for _, d := range platformDefaults() {
-		if _, err := getOrCreate(ctx, client, d.collection, d.obj); err != nil {
+		existing, err := getOrCreate(ctx, client, d.collection, d.obj)
+		if err != nil {
 			return fmt.Errorf("openchoreo: platform defaults: %w", err)
+		}
+		if d.obj.Kind == "ClusterComponentType" {
+			if err := updateSpecIfDifferent(ctx, client, d.collection, d.obj, existing); err != nil {
+				return fmt.Errorf("openchoreo: platform defaults: %w", err)
+			}
 		}
 	}
 	return nil
+}
+
+// updateSpecIfDifferent merge-patches existing's spec to desired's when
+// desired is not already contained in it. Only the component type is kept
+// in sync this way: its definition changes between Serendip versions
+// (spec 012 added external routes), while the other defaults are stable.
+// Containment rather than equality, because the API server fills in
+// defaults (e.g. targetPlane on each resource) that the desired spec omits.
+func updateSpecIfDifferent(ctx context.Context, client *kubernetes.Client, collection string, desired, existing kubernetes.Object) error {
+	var want, have any
+	if err := json.Unmarshal(desired.Spec, &want); err != nil {
+		return fmt.Errorf("decode desired %s spec: %w", desired.Kind, err)
+	}
+	if len(existing.Spec) > 0 {
+		if err := json.Unmarshal(existing.Spec, &have); err != nil {
+			return fmt.Errorf("decode %s %s spec: %w", desired.Kind, desired.Metadata.Name, err)
+		}
+	}
+	if containsJSON(have, want) {
+		return nil
+	}
+	if _, err := client.Patch(ctx, collection+"/"+desired.Metadata.Name, map[string]json.RawMessage{"spec": desired.Spec}); err != nil {
+		return fmt.Errorf("update %s %s: %w", desired.Kind, desired.Metadata.Name, err)
+	}
+	return nil
+}
+
+// containsJSON reports whether every value in want is present and equal in
+// have. Objects may carry extra keys in have; arrays must have the same
+// length with each element contained. Known limits: an empty value in want
+// that the server prunes would never be "contained" (keep desired specs
+// free of empty maps/arrays), and a key removed from want is not removed
+// from the live object (a merge patch can't delete it).
+func containsJSON(have, want any) bool {
+	switch w := want.(type) {
+	case map[string]any:
+		h, ok := have.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, wv := range w {
+			hv, ok := h[k]
+			if !ok || !containsJSON(hv, wv) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		h, ok := have.([]any)
+		if !ok || len(h) != len(w) {
+			return false
+		}
+		for i := range w {
+			if !containsJSON(h[i], w[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return have == want
+	}
 }
 
 func ensureNamespaceLabel(ctx context.Context, client *kubernetes.Client) error {
@@ -227,6 +294,12 @@ func componentTypeSpec() map[string]any {
 				},
 			},
 			map[string]any{
+				"id":       "httproute-external",
+				"forEach":  `${workload.endpoints.transformMap(name, ep, has(ep.visibility) && "external" in ep.visibility && ep.type == "HTTP", ep)}`,
+				"var":      "endpoint",
+				"template": httpRouteExternalTemplate(),
+			},
+			map[string]any{
 				"id":      "env-config",
 				"forEach": "${configurations.toConfigEnvsByContainer()}",
 				"var":     "envConfig",
@@ -240,6 +313,48 @@ func componentTypeSpec() map[string]any {
 					"data": "${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}",
 				},
 			},
+		},
+	}
+}
+
+// httpRouteExternalTemplate is OpenChoreo v1.3.1's sample "service" type's
+// external HTTPRoute, minus its CORS filter (CORS on HTTPRoute is outside
+// the standard-channel Gateway API installed here). It attaches to the
+// gateway named in the DataPlane's gateway.ingress.external, under host
+// <environment>-<org namespace>.<gateway host>, path /<component>-<endpoint>.
+// The labels are what the release controller uses to report the
+// endpoint's invoke URL.
+func httpRouteExternalTemplate() map[string]any {
+	return map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "HTTPRoute",
+		"metadata": map[string]any{
+			"name":      "${oc_generate_name(metadata.componentName, endpoint.key)}",
+			"namespace": "${metadata.namespace}",
+			"labels":    `${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint.key, "openchoreo.dev/endpoint-visibility": "external"})}`,
+		},
+		"spec": map[string]any{
+			"parentRefs": []any{map[string]any{
+				"name":      "${gateway.ingress.external.name}",
+				"namespace": "${gateway.ingress.external.namespace}",
+			}},
+			"hostnames": `${[gateway.ingress.external.?http, gateway.ingress.external.?https].filter(g, g.hasValue()).map(g, g.value().host).distinct().map(h, metadata.environmentName + "-" + metadata.componentNamespace + "." + h)}`,
+			"rules": []any{map[string]any{
+				"matches": []any{map[string]any{
+					"path": map[string]any{"type": "PathPrefix", "value": "/${metadata.componentName}-${endpoint.key}"},
+				}},
+				"filters": []any{map[string]any{
+					"type": "URLRewrite",
+					"urlRewrite": map[string]any{"path": map[string]any{
+						"type":               "ReplacePrefixMatch",
+						"replacePrefixMatch": `${endpoint.value.?basePath.orValue("/")}`,
+					}},
+				}},
+				"backendRefs": []any{map[string]any{
+					"name": "${metadata.componentName}",
+					"port": "${endpoint.value.port}",
+				}},
+			}},
 		},
 	}
 }

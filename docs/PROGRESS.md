@@ -14,10 +14,15 @@ Last updated: 2026-10-11
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** Specs 002-010 are committed locally only (spec 011 not yet) — decided explicitly
+PR #24.** Specs 002-011 are committed locally only (spec 012 not yet) — decided explicitly
 with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
+
+**Spec 012 (Gateway capability, kgateway) — COMPLETE, T001-T011 all done,
+both final reviews (`contract-guardian`, `go-reviewer`) PASS, NOT yet
+committed** (working tree only). Components can now be exposed outside the
+cluster. Full detail below, under "Spec 012 — what actually got built."
 
 **Spec 011 (Application Platform capability) — COMPLETE, T001-T010 all
 done, both final reviews (`contract-guardian`, `go-reviewer`) PASS,
@@ -275,6 +280,54 @@ project,workflow` only when Projects v2 board work or a
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
 
+## Spec 012 — what actually got built
+
+`core/reconcile/gateway.go` + `providers/gateway/kgateway` +
+`providers/internal/{helm,gatewayapi}` + OpenChoreo provider changes +
+`cmd/serendipd` `wireGateway`, T001-T011 done, uncommitted. ADR 0011
+(Accepted) and `docs/architecture/gateway.md` hold the detail.
+
+- **Capability split**: `GatewayProvider.EnsureGateway` returns a
+  `GatewayEndpoint{Name,Namespace,Host,Port}`; the composition root hands it
+  to the OpenChoreo provider, which writes
+  `DataPlane/default.spec.gateway.ingress.external`. OpenChoreo renders the
+  HTTPRoutes. Neither provider imports the other. No Gateway resource kind;
+  ensured at startup, not reconciled.
+- **kgateway v2.4.6** via Helm (experimental features off), one Gateway
+  `serendip-external` on a **NodePort (default 30080**,
+  `SERENDIP_GATEWAY_NODE_PORT`). Traefik/ServiceLB untouched, so no migration
+  for existing clusters. `SERENDIP_GATEWAY_HOST` defaults to `localhost`
+  (works only on the node; use `<node-ip>.nip.io` elsewhere). HTTP only.
+- **Gateway API pin moved v1.3.0 to v1.6.1**, now in
+  `providers/internal/gatewayapi`, **upgrade-only** (never downgrades) plus
+  upstream's safe-upgrades policy. The in-place cluster-wide CRD upgrade is
+  intentional. Corrects spec 011's "never upgrade".
+- **Core**: `ComponentPort.Expose`, `ComponentStatus.Endpoints`,
+  `ComponentObservation`/`Reachability`, a `Reachable` Condition
+  (`Serving`/`Pending`/`RouteRejected`); URLs published only at `Serving`.
+  `serendip-service` regained `httproute-external` (CORS dropped), and the
+  ClusterComponentType now has an update-if-contained path.
+- **Real-cluster findings (kind, k8s 1.34, CRDs pre-seeded at v1.3.0)**:
+  (1) OpenChoreo's per-component NetworkPolicy only admits pods labeled
+  `openchoreo.dev/system-component`, so every request 503'd until the proxy
+  pods got that label (fixed via `Gateway.spec.infrastructure.labels`,
+  supplied by `cmd/serendipd`); (2) OpenChoreo 1.3.1 reports
+  `externalURLs.http {scheme,host,port,path}`, not `invokeURL`; the provider
+  assembles the URL from those parts.
+- **Verified**: Reachable Pending to Serving about 28s; `curl` from the
+  Windows host returned 200 nginx; only the exposed port got a route;
+  idempotent over 2 resyncs; un-expose removed the route in about 3s (curl
+  404, status cleaned, pod kept), re-expose 200, delete removed the route;
+  nothing exposed deploys exactly as spec 011; restart patched the Gateway
+  once (labels).
+- **Footprint** (dev machine, not T470): controller about 50 MB, Envoy about
+  19 MB, about 70 MB and about 1% CPU idle; kind node about 1.67 GiB full
+  stack; `serendipd` about 21 MB.
+- **Explicitly deferred**: TLS, custom domains, internal visibility, API
+  management, multiple/BYO gateways, non-HTTP, gateway HA, disabling Traefik
+  to serve on 80/443, a Gateway resource kind and live reconciliation, an HTTP
+  reachability probe, removing labels via merge patch.
+
 ## Spec 011 — what actually got built
 
 `core/resource/app.go` + `core/reconcile/application.go` +
@@ -311,8 +364,9 @@ Application Platform capability, T001-T010 all done (`7d255dd`). Detail:
   controller lists Gateway/HTTPRoute and fails every reconcile without
   Gateway API CRDs even with `gateway.enabled=false`, so nothing became
   Ready. Fixed by `EnsureGatewayAPICRDs` (v1.3.0 standard CRDs only,
-  sha256-verified download, skipped if all 5 exist, never upgrades). A
-  prerequisite, not ingress. Known limitation: fresh installs need
+  sha256-verified download, skipped if all 5 exist, never upgrades; spec 012
+  superseded this with a v1.6.1 upgrade-only pin). A prerequisite, not
+  ingress. Known limitation: fresh installs need
   github.com access.
 - **Review-driven**: `observedGeneration` staleness check, `Progressing`
   right after a Workload patch, plus the bound-ComponentRelease workload
@@ -328,7 +382,7 @@ Application Platform capability, T001-T010 all done (`7d255dd`). Detail:
   node ~1.06 GiB full stack idle, `serendipd` ~30 MB (not the ADR 0005 T470
   benchmark).
 - **Explicitly deferred**: port-less (worker) Components, ingress
-  visibility, Serendip Organization/Project to OpenChoreo namespace mapping,
+  visibility (done in spec 012), Serendip Organization/Project to OpenChoreo namespace mapping,
   Secret injection, multi-environment promotion, retrying a failed DELETE
   after the Serendip record is gone (engine-level, same as Volume), live
   reconciliation of platform defaults (restart repairs), ~30s status lag
@@ -742,20 +796,28 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 
 ## Next up
 
-1. Next capability candidates (none picked; decide at the start of the next
-   session): Gateway/kgateway (now has Components to route to, and the
-   Gateway API CRDs are already installed as a prerequisite); `Secret`
-   injection into Components (spec 009 `Secret`s meet spec 011
-   `Component`s); Identity/Thunder, still gated by ADR 0006's maturity
-   window.
-2. **specs 002-011 are still unpushed by deliberate choice** (user
+1. **Commit spec 012** (working tree only today; run `contract-guardian`
+   first per the standing rule).
+2. **Open issue, pre-existing since spec 010, not fixed in 012**:
+   `providers/internal/helm` runs `helm` without `--kubeconfig`, so Helm uses
+   the default kubeconfig context, not `SERENDIP_KUBECONFIG`. It only worked in
+   verification because both pointed at the same cluster. Affects both
+   Helm-based providers (OpenChoreo, kgateway). Needs its own small fix.
+3. **T470 benchmark now strongly recommended next**: footprint keeps growing
+   (kind node about 1.67 GiB) and Traefik still idles unused. ADR 0005's gate
+   is still unmet.
+4. Other capability candidates (none picked; decide at the start of the next
+   session): `Secret` injection into Components (spec 009 meets spec 011);
+   disabling Traefik to serve on 80/443 (needs a migration story); TLS;
+   Identity/Thunder, still gated by ADR 0006's maturity window.
+5. **specs 002-012 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not
    a technical one to keep re-litigating.
-3. GitHub tracking board (milestones/issues/sub-issues/project) was
+6. GitHub tracking board (milestones/issues/sub-issues/project) was
    fully built for spec 001 and merged via PR #24 — extending it to
-   cover specs 002-011 once they're pushed is still open. CodeRabbit:
+   cover specs 002-012 once they're pushed is still open. CodeRabbit:
    CLI installed, only `coderabbit auth login` (browser) remains,
    previously blocked by the account flag — retry now that auth works,
    not yet re-attempted this session.

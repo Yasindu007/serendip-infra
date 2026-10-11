@@ -52,6 +52,7 @@ type ensureResult struct {
 	ready   bool
 	reason  string
 	message string
+	reach   *reconcile.Reachability
 	err     error
 }
 
@@ -77,10 +78,10 @@ func (f *fakeAppPlatform) DeleteApplication(ctx context.Context, app resource.Ap
 	return f.deleteAppErr
 }
 
-func (f *fakeAppPlatform) EnsureComponent(ctx context.Context, app resource.Application, comp resource.Component) (bool, string, string, error) {
+func (f *fakeAppPlatform) EnsureComponent(ctx context.Context, app resource.Application, comp resource.Component) (reconcile.ComponentObservation, error) {
 	f.ensureCompCalls++
 	f.lastEnsureCompApp = app
-	return f.comp.ready, f.comp.reason, f.comp.message, f.comp.err
+	return reconcile.ComponentObservation{Ready: f.comp.ready, Reason: f.comp.reason, Message: f.comp.message, Reachable: f.comp.reach}, f.comp.err
 }
 
 func (f *fakeAppPlatform) DeleteComponent(ctx context.Context, comp resource.Component) error {

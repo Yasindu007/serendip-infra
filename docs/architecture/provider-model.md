@@ -21,7 +21,7 @@ doc explains the *design intent* behind those rules.
 **Superseded sketch.** The `ApplicationProvider`/`InfrastructureProvider`
 code below is the founding-discussion sketch, kept for history. It was never
 shipped: real interfaces are narrow and per-capability (`StorageProvider`,
-`SecretsProvider`, `ApplicationPlatformProvider`; see the sections below).
+`SecretsProvider`, `ApplicationPlatformProvider`, `GatewayProvider`; see the sections below).
 Read it as design intent about the observe/plan/apply/verify shape only, not
 as names or signatures:
 
@@ -236,7 +236,7 @@ The real interface is `ApplicationPlatformProvider`
 type ApplicationPlatformProvider interface {
     EnsureApplication(ctx, app resource.Application) (ready bool, reason, message string, err error)
     DeleteApplication(ctx, app resource.Application) error
-    EnsureComponent(ctx, app resource.Application, comp resource.Component) (ready bool, reason, message string, err error)
+    EnsureComponent(ctx, app resource.Application, comp resource.Component) (ComponentObservation, error) // was a 4-value return until spec 012
     DeleteComponent(ctx, comp resource.Component) error
 }
 ```
@@ -253,6 +253,40 @@ even for a feature you have disabled. OpenChoreo's controller lists Gateway
 API kinds regardless of `gateway.enabled=false` and never became Ready
 without those CRDs. Chart toggles do not prove a feature's CRDs are
 unneeded; check on a real cluster.
+
+## Gateway: a fourth narrow interface, and capabilities that cooperate (spec 012)
+
+`GatewayProvider` (`core/reconcile/gateway.go`) has one method:
+
+```go
+type GatewayProvider interface {
+    EnsureGateway(ctx) (ep GatewayEndpoint, ready bool, reason, message string, err error)
+}
+```
+
+Fourth data point after Storage, Secrets and Application Platform: the shape
+comes from what the capability does (make one shared gateway exist, say where
+it is), so there is no `Delete` and no per-resource reconciler. It is ensured
+once at startup because there is no `Gateway` resource kind yet.
+
+**Pattern for capabilities that must cooperate without importing each
+other.** The Application Platform provider needs to know which gateway to
+attach routes to, and the gateway needs pods labeled the way the platform's
+NetworkPolicies expect. Neither provider names the other. `core/` defines a
+plain value (`GatewayEndpoint`), and `cmd/serendipd` is the only place that
+sees both sides: it takes the value from the gateway capability and passes it
+to the platform provider, and takes the platform provider's required proxy
+labels (`openchoreo.GatewayProxyLabels()`) and passes them to the gateway
+provider. Each provider stays removable, and a replacement gateway only has to
+honor the same inputs. Prefer this over one provider looking the other up.
+
+**`providers/internal/`** holds helpers shared by several providers
+(`helm`, `gatewayapi`). Go's `internal/` rule keeps them importable only from
+`providers/`, so `core/`, `api/` and `cmd/` cannot depend on them. A
+consequence: `cmd/serendipd` cannot call them, so each provider ensures its
+own prerequisite (both `kgateway.Deployer.Ensure` and the OpenChoreo wiring
+call `gatewayapi.EnsureCRDs`; the second call is a few GETs). Detail:
+`gateway.md`.
 
 ## Open questions
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 )
 
@@ -97,6 +98,62 @@ func EnsureDefaultDataPlane(ctx context.Context, client *kubernetes.Client) erro
 	})
 	if err != nil {
 		return fmt.Errorf("openchoreo: create DataPlane %s: %w", DefaultDataPlaneName, err)
+	}
+	return nil
+}
+
+// GatewayProxyLabels are the pod labels the shared gateway's proxies must
+// carry. Every component OpenChoreo renders gets a NetworkPolicy admitting
+// traffic on its exposed ports only from same-namespace pods or from pods
+// labeled openchoreo.dev/system-component -- the label OpenChoreo's own
+// data-plane chart stamps on its gateway proxies via
+// spec.infrastructure.labels. Without it the route attaches but every
+// request times out at the proxy (found in spec 012's real-cluster run).
+func GatewayProxyLabels() map[string]string {
+	return map[string]string{"openchoreo.dev/system-component": "gateway"}
+}
+
+type gatewayListener struct {
+	Port int32  `json:"port"`
+	Host string `json:"host"`
+}
+
+type gatewayEndpointSpec struct {
+	Name      string          `json:"name"`
+	Namespace string          `json:"namespace"`
+	HTTP      gatewayListener `json:"http"`
+}
+
+// EnsureDataPlaneGateway points the default DataPlane's external ingress at
+// the shared gateway, so external Workload endpoints render HTTPRoutes
+// attached to it. Configured on the DataPlane rather than the Environment
+// because the release controller watches DataPlanes and re-renders on
+// change. Patches only when the configured gateway differs.
+func EnsureDataPlaneGateway(ctx context.Context, client *kubernetes.Client, ep reconcile.GatewayEndpoint) error {
+	path := dataPlaneAPIPath(ControlPlaneNamespace) + "/" + DefaultDataPlaneName
+	dp, err := client.Get(ctx, path)
+	if err != nil {
+		return fmt.Errorf("openchoreo: get DataPlane %s: %w", DefaultDataPlaneName, err)
+	}
+	var current struct {
+		Gateway struct {
+			Ingress struct {
+				External gatewayEndpointSpec `json:"external"`
+			} `json:"ingress"`
+		} `json:"gateway"`
+	}
+	if len(dp.Spec) > 0 {
+		if err := json.Unmarshal(dp.Spec, &current); err != nil {
+			return fmt.Errorf("openchoreo: decode DataPlane %s spec: %w", DefaultDataPlaneName, err)
+		}
+	}
+	desired := gatewayEndpointSpec{Name: ep.Name, Namespace: ep.Namespace, HTTP: gatewayListener{Port: ep.Port, Host: ep.Host}}
+	if current.Gateway.Ingress.External == desired {
+		return nil
+	}
+	patch := map[string]any{"spec": map[string]any{"gateway": map[string]any{"ingress": map[string]any{"external": desired}}}}
+	if _, err := client.Patch(ctx, path, patch); err != nil {
+		return fmt.Errorf("openchoreo: set DataPlane %s gateway: %w", DefaultDataPlaneName, err)
 	}
 	return nil
 }

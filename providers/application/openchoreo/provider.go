@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"reflect"
 	"sort"
+	"strconv"
 
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -21,19 +24,28 @@ import (
 // data-plane cell namespace. Everything lives in ControlPlaneNamespace,
 // labeled as the org namespace by EnsurePlatformDefaults.
 type Provider struct {
-	client *kubernetes.Client
+	client  *kubernetes.Client
+	gateway reconcile.GatewayEndpoint
 }
 
-func NewProvider(client *kubernetes.Client) *Provider {
-	return &Provider{client: client}
+// NewProvider returns a Provider whose external routes attach to gateway.
+func NewProvider(client *kubernetes.Client, gateway reconcile.GatewayEndpoint) *Provider {
+	return &Provider{client: client, gateway: gateway}
 }
 
 var _ reconcile.ApplicationPlatformProvider = (*Provider)(nil)
 
-// endpointType is used for every Component port. TCP is the honest
-// generic choice: HTTP-aware types only matter for ingress routing, which
-// is disabled.
-const endpointType = "TCP"
+// endpointFor maps a Component port to a Workload endpoint. Exposed ports
+// become HTTP endpoints with external visibility, which is what makes the
+// component type render a route on the shared gateway. Everything else
+// stays TCP with the default cluster-internal visibility: TCP is the honest
+// generic choice when nothing routes by HTTP.
+func endpointFor(port resource.ComponentPort) workloadEndpoint {
+	if port.Expose {
+		return workloadEndpoint{Type: "HTTP", Port: port.Port, Visibility: []string{"external"}}
+	}
+	return workloadEndpoint{Type: "TCP", Port: port.Port}
+}
 
 type ownerRef struct {
 	ProjectName   string `json:"projectName"`
@@ -46,8 +58,9 @@ type envVar struct {
 }
 
 type workloadEndpoint struct {
-	Type string `json:"type"`
-	Port int32  `json:"port"`
+	Type       string   `json:"type"`
+	Port       int32    `json:"port"`
+	Visibility []string `json:"visibility,omitempty"`
 }
 
 type workloadContainer struct {
@@ -110,10 +123,48 @@ func (p *Provider) DeleteApplication(ctx context.Context, app resource.Applicati
 	return p.deleteIgnoringNotFound(ctx, namespacedPath("projects")+"/"+projectName(app.Metadata.ID))
 }
 
-func (p *Provider) EnsureComponent(ctx context.Context, app resource.Application, comp resource.Component) (bool, string, string, error) {
+func (p *Provider) EnsureComponent(ctx context.Context, app resource.Application, comp resource.Component) (reconcile.ComponentObservation, error) {
+	w, err := p.ensureWorkloadReady(ctx, app, comp)
+	if err != nil {
+		return reconcile.ComponentObservation{}, err
+	}
+	obs := reconcile.ComponentObservation{Ready: w.ready, Reason: w.reason, Message: w.message}
+
+	exposed := exposedPorts(comp.Spec)
+	if len(exposed) == 0 {
+		return obs, nil
+	}
+	if !w.ready {
+		obs.Reachable = &reconcile.Reachability{Reason: reconcile.ReasonPending, Message: "workload is not deployed"}
+		return obs, nil
+	}
+	reach, err := p.observeReachability(ctx, app, comp, w.binding, exposed)
+	if err != nil {
+		// A failed read about routes says nothing about the workload: keep
+		// its Ready result and report reachability as unknown-yet.
+		reach = reconcile.Reachability{Reason: reconcile.ReasonPending, Message: "could not observe routes: " + err.Error()}
+	}
+	obs.Reachable = &reach
+	return obs, nil
+}
+
+// workloadState is the workload half of an observation, plus the
+// ReleaseBinding it was read from (zero when none exists yet).
+type workloadState struct {
+	ready   bool
+	reason  string
+	message string
+	binding kubernetes.Object
+}
+
+func progressing(message string) workloadState {
+	return workloadState{reason: reconcile.ReasonProgressing, message: message}
+}
+
+func (p *Provider) ensureWorkloadReady(ctx context.Context, app resource.Application, comp resource.Component) (workloadState, error) {
 	if len(comp.Spec.Ports) == 0 {
-		return false, reconcile.ReasonUnsupported,
-			"components without ports are not supported by this provider yet", nil
+		return workloadState{reason: reconcile.ReasonUnsupported,
+			message: "components without ports are not supported by this provider yet"}, nil
 	}
 
 	project := projectName(app.Metadata.ID)
@@ -130,48 +181,216 @@ func (p *Provider) EnsureComponent(ctx context.Context, app resource.Application
 		}),
 	})
 	if err != nil {
-		return false, "", "", err
+		return workloadState{}, err
 	}
 	var compSpec struct {
 		Owner ownerRef `json:"owner"`
 	}
 	if err := json.Unmarshal(existing.Spec, &compSpec); err != nil {
-		return false, "", "", fmt.Errorf("decode Component %s spec: %w", name, err)
+		return workloadState{}, fmt.Errorf("decode Component %s spec: %w", name, err)
 	}
 	if compSpec.Owner.ProjectName != project {
 		// owner is immutable upstream; moving a Component to another
 		// Application would need delete-and-recreate.
-		return false, reconcile.ReasonUnsupported,
-			"moving a component to a different application is not supported; delete it and create a new component under the target application", nil
+		return workloadState{reason: reconcile.ReasonUnsupported,
+			message: "moving a component to a different application is not supported; delete it and create a new component under the target application"}, nil
 	}
 
 	patched, err := p.ensureWorkload(ctx, project, name, labels, comp.Spec)
 	if err != nil {
-		return false, "", "", err
+		return workloadState{}, err
 	}
 	if patched {
 		// The ReleaseBinding still describes the previous release at this
 		// point; reading it now would report the old version as Deployed.
-		return false, reconcile.ReasonProgressing, "rolling out updated workload", nil
+		return progressing("rolling out updated workload"), nil
 	}
 
 	binding, err := p.client.Get(ctx, namespacedPath("releasebindings")+"/"+releaseBindingName(comp.Metadata.ID))
 	if errors.Is(err, kubernetes.ErrNotFound) {
-		return false, reconcile.ReasonProgressing, "waiting for the platform to create the release binding", nil
+		return progressing("waiting for the platform to create the release binding"), nil
 	}
 	if err != nil {
-		return false, "", "", fmt.Errorf("get ReleaseBinding %s: %w", releaseBindingName(comp.Metadata.ID), err)
+		return workloadState{}, fmt.Errorf("get ReleaseBinding %s: %w", releaseBindingName(comp.Metadata.ID), err)
 	}
 
 	current, err := p.bindingReleasesDesired(ctx, binding, desiredWorkload(project, name, comp.Spec))
 	if err != nil {
-		return false, "", "", err
+		return workloadState{}, err
 	}
 	if !current {
-		return false, reconcile.ReasonProgressing, "waiting for a release of the current spec to be bound", nil
+		return progressing("waiting for a release of the current spec to be bound"), nil
 	}
 	ready, reason, message := mapReady(binding)
-	return ready, reason, message, nil
+	return workloadState{ready: ready, reason: reason, message: message, binding: binding}, nil
+}
+
+func exposedPorts(spec resource.ComponentSpec) []string {
+	var names []string
+	for _, p := range spec.Ports {
+		if p.Expose {
+			names = append(names, p.Name)
+		}
+	}
+	return names
+}
+
+type routeParentStatus struct {
+	ParentRef struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"parentRef"`
+	Conditions []condition `json:"conditions"`
+}
+
+// observeReachability reports whether every exposed port has a route that
+// the shared gateway accepted, and the platform has published an invoke URL
+// for it. URLs come from the platform's own report, never assembled here,
+// so status shows exactly the address the route really matches.
+func (p *Provider) observeReachability(ctx context.Context, app resource.Application, comp resource.Component, binding kubernetes.Object, exposed []string) (reconcile.Reachability, error) {
+	pending := func(format string, args ...any) reconcile.Reachability {
+		return reconcile.Reachability{Reason: reconcile.ReasonPending, Message: fmt.Sprintf(format, args...)}
+	}
+
+	prb, err := p.client.Get(ctx, namespacedPath("projectreleasebindings")+"/"+projectReleaseBindingName(app.Metadata.ID))
+	if errors.Is(err, kubernetes.ErrNotFound) {
+		return pending("application binding not found"), nil
+	}
+	if err != nil {
+		return reconcile.Reachability{}, fmt.Errorf("get ProjectReleaseBinding %s: %w", projectReleaseBindingName(app.Metadata.ID), err)
+	}
+	var prbStatus struct {
+		Namespace string `json:"namespace"`
+	}
+	if len(prb.Status) > 0 {
+		if err := json.Unmarshal(prb.Status, &prbStatus); err != nil {
+			return reconcile.Reachability{}, fmt.Errorf("decode ProjectReleaseBinding status: %w", err)
+		}
+	}
+	if prbStatus.Namespace == "" {
+		return pending("data-plane namespace not reported yet"), nil
+	}
+
+	name := componentName(comp.Metadata.ID)
+	selector := url.QueryEscape("openchoreo.dev/component=" + name + ",openchoreo.dev/endpoint-visibility=external")
+	routes, err := p.client.List(ctx, "/apis/gateway.networking.k8s.io/v1/namespaces/"+url.PathEscape(prbStatus.Namespace)+"/httproutes?labelSelector="+selector)
+	if err != nil {
+		return reconcile.Reachability{}, fmt.Errorf("list HTTPRoutes for %s: %w", name, err)
+	}
+	byEndpoint := make(map[string]kubernetes.Object, len(routes))
+	for _, r := range routes {
+		byEndpoint[r.Metadata.Labels["openchoreo.dev/endpoint-name"]] = r
+	}
+
+	var bindingStatus struct {
+		Endpoints []struct {
+			Name         string `json:"name"`
+			InvokeURL    string `json:"invokeURL"`
+			ExternalURLs struct {
+				HTTP *endpointURL `json:"http"`
+			} `json:"externalURLs"`
+		} `json:"endpoints"`
+	}
+	if len(binding.Status) > 0 {
+		if err := json.Unmarshal(binding.Status, &bindingStatus); err != nil {
+			return reconcile.Reachability{}, fmt.Errorf("decode ReleaseBinding status: %w", err)
+		}
+	}
+	urls := make(map[string]string, len(bindingStatus.Endpoints))
+	for _, e := range bindingStatus.Endpoints {
+		switch {
+		case e.InvokeURL != "":
+			urls[e.Name] = e.InvokeURL
+		case e.ExternalURLs.HTTP != nil:
+			urls[e.Name] = e.ExternalURLs.HTTP.String()
+		}
+	}
+
+	var endpoints []resource.ComponentEndpointStatus
+	for _, port := range exposed {
+		route, ok := byEndpoint[port]
+		if !ok {
+			return pending("route for port %q not rendered yet", port), nil
+		}
+		parent, ok, err := p.gatewayParent(route)
+		if err != nil {
+			return reconcile.Reachability{}, err
+		}
+		if !ok {
+			return pending("route for port %q not yet attached to the gateway", port), nil
+		}
+		for _, typ := range []string{"Accepted", "ResolvedRefs"} {
+			c := findCondition(parent.Conditions, typ)
+			stale := c != nil && c.ObservedGeneration > 0 && c.ObservedGeneration < route.Metadata.Generation
+			if c == nil || c.Status == "Unknown" || stale {
+				return pending("route for port %q: %s not reported yet", port, typ), nil
+			}
+			if c.Status != "True" {
+				return reconcile.Reachability{Reason: reconcile.ReasonRouteRejected,
+					Message: fmt.Sprintf("route for port %q: %s: %s", port, c.Reason, c.Message)}, nil
+			}
+		}
+		u := urls[port]
+		if u == "" {
+			return pending("waiting for the external URL of port %q", port), nil
+		}
+		endpoints = append(endpoints, resource.ComponentEndpointStatus{Name: port, URL: u})
+	}
+	return reconcile.Reachability{Reachable: true, Reason: reconcile.ReasonServing, Endpoints: endpoints}, nil
+}
+
+// endpointURL is the platform's structured report of one endpoint
+// address. OpenChoreo 1.3.1 fills externalURLs rather than invokeURL for
+// HTTP endpoints, so the URL is assembled from these reported parts.
+type endpointURL struct {
+	Scheme string `json:"scheme"`
+	Host   string `json:"host"`
+	Port   int32  `json:"port"`
+	Path   string `json:"path"`
+}
+
+func (u endpointURL) String() string {
+	if u.Host == "" {
+		return ""
+	}
+	scheme := u.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	host := u.Host
+	if u.Port != 0 && !(scheme == "http" && u.Port == 80) && !(scheme == "https" && u.Port == 443) {
+		host = net.JoinHostPort(u.Host, strconv.Itoa(int(u.Port)))
+	}
+	return (&url.URL{Scheme: scheme, Host: host, Path: u.Path}).String()
+}
+
+// gatewayParent finds the route's status entry for the shared gateway. An
+// empty parentRef namespace means the route's own namespace, which is never
+// the gateway's here, so only an explicit match counts.
+func (p *Provider) gatewayParent(route kubernetes.Object) (routeParentStatus, bool, error) {
+	var st struct {
+		Parents []routeParentStatus `json:"parents"`
+	}
+	if len(route.Status) > 0 {
+		if err := json.Unmarshal(route.Status, &st); err != nil {
+			return routeParentStatus{}, false, fmt.Errorf("decode HTTPRoute %s status: %w", route.Metadata.Name, err)
+		}
+	}
+	for _, ps := range st.Parents {
+		if ps.ParentRef.Name == p.gateway.Name && ps.ParentRef.Namespace == p.gateway.Namespace {
+			return ps, true, nil
+		}
+	}
+	return routeParentStatus{}, false, nil
+}
+
+func findCondition(conds []condition, typ string) *condition {
+	for i := range conds {
+		if conds[i].Type == typ {
+			return &conds[i]
+		}
+	}
+	return nil
 }
 
 // bindingReleasesDesired reports whether the ComponentRelease the binding
@@ -258,7 +477,7 @@ func desiredWorkload(project, name string, spec resource.ComponentSpec) workload
 		Endpoints: make(map[string]workloadEndpoint, len(spec.Ports)),
 	}
 	for _, port := range spec.Ports {
-		w.Endpoints[port.Name] = workloadEndpoint{Type: endpointType, Port: port.Port}
+		w.Endpoints[port.Name] = endpointFor(port)
 	}
 	keys := make([]string, 0, len(spec.Env))
 	for k := range spec.Env {
@@ -308,7 +527,13 @@ func workloadPatch(current, desired workloadSpec) map[string]any {
 		endpoints[k] = nil
 	}
 	for k, v := range desired.Endpoints {
-		endpoints[k] = v
+		// Nested objects merge too: an endpoint going from exposed back to
+		// cluster-internal must clear visibility explicitly.
+		var visibility any = v.Visibility
+		if len(v.Visibility) == 0 {
+			visibility = nil
+		}
+		endpoints[k] = map[string]any{"type": v.Type, "port": v.Port, "visibility": visibility}
 	}
 	var env any = desired.Container.Env
 	if len(desired.Container.Env) == 0 {

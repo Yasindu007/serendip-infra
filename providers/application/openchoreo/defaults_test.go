@@ -23,6 +23,10 @@ type fakeAPI struct {
 	failPath string
 	// lastPatch is the raw body of the most recent PATCH request.
 	lastPatch []byte
+	// lists serves GETs on collection paths as {"items": ...}; lastQuery
+	// is the raw query of the most recent such list request.
+	lists     map[string][]kubernetes.Object
+	lastQuery string
 }
 
 func newFakeAPI() *fakeAPI { return &fakeAPI{objects: map[string]kubernetes.Object{}} }
@@ -54,6 +58,11 @@ func (f *fakeAPI) handler(t *testing.T) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
+			if items, ok := f.lists[r.URL.Path]; ok {
+				f.lastQuery = r.URL.RawQuery
+				json.NewEncoder(w).Encode(map[string]any{"items": items})
+				return
+			}
 			obj, ok := f.objects[r.URL.Path]
 			if !ok {
 				w.WriteHeader(http.StatusNotFound)
@@ -179,8 +188,8 @@ func TestEnsurePlatformDefaults_AllAbsent_CreatesEachOnce(t *testing.T) {
 	for _, r := range ct.Resources {
 		ids = append(ids, r.ID)
 	}
-	if strings.Join(ids, ",") != "deployment,service,env-config" {
-		t.Errorf("component type resources = %v, want [deployment service env-config]", ids)
+	if strings.Join(ids, ",") != "deployment,service,httproute-external,env-config" {
+		t.Errorf("component type resources = %v, want [deployment service httproute-external env-config]", ids)
 	}
 }
 

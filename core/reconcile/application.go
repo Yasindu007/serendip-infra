@@ -33,6 +33,36 @@ const (
 	ReasonEnsureFailed          = "EnsureFailed"
 )
 
+// Reasons for a Component's "Reachable" Condition (conditionReachable,
+// shared with SecretReconciler). It is set only while at least one port is
+// exposed, and says whether the exposed ports can actually be reached from
+// outside the cluster. Fixed and provider-neutral like the Ready reasons.
+const (
+	ReasonServing       = "Serving"
+	ReasonPending       = "Pending"
+	ReasonRouteRejected = "RouteRejected"
+)
+
+// ComponentObservation is what an ApplicationPlatformProvider reports
+// about one Component.
+type ComponentObservation struct {
+	Ready   bool
+	Reason  string
+	Message string
+	// Reachable is nil when no port is exposed.
+	Reachable *Reachability
+}
+
+// Reachability reports whether a Component's exposed ports are reachable
+// from outside the cluster. Endpoints is only honoured when Reachable is
+// true: an address is never published before it serves.
+type Reachability struct {
+	Reachable bool
+	Reason    string
+	Message   string
+	Endpoints []resource.ComponentEndpointStatus
+}
+
 // ApplicationPlatformProvider is the capability-shaped interface
 // ApplicationReconciler and ComponentReconciler drive. Uses only
 // core/resource types; whatever objects a provider creates to realise an
@@ -50,7 +80,7 @@ type ApplicationPlatformProvider interface {
 	DeleteApplication(ctx context.Context, app resource.Application) error
 	// EnsureComponent is given comp's owning Application, already
 	// confirmed Ready by ComponentReconciler.
-	EnsureComponent(ctx context.Context, app resource.Application, comp resource.Component) (ready bool, reason, message string, err error)
+	EnsureComponent(ctx context.Context, app resource.Application, comp resource.Component) (ComponentObservation, error)
 	DeleteComponent(ctx context.Context, comp resource.Component) error
 }
 
@@ -141,47 +171,137 @@ func (r *ComponentReconciler) Reconcile(ctx context.Context, ref graph.ResourceR
 	}
 
 	if err := validateComponentSpec(comp.Spec); err != nil {
-		return r.setCondition(ctx, comp, resource.ConditionFalse, ReasonInvalidSpec, err.Error())
+		return r.setNotDeployed(ctx, comp, ReasonInvalidSpec, err.Error())
 	}
 	appID, err := owningApplicationID(comp)
 	if err != nil {
-		return r.setCondition(ctx, comp, resource.ConditionFalse, ReasonInvalidSpec, err.Error())
+		return r.setNotDeployed(ctx, comp, ReasonInvalidSpec, err.Error())
 	}
 
 	app, err := r.apps.Get(ctx, appID)
 	if errors.Is(err, store.ErrNotFound) {
-		return r.setCondition(ctx, comp, resource.ConditionFalse, ReasonWaitingForApplication,
+		return r.setNotDeployed(ctx, comp, ReasonWaitingForApplication,
 			fmt.Sprintf("owning Application %s not found", appID))
 	}
 	if err != nil {
 		return err
 	}
 	if c := findCondition(app.Status.Conditions, conditionReady); c == nil || c.Status != resource.ConditionTrue {
-		return r.setCondition(ctx, comp, resource.ConditionFalse, ReasonWaitingForApplication,
+		return r.setNotDeployed(ctx, comp, ReasonWaitingForApplication,
 			fmt.Sprintf("owning Application %s is not Ready yet", appID))
 	}
 
-	ready, reason, message, err := r.provider.EnsureComponent(ctx, app, comp)
+	obs, err := r.provider.EnsureComponent(ctx, app, comp)
 	if err != nil {
-		return r.setCondition(ctx, comp, resource.ConditionFalse, ReasonEnsureFailed, err.Error())
+		return r.setNotDeployed(ctx, comp, ReasonEnsureFailed, err.Error())
 	}
-	return r.setCondition(ctx, comp, readyStatus(ready), reason, message)
+	return r.setState(ctx, comp, obs)
 }
 
-func (r *ComponentReconciler) setCondition(ctx context.Context, comp resource.Component, status resource.ConditionStatus, reason, message string) error {
-	if existing := findCondition(comp.Status.Conditions, conditionReady); existing != nil &&
-		existing.Status == status && existing.Reason == reason {
+// setNotDeployed records a Ready=False outcome reached without the
+// provider's observation. Any exposed port is then not reachable either.
+func (r *ComponentReconciler) setNotDeployed(ctx context.Context, comp resource.Component, reason, message string) error {
+	obs := ComponentObservation{Reason: reason, Message: message}
+	if exposesAny(comp.Spec) {
+		obs.Reachable = &Reachability{Reason: ReasonPending, Message: "workload is not deployed"}
+	}
+	return r.setState(ctx, comp, obs)
+}
+
+// setState writes the Ready and Reachable Conditions and the endpoint
+// list, but only when a Condition's {Status, Reason} or the endpoint list
+// actually changes -- the same idempotency rule as every other
+// reconciler, extended to the new fields. Message churn alone is not a
+// change. Reachable is removed, and endpoints cleared, when nothing is
+// exposed; endpoints are published only while Reachable is true.
+func (r *ComponentReconciler) setState(ctx context.Context, comp resource.Component, obs ComponentObservation) error {
+	now := time.Now()
+	ready := resource.Condition{Type: conditionReady, Status: readyStatus(obs.Ready), Reason: obs.Reason, Message: obs.Message, LastTransitionTime: now}
+
+	var reach *resource.Condition
+	var endpoints []resource.ComponentEndpointStatus
+	if obs.Reachable != nil {
+		rs := *obs.Reachable
+		// A route can't serve a workload that isn't running, whatever the
+		// provider reports.
+		if rs.Reachable && !obs.Ready {
+			rs = Reachability{Reason: ReasonPending, Message: "workload is not deployed"}
+		}
+		reach = &resource.Condition{Type: conditionReachable, Status: readyStatus(rs.Reachable), Reason: rs.Reason, Message: rs.Message, LastTransitionTime: now}
+		if rs.Reachable {
+			endpoints = rs.Endpoints
+		}
+	}
+
+	if conditionUnchanged(comp.Status.Conditions, ready) &&
+		reachableUnchanged(comp.Status.Conditions, reach) &&
+		endpointsEqual(comp.Status.Endpoints, endpoints) {
 		return nil
 	}
-	comp.Status.Conditions = upsertCondition(comp.Status.Conditions, resource.Condition{
-		Type:               conditionReady,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: time.Now(),
-	})
+
+	comp.Status.Conditions = upsertCondition(comp.Status.Conditions, keepTransitionTime(comp.Status.Conditions, ready))
+	if reach != nil {
+		comp.Status.Conditions = upsertCondition(comp.Status.Conditions, keepTransitionTime(comp.Status.Conditions, *reach))
+	} else {
+		comp.Status.Conditions = removeCondition(comp.Status.Conditions, conditionReachable)
+	}
+	comp.Status.Endpoints = endpoints
 	_, err := r.components.Update(ctx, comp)
 	return err
+}
+
+// keepTransitionTime preserves c's previous LastTransitionTime when its
+// Status hasn't changed -- per Kubernetes conventions the time marks a
+// status transition, not every rewrite (e.g. a Reason-only change, or
+// another Condition changing in the same write).
+func keepTransitionTime(conditions []resource.Condition, c resource.Condition) resource.Condition {
+	if existing := findCondition(conditions, c.Type); existing != nil && existing.Status == c.Status {
+		c.LastTransitionTime = existing.LastTransitionTime
+	}
+	return c
+}
+
+func conditionUnchanged(conditions []resource.Condition, want resource.Condition) bool {
+	existing := findCondition(conditions, want.Type)
+	return existing != nil && existing.Status == want.Status && existing.Reason == want.Reason
+}
+
+func reachableUnchanged(conditions []resource.Condition, want *resource.Condition) bool {
+	if want == nil {
+		return findCondition(conditions, conditionReachable) == nil
+	}
+	return conditionUnchanged(conditions, *want)
+}
+
+func endpointsEqual(a, b []resource.ComponentEndpointStatus) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func removeCondition(conditions []resource.Condition, condType string) []resource.Condition {
+	out := make([]resource.Condition, 0, len(conditions))
+	for _, c := range conditions {
+		if c.Type != condType {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func exposesAny(spec resource.ComponentSpec) bool {
+	for _, p := range spec.Ports {
+		if p.Expose {
+			return true
+		}
+	}
+	return false
 }
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)

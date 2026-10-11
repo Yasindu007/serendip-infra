@@ -4,7 +4,8 @@ This document describes the Application Platform capability
 (`capability-model.md:46`) as it exists today: spec 010's OpenChoreo
 deployment foundation plus spec 011's real capability on top of it
 (`Application`/`Component` resources, `ApplicationPlatformProvider`, two
-reconcilers). ADR 0005 is the authoritative record for *why* OpenChoreo;
+reconcilers), and spec 012's external exposure through the Gateway
+capability (`gateway.md`). ADR 0005 is the authoritative record for *why* OpenChoreo;
 ADR 0010 for *why the foundation shells out to `helm`* (a per-capability
 exception to ADR 0002/0009's direct-object-construction precedent).
 
@@ -41,7 +42,8 @@ if its owner project differs from the requested Application it returns
 `Unsupported`), then the Workload. An existing Workload is compared on only
 the fields Serendip owns (image, env, endpoints) and merge-patched only on
 real difference, so a no-drift reconcile makes no writes on either side.
-Every port becomes a `TCP` endpoint. Workload env is OpenChoreo's
+A port becomes a `TCP` endpoint, unless it sets `expose: true` (below).
+Workload env is OpenChoreo's
 `[{key,value}]` list, sorted by key; OpenChoreo delivers it via the type's
 env-config ConfigMap and `envFrom`.
 
@@ -69,12 +71,21 @@ GET-then-create, not reconciled):
   namespace. Copied from v1.3.1 `samples/getting-started/all.yaml`.
 - `ClusterComponentType/serendip-service` (`workloadType: deployment`): a
   trimmed copy of the sample's `service` type that renders a Deployment, a
-  ClusterIP Service, and an env ConfigMap consumed via `envFrom`. Dropped:
-  HTTPRoutes and their visibility validations (no gateway ingress),
+  ClusterIP Service, an env ConfigMap consumed via `envFrom`, and (spec 012)
+  an `httproute-external` for each endpoint that is `HTTP` with `external`
+  visibility. The route is the sample's, minus its CORS filter (outside the
+  standard-channel Gateway API). Dropped: the sample's visibility validations,
   ExternalSecrets (external-secrets not installed; secret injection out of
   scope), file-mount config, command/args, and the workflow/trait
   allow-lists (nothing uses them). Kept: the "at least one endpoint"
   validation, which is why port-less Components are unsupported (below).
+  **Update path:** `EnsurePlatformDefaults` is GET-then-create for every
+  default, except that the ClusterComponentType is also merge-patched when the
+  desired spec is not *contained* in the stored one (containment, not
+  equality, because the API server adds defaults). This is how clusters that
+  predate spec 012 pick up the route. Existing releases snapshot the type, so
+  running Components are untouched until their next Workload change. A key
+  removed from the desired spec would not be removed from a live type.
 - `Environment/development` pointing at `DataPlane/default`.
 - `DeploymentPipeline/serendip`, single environment. A pipeline with an empty
   `targetEnvironmentRefs` was confirmed accepted on a real cluster
@@ -145,6 +156,26 @@ Both reconcilers' not-found branches call `Delete*` with an ID-only resource.
 Delete issues a DELETE on the Project/Component (404 is success) and returns;
 OpenChoreo's finalizers do the teardown asynchronously.
 
+### External exposure (spec 012)
+
+`ComponentPort.Expose` (default false) maps to a Workload endpoint
+`{type: HTTP, visibility: [external]}`; other ports stay `TCP` as before.
+`EnsureDataPlaneGateway` (in `dataplane.go`, called after
+`EnsureDefaultDataPlane`) merge-patches `DataPlane/default.spec.gateway.ingress.
+external` with the `GatewayEndpoint` that `cmd/serendipd` hands over from the
+Gateway capability, only when it differs. `EnsureComponent` returns a
+`ComponentObservation`; when a port is exposed and the workload is Deployed it
+also finds the rendered HTTPRoutes (by `openchoreo.dev/component` and
+`endpoint-visibility=external` labels, in the cell namespace from
+`ProjectReleaseBinding.status.namespace`), checks each route's parent status
+for the shared Gateway, and reads the URL OpenChoreo reports. Reasons, URL
+publication rules, the NetworkPolicy/proxy-label finding and the
+`externalURLs` finding are in `gateway.md`; OpenChoreo 1.3.1 reports
+`ReleaseBinding.status.endpoints[].externalURLs.http {scheme,host,port,path}`
+rather than `invokeURL`, so the provider assembles the URL from those parts.
+A Component with nothing exposed makes no extra API calls and has no
+`Reachable` Condition.
+
 ### Gateway API CRDs prerequisite (real-cluster finding)
 
 OpenChoreo's RenderedRelease controller lists Gateway and HTTPRoute objects in
@@ -152,17 +183,17 @@ the data plane on every reconcile, and fails every reconcile with "not found"
 when those CRDs are missing, **even with `gateway.enabled=false` on both
 charts**. Result: no release ever reported status and nothing became Ready.
 
-`EnsureGatewayAPICRDs` (run in `wireOpenChoreo` after `EnsureDefaultDataPlane`,
-before `EnsurePlatformDefaults`) installs Gateway API **v1.3.0 standard-channel
-CRDs only**: no controller, no Gateway objects. It downloads the pinned GitHub
-release `standard-install.yaml`, verifies its sha256, and creates each CRD that
-does not exist. If all 5 CRDs already exist it skips the download entirely;
-existing CRDs are never upgraded or downgraded (a cluster running its own
-gateway controller keeps its version).
+`EnsureGatewayAPICRDs` (run in `wireOpenChoreo` after `EnsureDataPlaneGateway`,
+before `EnsurePlatformDefaults`) is a one-line delegate to
+`providers/internal/gatewayapi.EnsureCRDs`, shared with the kgateway provider.
+Spec 011 pinned v1.3.0 and never touched existing CRDs; that is **superseded**:
+the pin is now **v1.6.1** (forced by kgateway 2.4.x, ADR 0011) with
+**upgrade-only** semantics. Older CRDs are upgraded in place by bundle-version
+annotation, equal or newer are left alone, and upstream's `safe-upgrades`
+admission policy is installed too. Details in `gateway.md`.
 
-This is a prerequisite, not ingress: external reachability stays out of scope.
-**Known limitation:** a fresh install needs network access to github.com;
-air-gapped installs need the manifest embedded or mirrored later.
+**Known limitation:** a fresh install (or an upgrade) needs network access to
+github.com; air-gapped installs need the manifest embedded or mirrored later.
 
 ### Observed rollout semantics
 
@@ -205,8 +236,9 @@ Each disabled flag turns off a dependency deferred rather than removed:
   hostnames; the developer-portal UI is deferred (no consumer).
 - `gateway.enabled=false` (both charts) plus `gateway.tls.enabled=false` (data
   plane). The data-plane chart's hostname check is gated on `gateway.tls.enabled`
-  alone, found on a real cluster. kgateway is deferred. (OpenChoreo's internal
-  `clusterGateway` is separate and always on.)
+  alone, found on a real cluster. The charts' own gateway stays off because
+  Serendip creates the shared Gateway itself (`gateway.md`). (OpenChoreo's
+  internal `clusterGateway` is separate and always on.)
 
 ### `DataPlane` CR and CA-trust bootstrapping
 
@@ -236,9 +268,11 @@ not kill the daemon).
 ### Startup wiring
 
 `wireOpenChoreo` (called from `wireKubernetes` after `wireOpenBao`; skipped
-entirely when `SERENDIP_KUBECONFIG` is unset) runs, in order: `Deployer.Ensure`,
-`EnsureDefaultDataPlane`, `EnsureGatewayAPICRDs`, `EnsurePlatformDefaults`,
-`CheckReady`. It then registers `openchoreo.NewProvider(client)` under
+entirely when `SERENDIP_KUBECONFIG` is unset) takes the `GatewayEndpoint` from
+`wireGateway` (which runs first) and runs, in order: `Deployer.Ensure`,
+`EnsureDefaultDataPlane`, `EnsureDataPlaneGateway`, `EnsureGatewayAPICRDs`,
+`EnsurePlatformDefaults`, `CheckReady`. It then registers
+`openchoreo.NewProvider(client, gateway)` under
 `"application-platform"`, does the single Lookup and type-assert to
 `reconcile.ApplicationPlatformProvider`, and registers the Application and
 Component reconcilers with the engine (30s resync, 10s per-reconcile timeout).
@@ -251,8 +285,8 @@ client's `Object` envelope does not model.
 - **Port-less (worker) Components.** The `serendip-service` type requires an
   endpoint, and `componentType` is immutable upstream, so supporting both would
   need delete-and-recreate. Reported as `Unsupported`.
-- **Ingress / external visibility.** Only the default cluster-internal
-  endpoint visibility is usable; no kgateway, no Gateway or HTTPRoute objects.
+- **Non-external visibility** (`internal`/`namespace`), TLS, custom domains:
+  see `gateway.md`. Only `external` HTTP exposure exists.
 - **Mapping Serendip Organization/Project onto OpenChoreo namespaces**
   (multi-tenancy; one fixed org namespace today).
 - **Secret injection** into Components (spec 009 `Secret`s are not wired in).
@@ -265,8 +299,8 @@ client's `Object` envelope does not model.
   restart only.
 - **Status lag of up to ~30s**: OpenChoreo-side progress is not a Serendip
   event and the engine has no per-resource requeue.
-- **Build Plane, Observability Plane, Thunder, kgateway deployment**
-  (ADR 0005 and prior scope).
+- **Build Plane, Observability Plane, Thunder** (ADR 0005 and prior scope).
+  kgateway is deployed by the Gateway capability (`gateway.md`), not here.
 
 ## Real-cluster verification (spec 011, kind, Kubernetes 1.34.0)
 

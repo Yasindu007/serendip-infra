@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 	"github.com/serendip-infra/serendip-infra/providers/application/openchoreo"
+	"github.com/serendip-infra/serendip-infra/providers/gateway/kgateway"
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 	"github.com/serendip-infra/serendip-infra/providers/secrets/openbao"
 	"github.com/serendip-infra/serendip-infra/providers/storage/localpath"
@@ -232,11 +234,73 @@ func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus 
 		return nil, fmt.Errorf("openbao: %w", err)
 	}
 
-	if err := wireOpenChoreo(ctx, client, registry, db, bus, engine); err != nil {
+	gateway, err := wireGateway(ctx, client, registry)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: %w", err)
+	}
+
+	if err := wireOpenChoreo(ctx, client, registry, db, bus, engine, gateway); err != nil {
 		return nil, fmt.Errorf("openchoreo: %w", err)
 	}
 
 	return secretReconciler, nil
+}
+
+// wireGateway installs kgateway (spec 012, ADR 0011), registers it under
+// the "gateway" capability, and ensures the shared external gateway. The
+// returned GatewayEndpoint is handed to the application platform provider,
+// so neither provider imports the other. A gateway that never becomes
+// ready fails startup, the same contract as the application platform's
+// own readiness check.
+func wireGateway(ctx context.Context, client *kubernetes.Client, registry *provider.Registry) (reconcile.GatewayEndpoint, error) {
+	host := envOr("SERENDIP_GATEWAY_HOST", "localhost")
+	nodePort, err := parseNodePort(os.Getenv("SERENDIP_GATEWAY_NODE_PORT"))
+	if err != nil {
+		return reconcile.GatewayEndpoint{}, err
+	}
+
+	deployer, err := kgateway.NewDeployer(client)
+	if err != nil {
+		return reconcile.GatewayEndpoint{}, fmt.Errorf("deployer: %w", err)
+	}
+	if err := deployer.Ensure(ctx); err != nil {
+		return reconcile.GatewayEndpoint{}, fmt.Errorf("deploy: %w", err)
+	}
+
+	registry.Register("gateway", kgateway.NewProvider(client, host, nodePort, openchoreo.GatewayProxyLabels()))
+	impl, ok := registry.Lookup("gateway")
+	if !ok {
+		return reconcile.GatewayEndpoint{}, fmt.Errorf("internal: just-registered capability not found in registry")
+	}
+	gp, ok := impl.(reconcile.GatewayProvider)
+	if !ok {
+		return reconcile.GatewayEndpoint{}, fmt.Errorf("internal: registered implementation does not satisfy reconcile.GatewayProvider")
+	}
+
+	ep, ready, reason, message, err := gp.EnsureGateway(ctx)
+	if err != nil {
+		return reconcile.GatewayEndpoint{}, err
+	}
+	if !ready {
+		return reconcile.GatewayEndpoint{}, fmt.Errorf("gateway %s/%s not ready: %s: %s (if NodePort %d is already in use, set SERENDIP_GATEWAY_NODE_PORT)",
+			ep.Namespace, ep.Name, reason, message, ep.Port)
+	}
+
+	log.Printf("serendipd: kubernetes: gateway provider (kgateway) active, external routes on %s:%d", ep.Host, ep.Port)
+	return ep, nil
+}
+
+// parseNodePort parses SERENDIP_GATEWAY_NODE_PORT; empty means the default.
+// Kubernetes only allocates NodePorts from 30000-32767 by default.
+func parseNodePort(raw string) (int32, error) {
+	if raw == "" {
+		return kgateway.DefaultNodePort, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 30000 || n > 32767 {
+		return 0, fmt.Errorf("SERENDIP_GATEWAY_NODE_PORT=%q: must be a port in the NodePort range 30000-32767", raw)
+	}
+	return int32(n), nil
 }
 
 // wireOpenBao deploys OpenBao into the cluster (idempotent, spec 008),
@@ -297,7 +361,7 @@ func wireOpenBao(ctx context.Context, client *kubernetes.Client, registry *provi
 // *openchoreo.Provider under "application-platform", and wires
 // ApplicationReconciler/ComponentReconciler into engine (mirrors
 // wireOpenBao's wiring block).
-func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine) error {
+func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine, gateway reconcile.GatewayEndpoint) error {
 	deployer, err := openchoreo.NewDeployer(client)
 	if err != nil {
 		return fmt.Errorf("deployer: %w", err)
@@ -308,6 +372,9 @@ func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, registry *pr
 
 	if err := openchoreo.EnsureDefaultDataPlane(ctx, client); err != nil {
 		return fmt.Errorf("default data plane: %w", err)
+	}
+	if err := openchoreo.EnsureDataPlaneGateway(ctx, client, gateway); err != nil {
+		return fmt.Errorf("data plane gateway: %w", err)
 	}
 	if err := openchoreo.EnsureGatewayAPICRDs(ctx, client); err != nil {
 		return fmt.Errorf("gateway api crds: %w", err)
@@ -320,7 +387,7 @@ func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, registry *pr
 		return fmt.Errorf("readiness: %w", err)
 	}
 
-	registry.Register("application-platform", openchoreo.NewProvider(client))
+	registry.Register("application-platform", openchoreo.NewProvider(client, gateway))
 
 	impl, ok := registry.Lookup("application-platform")
 	if !ok {

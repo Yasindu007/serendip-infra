@@ -40,7 +40,7 @@ escape hatch").
 | Secrets & PKI | Yes | OpenBao | External Secrets Operator + external vault |
 | Certificates | Yes | cert-manager | — |
 | Networking (CNI) | Yes | Cilium | — |
-| Gateway / ingress | Yes | kgateway | WSO2 API Manager (advanced API management) |
+| Gateway / ingress | Yes | kgateway (ADR 0011; `gateway.md`) | WSO2 API Manager (advanced API management) |
 | Compute (Kubernetes) | Yes | K3s (ADR 0001) | RKE2 (future, hardened profiles) |
 | Cluster management | No | Rancher | — (native single-cluster mgmt below 3+ nodes) |
 | Application platform | Yes | OpenChoreo (ADR 0005) | KubeVela + Crossplane + Argo (evaluated, not selected) |

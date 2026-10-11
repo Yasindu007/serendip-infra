@@ -29,14 +29,27 @@ type ComponentSpec struct {
 }
 
 // ComponentPort is one port the Component's container listens on. Name
-// is a DNS label identifying the port within its Component.
+// is a DNS label identifying the port within its Component. Expose makes
+// the port reachable from outside the cluster through the platform's
+// shared gateway, served as HTTP.
 type ComponentPort struct {
-	Name string `json:"name"`
-	Port int32  `json:"port"`
+	Name   string `json:"name"`
+	Port   int32  `json:"port"`
+	Expose bool   `json:"expose,omitempty"`
 }
 
+// ComponentStatus.Endpoints lists the external address of each exposed
+// port, populated only once that address is actually serving.
 type ComponentStatus struct {
 	Status
+	Endpoints []ComponentEndpointStatus `json:"endpoints,omitempty"`
+}
+
+// ComponentEndpointStatus is where one exposed port can be reached from
+// outside the cluster. Name matches the ComponentPort's Name.
+type ComponentEndpointStatus struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 type Component = Resource[ComponentSpec, ComponentStatus]

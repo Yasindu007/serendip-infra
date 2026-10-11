@@ -41,7 +41,7 @@ func readyStatus(status, reason string) json.RawMessage {
 
 func TestEnsureApplication_FreshCreatesProjectAndBinding(t *testing.T) {
 	api := newFakeAPI()
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 
 	ready, reason, _, err := p.EnsureApplication(context.Background(), testApp())
 	if err != nil {
@@ -83,7 +83,7 @@ func TestEnsureApplication_FreshCreatesProjectAndBinding(t *testing.T) {
 
 func TestEnsureApplication_ReadyBinding(t *testing.T) {
 	api := newFakeAPI()
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := p.EnsureApplication(context.Background(), testApp()); err != nil {
 		t.Fatal(err)
 	}
@@ -107,9 +107,9 @@ func TestEnsureApplication_ReadyBinding(t *testing.T) {
 
 func TestEnsureComponent_FreshCreatesComponentAndWorkload(t *testing.T) {
 	api := newFakeAPI()
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 
-	ready, reason, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec))
+	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
 	if err != nil {
 		t.Fatalf("EnsureComponent() = %v", err)
 	}
@@ -150,13 +150,13 @@ func TestEnsureComponent_FreshCreatesComponentAndWorkload(t *testing.T) {
 
 func TestEnsureComponent_UnchangedWorkloadIsNotPatched(t *testing.T) {
 	api := newFakeAPI()
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
-	if _, _, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec)); err != nil {
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
+	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
 	}
 	api.calls = nil
 
-	if _, _, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec)); err != nil {
+	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
 	}
 	if n := api.count(http.MethodPost) + api.count(http.MethodPatch); n != 0 {
@@ -166,8 +166,8 @@ func TestEnsureComponent_UnchangedWorkloadIsNotPatched(t *testing.T) {
 
 func TestEnsureComponent_ChangedSpecPatchesOnlyOwnedFields(t *testing.T) {
 	api := newFakeAPI()
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
-	if _, _, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec)); err != nil {
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
+	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
 	}
 	api.calls = nil
@@ -179,7 +179,7 @@ func TestEnsureComponent_ChangedSpecPatchesOnlyOwnedFields(t *testing.T) {
 	// A Ready binding for the previous release must not make the update
 	// look Deployed in the same pass that patched the Workload.
 	api.put(nsItem("releasebindings", releaseBindingName(testCompID)), kubernetes.Object{Status: readyStatus("True", "Ready")})
-	ready, reason, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(changed))
+	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(changed))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestEnsureComponent_ChangedSpecPatchesOnlyOwnedFields(t *testing.T) {
 	if got := string(body.Spec["container"]); got != `{"env":null,"image":"nginx:1.28-alpine"}` {
 		t.Errorf("patch container = %s", got)
 	}
-	if got := string(body.Spec["endpoints"]); got != `{"http":null,"metrics":{"type":"TCP","port":9090}}` {
+	if got := string(body.Spec["endpoints"]); got != `{"http":null,"metrics":{"port":9090,"type":"TCP","visibility":null}}` {
 		t.Errorf("patch endpoints = %s, want removed endpoint nulled", got)
 	}
 }
@@ -226,9 +226,9 @@ func TestEnsureComponent_ReleaseBindingStatusMapping(t *testing.T) {
 		t.Run(tt.reason, func(t *testing.T) {
 			api := newFakeAPI()
 			putBoundRelease(api, webSpec, readyStatus(tt.status, tt.reason))
-			p := NewProvider(newTestKubeClient(t, api.handler(t)))
+			p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 
-			ready, reason, message, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec))
+			ready, reason, message, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -245,8 +245,8 @@ func TestEnsureComponent_ReleaseBindingStatusMapping(t *testing.T) {
 func TestEnsureComponent_NoReadyConditionYetIsProgressing(t *testing.T) {
 	api := newFakeAPI()
 	putBoundRelease(api, webSpec, nil)
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
-	ready, reason, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec))
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
+	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
 	if err != nil || ready || reason != reconcile.ReasonProgressing {
 		t.Errorf("= (%v, %q, %v), want (false, Progressing, nil)", ready, reason, err)
 	}
@@ -254,8 +254,8 @@ func TestEnsureComponent_NoReadyConditionYetIsProgressing(t *testing.T) {
 
 func TestEnsureComponent_ZeroPortsUnsupportedWithoutAPICalls(t *testing.T) {
 	api := newFakeAPI()
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
-	ready, reason, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(resource.ComponentSpec{Image: "busybox"}))
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
+	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(resource.ComponentSpec{Image: "busybox"}))
 	if err != nil || ready || reason != reconcile.ReasonUnsupported {
 		t.Errorf("= (%v, %q, %v), want (false, Unsupported, nil)", ready, reason, err)
 	}
@@ -266,12 +266,12 @@ func TestEnsureComponent_ZeroPortsUnsupportedWithoutAPICalls(t *testing.T) {
 
 func TestEnsureComponent_MovedBetweenApplicationsUnsupported(t *testing.T) {
 	api := newFakeAPI()
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
-	if _, _, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec)); err != nil {
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
+	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
 	}
 	other := resource.Application{Metadata: resource.Metadata{ID: "app-id-2"}}
-	ready, reason, _, err := p.EnsureComponent(context.Background(), other, testComp(webSpec))
+	ready, reason, _, err := ensureComp(p, context.Background(), other, testComp(webSpec))
 	if err != nil || ready || reason != reconcile.ReasonUnsupported {
 		t.Errorf("= (%v, %q, %v), want (false, Unsupported, nil)", ready, reason, err)
 	}
@@ -280,19 +280,19 @@ func TestEnsureComponent_MovedBetweenApplicationsUnsupported(t *testing.T) {
 func TestEnsureComponent_APIErrorReturned(t *testing.T) {
 	api := newFakeAPI()
 	api.failPath = namespacedPath("components")
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
-	if _, _, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec)); err == nil {
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
+	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err == nil {
 		t.Error("EnsureComponent() = nil error, want the API failure")
 	}
 }
 
 func TestDelete_RemovesObjectAndIgnoresNotFound(t *testing.T) {
 	api := newFakeAPI()
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := p.EnsureApplication(context.Background(), testApp()); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec)); err != nil {
+	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -322,7 +322,7 @@ func TestDelete_RemovesObjectAndIgnoresNotFound(t *testing.T) {
 func TestDelete_APIErrorReturned(t *testing.T) {
 	api := newFakeAPI()
 	api.failPath = namespacedPath("components")
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if err := p.DeleteComponent(context.Background(), resource.Component{Metadata: resource.Metadata{ID: testCompID}}); err == nil {
 		t.Error("DeleteComponent() = nil, want the API failure")
 	}
@@ -369,9 +369,9 @@ func TestEnsureComponent_ReadyBindingForStaleReleaseIsProgressing(t *testing.T) 
 	old := webSpec
 	old.Image = "nginx:1.26-alpine"
 	putBoundRelease(api, old, readyStatus("True", "Ready"))
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 
-	ready, reason, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec))
+	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
 	if err != nil || ready || reason != reconcile.ReasonProgressing {
 		t.Errorf("= (%v, %q, %v), want (false, Progressing, nil) while the bound release predates the spec", ready, reason, err)
 	}
@@ -381,10 +381,17 @@ func TestEnsureComponent_BoundReleaseMissingIsProgressing(t *testing.T) {
 	api := newFakeAPI()
 	putBoundRelease(api, webSpec, readyStatus("True", "Ready"))
 	delete(api.objects, nsItem("componentreleases", "rel-1"))
-	p := NewProvider(newTestKubeClient(t, api.handler(t)))
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 
-	ready, reason, _, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec))
+	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
 	if err != nil || ready || reason != reconcile.ReasonProgressing {
 		t.Errorf("= (%v, %q, %v), want (false, Progressing, nil)", ready, reason, err)
 	}
+}
+
+// ensureComp unpacks EnsureComponent's observation into the workload
+// readiness fields most tests assert on.
+func ensureComp(p *Provider, ctx context.Context, app resource.Application, comp resource.Component) (bool, string, string, error) {
+	obs, err := p.EnsureComponent(ctx, app, comp)
+	return obs.Ready, obs.Reason, obs.Message, err
 }

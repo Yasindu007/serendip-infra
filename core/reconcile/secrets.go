@@ -10,8 +10,9 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/store"
 )
 
-// conditionReachable is the one Condition.Type SecretReconciler sets.
-// Named "Reachable", not "Synced" -- there is no desired value in
+// conditionReachable is the one Condition.Type SecretReconciler sets, and
+// is shared with ComponentReconciler, where it means an exposed port can be
+// reached from outside the cluster. For Secrets it's named "Reachable", not "Synced" -- there is no desired value in
 // SecretSpec to compare against (resource.SecretSpec's own doc
 // comment), only existence to observe. A "Synced" name would wrongly
 // imply a value-matching guarantee this Reconciler cannot make
