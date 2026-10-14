@@ -21,7 +21,7 @@ below) — not pushing yet is a choice, not a blocker.
 
 **Spec 014 (reconciliation hardening) — implementation and real-cluster
 verification done; both final reviews PASS and docs synced. Only the
-benchmark re-run (T010 item 7) is left; not yet committed.** Detail below, under "Spec 014 — what actually got built."
+benchmark re-run (T010 item 7) is left. Committed (`993fa54`).** Detail below, under "Spec 014 — what actually got built."
 
 **Spec 013 (edge-1 benchmark harness, simulated T470) — COMPLETE** (`3361e46`).
 
