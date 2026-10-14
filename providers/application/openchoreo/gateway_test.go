@@ -3,7 +3,6 @@ package openchoreo
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -30,78 +29,6 @@ func dataPlanePath() string {
 	return dataPlaneAPIPath(ControlPlaneNamespace) + "/" + DefaultDataPlaneName
 }
 
-func TestEnsureDataPlaneGateway_SetsAndIsIdempotent(t *testing.T) {
-	api := newFakeAPI()
-	api.put(dataPlanePath(), kubernetes.Object{Spec: mustJSON(map[string]any{"clusterAgent": map[string]any{}})})
-	client := newTestKubeClient(t, api.handler(t))
-
-	if err := EnsureDataPlaneGateway(context.Background(), client, testGateway); err != nil {
-		t.Fatalf("EnsureDataPlaneGateway() = %v", err)
-	}
-	if n := api.count(http.MethodPatch); n != 1 {
-		t.Fatalf("PATCH calls = %d, want 1", n)
-	}
-	want := `{"spec":{"gateway":{"ingress":{"external":{"name":"serendip-external","namespace":"kgateway-system","http":{"port":30080,"host":"localhost"}}}}}}`
-	if string(api.lastPatch) != want {
-		t.Errorf("patch = %s, want %s", api.lastPatch, want)
-	}
-
-	// The fake's merge only handles top-level spec keys, so store the
-	// resulting spec as the API server would have.
-	obj := api.objects[dataPlanePath()]
-	obj.Spec = mustJSON(map[string]any{"clusterAgent": map[string]any{}, "gateway": map[string]any{"ingress": map[string]any{"external": map[string]any{
-		"name": "serendip-external", "namespace": "kgateway-system", "http": map[string]any{"port": 30080, "host": "localhost"},
-	}}}})
-	api.objects[dataPlanePath()] = obj
-	api.calls = nil
-	if err := EnsureDataPlaneGateway(context.Background(), client, testGateway); err != nil {
-		t.Fatal(err)
-	}
-	if n := api.count(http.MethodPatch); n != 0 {
-		t.Errorf("PATCH on unchanged gateway = %d, want 0", n)
-	}
-}
-
-func TestComponentTypeUpdate_PatchesOldSpecButNotServerDefaults(t *testing.T) {
-	ctPath := clusterPath("clustercomponenttypes") + "/" + componentTypeName
-
-	t.Run("stored spec from before external routes is updated", func(t *testing.T) {
-		api := newFakeAPI()
-		api.put(nsPath, kubernetes.Object{Metadata: kubernetes.ObjectMeta{Name: ControlPlaneNamespace, Labels: map[string]string{controlPlaneNamespaceLabel: "true"}}})
-		old := componentTypeSpec()
-		res := old["resources"].([]any)
-		old["resources"] = append(res[:2:2], res[3]) // drop httproute-external
-		api.put(ctPath, kubernetes.Object{Spec: mustJSON(old)})
-		client := newTestKubeClient(t, api.handler(t))
-
-		if err := EnsurePlatformDefaults(context.Background(), client); err != nil {
-			t.Fatal(err)
-		}
-		if n := api.count(http.MethodPatch); n != 1 || !strings.Contains(string(api.lastPatch), "httproute-external") {
-			t.Errorf("PATCH calls = %d, last = %.120s; want one patch adding httproute-external", n, api.lastPatch)
-		}
-	})
-
-	t.Run("server-added defaults do not cause a patch", func(t *testing.T) {
-		api := newFakeAPI()
-		api.put(nsPath, kubernetes.Object{Metadata: kubernetes.ObjectMeta{Name: ControlPlaneNamespace, Labels: map[string]string{controlPlaneNamespaceLabel: "true"}}})
-		var stored map[string]any
-		json.Unmarshal(mustJSON(componentTypeSpec()), &stored)
-		for _, r := range stored["resources"].([]any) {
-			r.(map[string]any)["targetPlane"] = "dataplane"
-		}
-		api.put(ctPath, kubernetes.Object{Spec: mustJSON(stored)})
-		client := newTestKubeClient(t, api.handler(t))
-
-		if err := EnsurePlatformDefaults(context.Background(), client); err != nil {
-			t.Fatal(err)
-		}
-		if n := api.count(http.MethodPatch); n != 0 {
-			t.Errorf("PATCH calls = %d, want 0 when the stored spec only adds server defaults", n)
-		}
-	})
-}
-
 func TestEnsureComponent_ExposureMapsToEndpointTypeAndVisibility(t *testing.T) {
 	api := newFakeAPI()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
@@ -115,24 +42,31 @@ func TestEnsureComponent_ExposureMapsToEndpointTypeAndVisibility(t *testing.T) {
 	}
 }
 
-func TestEnsureComponent_UnexposingClearsVisibilityExplicitly(t *testing.T) {
+// Un-exposing a port is just a Workload apply without visibility: the API
+// server drops the field Serendip no longer applies, so no explicit null is
+// needed (or sent).
+func TestEnsureComponent_UnexposingAppliesWithoutVisibility(t *testing.T) {
 	api := newFakeAPI()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, err := p.EnsureComponent(context.Background(), testApp(), testComp(exposedSpec)); err != nil {
 		t.Fatal(err)
 	}
-	api.calls = nil
 
 	internal := exposedSpec
 	internal.Ports = []resource.ComponentPort{{Name: "http", Port: 80}, {Name: "metrics", Port: 9113}}
-	if _, err := p.EnsureComponent(context.Background(), testApp(), testComp(internal)); err != nil {
+	obs, err := p.EnsureComponent(context.Background(), testApp(), testComp(internal))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if n := api.count(http.MethodPatch); n != 1 {
-		t.Fatalf("PATCH calls = %v, want exactly one Workload patch", api.calls)
+	if obs.Reason != reconcile.ReasonProgressing {
+		t.Errorf("reason = %q, want Progressing right after the spec change", obs.Reason)
 	}
-	if !strings.Contains(string(api.lastPatch), `"http":{"port":80,"type":"TCP","visibility":null}`) {
-		t.Errorf("patch = %s, want the http endpoint's visibility nulled", api.lastPatch)
+	wl := api.lastApply(t, nsItem("workloads", componentName(testCompID)))
+	if strings.Contains(string(wl.Spec), "visibility") {
+		t.Errorf("Workload apply = %s, want no visibility key at all", wl.Spec)
+	}
+	if !strings.Contains(string(wl.Spec), `"http":{"type":"TCP","port":80}`) {
+		t.Errorf("Workload apply = %s, want http as a plain TCP endpoint", wl.Spec)
 	}
 }
 

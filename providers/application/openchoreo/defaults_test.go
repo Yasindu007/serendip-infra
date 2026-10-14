@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -13,9 +14,13 @@ import (
 )
 
 // fakeAPI is a minimal in-memory Kubernetes API: objects keyed by their
-// full item path, POST stores under collection+"/"+name, PATCH merges
-// top-level metadata.labels only (all these tests need). failPath makes
-// any request to a path with that prefix return 500.
+// full item path, POST stores under collection+"/"+name, a merge PATCH
+// merges metadata.labels and top-level spec keys, and a server-side apply
+// (recorded as method "APPLY") creates or updates the object the way the
+// API server does for these tests' purposes: spec/data replaced by the
+// applied ones, labels merged, status kept, generation bumped only when the
+// spec really changes, and nothing counted as stored when nothing changed.
+// failPath makes any request to a path with that prefix return 500.
 type fakeAPI struct {
 	mu       sync.Mutex
 	objects  map[string]kubernetes.Object
@@ -27,6 +32,76 @@ type fakeAPI struct {
 	// is the raw query of the most recent such list request.
 	lists     map[string][]kubernetes.Object
 	lastQuery string
+	// applies is every apply request, in order; writes counts the applies
+	// that actually changed a stored object.
+	applies []appliedReq
+	writes  int
+}
+
+type appliedReq struct {
+	path, fieldManager, force string
+	body                      kubernetes.Object
+}
+
+const methodApply = "APPLY"
+
+func isApplyRequest(r *http.Request) bool {
+	return r.Method == http.MethodPatch && r.Header.Get("Content-Type") == "application/apply-patch+yaml"
+}
+
+// lastApply returns the most recent apply to path.
+func (f *fakeAPI) lastApply(t *testing.T, path string) kubernetes.Object {
+	t.Helper()
+	for i := len(f.applies) - 1; i >= 0; i-- {
+		if f.applies[i].path == path {
+			return f.applies[i].body
+		}
+	}
+	t.Fatalf("no apply to %s (calls: %v)", path, f.calls)
+	return kubernetes.Object{}
+}
+
+func jsonEqual(a, b json.RawMessage) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == len(b)
+	}
+	var av, bv any
+	json.Unmarshal(a, &av)
+	json.Unmarshal(b, &bv)
+	return reflect.DeepEqual(av, bv)
+}
+
+func (f *fakeAPI) apply(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	var in kubernetes.Object
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		t.Errorf("decode apply body: %v", err)
+	}
+	q := r.URL.Query()
+	f.applies = append(f.applies, appliedReq{path: r.URL.Path, fieldManager: q.Get("fieldManager"), force: q.Get("force"), body: in})
+
+	obj, existed := f.objects[r.URL.Path]
+	changed := !existed || !jsonEqual(obj.Spec, in.Spec) || !jsonEqual(obj.Data, in.Data)
+	if !existed {
+		obj = kubernetes.Object{APIVersion: in.APIVersion, Kind: in.Kind,
+			Metadata: kubernetes.ObjectMeta{Name: in.Metadata.Name, Namespace: in.Metadata.Namespace, Generation: 1}}
+	} else if !jsonEqual(obj.Spec, in.Spec) {
+		obj.Metadata.Generation++
+	}
+	obj.Spec, obj.Data = in.Spec, in.Data
+	for k, v := range in.Metadata.Labels {
+		if obj.Metadata.Labels == nil {
+			obj.Metadata.Labels = map[string]string{}
+		}
+		if obj.Metadata.Labels[k] != v {
+			obj.Metadata.Labels[k] = v
+			changed = true
+		}
+	}
+	if changed {
+		f.writes++
+	}
+	f.objects[r.URL.Path] = obj
+	json.NewEncoder(w).Encode(obj)
 }
 
 func newFakeAPI() *fakeAPI { return &fakeAPI{objects: map[string]kubernetes.Object{}} }
@@ -49,13 +124,21 @@ func (f *fakeAPI) handler(t *testing.T) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		f.calls = append(f.calls, r.Method+" "+r.URL.Path)
+		method := r.Method
+		if isApplyRequest(r) {
+			method = methodApply
+		}
+		f.calls = append(f.calls, method+" "+r.URL.Path)
 		if f.failPath != "" && strings.HasPrefix(r.URL.Path, f.failPath) {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("simulated failure"))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if method == methodApply {
+			f.apply(t, w, r)
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
 			if items, ok := f.lists[r.URL.Path]; ok {
@@ -131,7 +214,7 @@ func mergeJSON(base, patch json.RawMessage) json.RawMessage {
 
 const nsPath = "/api/v1/namespaces/openchoreo-control-plane"
 
-func TestEnsurePlatformDefaults_AllAbsent_CreatesEachOnce(t *testing.T) {
+func TestEnsurePlatformDefaults_AllAbsent_AppliesEach(t *testing.T) {
 	api := newFakeAPI()
 	api.put(nsPath, kubernetes.Object{APIVersion: "v1", Kind: "Namespace", Metadata: kubernetes.ObjectMeta{Name: ControlPlaneNamespace}})
 	client := newTestKubeClient(t, api.handler(t))
@@ -159,11 +242,20 @@ func TestEnsurePlatformDefaults_AllAbsent_CreatesEachOnce(t *testing.T) {
 			t.Errorf("%s: kind/apiVersion = %s/%s", path, obj.Kind, obj.APIVersion)
 		}
 	}
-	if got := api.count(http.MethodPost); got != 4 {
-		t.Errorf("POST calls = %d, want 4", got)
+	if got := api.count(methodApply); got != 4 {
+		t.Errorf("apply calls = %d, want 4", got)
 	}
+	for _, a := range api.applies {
+		if a.fieldManager != kubernetes.FieldManager || a.force != "true" {
+			t.Errorf("%s: fieldManager=%q force=%q, want %s/true", a.path, a.fieldManager, a.force, kubernetes.FieldManager)
+		}
+	}
+	// The namespace label is the one merge patch: Helm owns that namespace.
 	if got := api.count(http.MethodPatch); got != 1 {
-		t.Errorf("PATCH calls = %d, want 1", got)
+		t.Errorf("merge PATCH calls = %d, want 1 (namespace label)", got)
+	}
+	if got := api.count(http.MethodPost); got != 0 {
+		t.Errorf("POST calls = %d, want 0 (apply creates)", got)
 	}
 
 	var env struct {
@@ -193,7 +285,7 @@ func TestEnsurePlatformDefaults_AllAbsent_CreatesEachOnce(t *testing.T) {
 	}
 }
 
-func TestEnsurePlatformDefaults_AllPresent_NoWrites(t *testing.T) {
+func TestEnsurePlatformDefaults_AllPresent_NothingStored(t *testing.T) {
 	api := newFakeAPI()
 	client := newTestKubeClient(t, api.handler(t))
 	api.put(nsPath, kubernetes.Object{APIVersion: "v1", Kind: "Namespace",
@@ -201,13 +293,41 @@ func TestEnsurePlatformDefaults_AllPresent_NoWrites(t *testing.T) {
 	if err := EnsurePlatformDefaults(context.Background(), client); err != nil {
 		t.Fatalf("first EnsurePlatformDefaults() = %v", err)
 	}
-	api.calls = nil
+	api.calls, api.writes = nil, 0
 
 	if err := EnsurePlatformDefaults(context.Background(), client); err != nil {
 		t.Fatalf("second EnsurePlatformDefaults() = %v", err)
 	}
-	if n := api.count(http.MethodPost) + api.count(http.MethodPatch); n != 0 {
-		t.Errorf("writes on second run = %d (%v), want 0", n, api.calls)
+	if n := api.count(http.MethodPost) + api.count(http.MethodPatch); n != 0 || api.writes != 0 {
+		t.Errorf("second run: %d create/merge writes, %d stored applies (%v), want none", n, api.writes, api.calls)
+	}
+}
+
+// A default deleted by hand comes back on the next pass (cmd's foundations
+// loop), and a default edited by hand is put back.
+func TestEnsurePlatformDefaults_RepairsDeletedAndEdited(t *testing.T) {
+	api := newFakeAPI()
+	api.put(nsPath, kubernetes.Object{Metadata: kubernetes.ObjectMeta{Name: ControlPlaneNamespace, Labels: map[string]string{controlPlaneNamespaceLabel: "true"}}})
+	client := newTestKubeClient(t, api.handler(t))
+	if err := EnsurePlatformDefaults(context.Background(), client); err != nil {
+		t.Fatal(err)
+	}
+	envPath := namespacedPath("environments") + "/" + environmentName
+	ctPath := clusterPath("clustercomponenttypes") + "/" + componentTypeName
+	want := api.objects[ctPath].Spec
+	delete(api.objects, envPath)
+	edited := api.objects[ctPath]
+	edited.Spec = mustJSON(map[string]any{"workloadType": "statefulset"})
+	api.objects[ctPath] = edited
+
+	if err := EnsurePlatformDefaults(context.Background(), client); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := api.objects[envPath]; !ok {
+		t.Error("deleted Environment was not recreated")
+	}
+	if !jsonEqual(api.objects[ctPath].Spec, want) {
+		t.Errorf("edited component type spec = %s, want restored", api.objects[ctPath].Spec)
 	}
 }
 
@@ -217,7 +337,7 @@ func TestEnsurePlatformDefaults_ErrorsNameTheFailingStep(t *testing.T) {
 		wantIn   string
 	}{
 		{nsPath, "label namespace"},
-		{"/apis/openchoreo.dev/v1alpha1/clustercomponenttypes", "ClusterComponentType"},
+		{"/apis/openchoreo.dev/v1alpha1/clustercomponenttypes/", "ClusterComponentType"},
 		{"/apis/openchoreo.dev/v1alpha1/namespaces/openchoreo-control-plane/deploymentpipelines", "DeploymentPipeline"},
 	}
 	for _, tt := range tests {

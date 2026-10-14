@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 // ErrNotFound is returned by Get/Delete when the Kubernetes API
@@ -232,6 +233,43 @@ func (c *Client) Patch(ctx context.Context, path string, patch any) (Object, err
 		return Object{}, fmt.Errorf("kubernetes: decode PATCH %s response: %w", path, err)
 	}
 	return patched, nil
+}
+
+// FieldManager is the one server-side-apply field manager every Serendip
+// provider applies under, so ownership of Serendip-set fields is tracked
+// consistently across providers and releases.
+const FieldManager = "serendip"
+
+// Apply server-side-applies obj at its item path (e.g.
+// "/api/v1/namespaces/default/configmaps/foo") under fieldManager, creating
+// it if absent, and returns the resulting object. obj is the full desired
+// state of every field this manager owns: a field it applied before and
+// omits now is removed by the API server, while fields owned only by other
+// managers are left alone. force=true because the caller is the source of
+// truth for every field it declares on objects it owns; a conflict there
+// is drift to undo. obj must carry apiVersion, kind, and metadata.name
+// (and namespace, if namespaced), and should not carry resourceVersion
+// (that would turn the apply into an optimistic-concurrency check). The
+// body is JSON, which is valid YAML for the apply-patch content type.
+// Returns ErrNotFound on a 404 (e.g. the parent namespace doesn't exist).
+func (c *Client) Apply(ctx context.Context, path string, obj Object, fieldManager string) (Object, error) {
+	q := url.Values{"fieldManager": {fieldManager}, "force": {"true"}}
+	resp, err := c.doWithContentType(ctx, http.MethodPatch, path+"?"+q.Encode(), obj, "application/apply-patch+yaml")
+	if err != nil {
+		return Object{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return Object{}, ErrNotFound
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return Object{}, unexpectedStatus(resp)
+	}
+	var applied Object
+	if err := json.NewDecoder(resp.Body).Decode(&applied); err != nil {
+		return Object{}, fmt.Errorf("kubernetes: decode apply %s response: %w", path, err)
+	}
+	return applied, nil
 }
 
 // List fetches every object at a collection path (e.g.

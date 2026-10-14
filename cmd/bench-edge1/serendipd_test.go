@@ -15,9 +15,9 @@ func TestWaitForLogLine(t *testing.T) {
 	os.WriteFile(path, []byte("starting\n"), 0o644)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		os.WriteFile(path, []byte("starting\nserendipd: listening on 127.0.0.1:1\n"), 0o644)
+		os.WriteFile(path, []byte("starting\nserendipd: listening on 127.0.0.1:1\nserendipd: all capabilities ready\n"), 0o644)
 	}()
-	if err := waitForLogLine(context.Background(), path, "listening on", 5*time.Second, make(chan struct{}), func() error { return nil }); err != nil {
+	if err := waitForLogLine(context.Background(), path, readyLine, 5*time.Second, make(chan struct{}), func() error { return nil }); err != nil {
 		t.Fatalf("waitForLogLine = %v", err)
 	}
 }

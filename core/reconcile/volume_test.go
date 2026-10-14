@@ -59,6 +59,7 @@ func TestVolumeReconciler_Cases(t *testing.T) {
 		wantStatus   resource.ConditionStatus
 		wantReason   string
 		wantHasError bool
+		wantRequeue  bool
 	}{
 		{
 			name:       "bound",
@@ -67,10 +68,18 @@ func TestVolumeReconciler_Cases(t *testing.T) {
 			wantReason: "Bound",
 		},
 		{
-			name:       "pending (not yet bound, no error)",
-			provider:   &fakeStorageProvider{ensureBound: false, ensureReason: "Pending"},
-			wantStatus: resource.ConditionFalse,
-			wantReason: "Pending",
+			name:        "pending (not yet bound, no error)",
+			provider:    &fakeStorageProvider{ensureBound: false, ensureReason: "Pending"},
+			wantStatus:  resource.ConditionFalse,
+			wantReason:  "Pending",
+			wantRequeue: true,
+		},
+		{
+			name:        "provider not ready",
+			provider:    &fakeStorageProvider{ensureErr: reconcile.ErrProviderNotReady},
+			wantStatus:  resource.ConditionFalse,
+			wantReason:  reconcile.ReasonProviderNotReady,
+			wantRequeue: true,
 		},
 		{
 			name:         "ensure fails",
@@ -94,9 +103,7 @@ func TestVolumeReconciler_Cases(t *testing.T) {
 
 			r := reconcile.NewVolumeReconciler(volumes, tt.provider)
 			ref := graph.ResourceRef{Kind: resource.KindVolume, ID: vol.Metadata.ID}
-			if err := r.Reconcile(context.Background(), ref); err != nil {
-				t.Fatalf("Reconcile() = %v", err)
-			}
+			checkRequeue(t, r.Reconcile(context.Background(), ref), tt.wantRequeue)
 
 			got, err := volumes.Get(context.Background(), vol.Metadata.ID)
 			if err != nil {

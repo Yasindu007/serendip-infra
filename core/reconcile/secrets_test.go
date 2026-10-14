@@ -69,11 +69,19 @@ func (f *fakeSecretsProvider) Delete(ctx context.Context, sec resource.Secret) e
 
 func TestSecretReconciler_Cases(t *testing.T) {
 	tests := []struct {
-		name       string
-		provider   *fakeSecretsProvider
-		wantStatus resource.ConditionStatus
-		wantReason string
+		name        string
+		provider    *fakeSecretsProvider
+		wantStatus  resource.ConditionStatus
+		wantReason  string
+		wantRequeue bool
 	}{
+		{
+			name:        "provider not ready",
+			provider:    &fakeSecretsProvider{existsErr: reconcile.ErrProviderNotReady},
+			wantStatus:  resource.ConditionUnknown,
+			wantReason:  reconcile.ReasonProviderNotReady,
+			wantRequeue: true,
+		},
 		{
 			name:       "value exists",
 			provider:   &fakeSecretsProvider{exists: true},
@@ -107,9 +115,7 @@ func TestSecretReconciler_Cases(t *testing.T) {
 
 			r := reconcile.NewSecretReconciler(secrets, tt.provider)
 			ref := graph.ResourceRef{Kind: resource.KindSecret, ID: sec.Metadata.ID}
-			if err := r.Reconcile(context.Background(), ref); err != nil {
-				t.Fatalf("Reconcile() = %v", err)
-			}
+			checkRequeue(t, r.Reconcile(context.Background(), ref), tt.wantRequeue)
 
 			got, err := secrets.Get(context.Background(), sec.Metadata.ID)
 			if err != nil {

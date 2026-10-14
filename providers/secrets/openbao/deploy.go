@@ -10,9 +10,9 @@ import (
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 )
 
-// Namespace is shared with providers/storage/localpath -- whichever
-// provider's Ensure/NewProvider runs first creates it (idempotent
-// GET-then-Create, safe either order). A dedicated namespace keeps
+// Namespace is shared with providers/storage/localpath -- both
+// server-side-apply it under the same field manager with the same (empty)
+// content, so whichever runs first creates it and order never matters. A dedicated namespace keeps
 // every Serendip-managed object visibly separate from anything else a
 // user might put in the cluster.
 const Namespace = "serendip-system"
@@ -75,7 +75,7 @@ func NewDeployer(client *kubernetes.Client) *Deployer {
 	}
 }
 
-// Ensure idempotently creates (GET-then-Create) the namespace,
+// Ensure server-side-applies (kubernetes.FieldManager) the namespace,
 // ConfigMap, PVC, Service, and StatefulSet, in that dependency order --
 // each later object references an earlier one by name (the
 // StatefulSet mounts the ConfigMap and the PVC; the Service selects
@@ -87,6 +87,11 @@ func NewDeployer(client *kubernetes.Client) *Deployer {
 // returns, with no reconciler/resync loop yet (spec 009's job) to paper
 // over a Pod that's still pulling its image or replaying PebbleDB's
 // WAL, so Ensure itself owns that wait.
+//
+// Apply makes every object match this code on every call: a field set
+// here and later dropped is removed, a changed image rolls the StatefulSet,
+// and an object deleted by hand is recreated. A no-drift apply stores
+// nothing (resourceVersion unchanged).
 func (d *Deployer) Ensure(ctx context.Context) error {
 	if err := d.ensureNamespace(ctx); err != nil {
 		return fmt.Errorf("openbao: ensure namespace %s: %w", Namespace, err)
@@ -167,42 +172,35 @@ func (d *Deployer) waitStatefulSetReady(ctx context.Context) error {
 	}
 }
 
+// apply server-side-applies obj at path under kubernetes.FieldManager.
+func (d *Deployer) apply(ctx context.Context, path string, obj kubernetes.Object) error {
+	_, err := d.client.Apply(ctx, path, obj, kubernetes.FieldManager)
+	return err
+}
+
+func namespacedPath(resource, name string) string {
+	return fmt.Sprintf("/api/v1/namespaces/%s/%s/%s", Namespace, resource, name)
+}
+
 func (d *Deployer) ensureNamespace(ctx context.Context) error {
-	_, err := d.client.Get(ctx, "/api/v1/namespaces/"+Namespace)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return err
-	}
-	_, err = d.client.Create(ctx, "/api/v1/namespaces", kubernetes.Object{
+	return d.apply(ctx, "/api/v1/namespaces/"+Namespace, kubernetes.Object{
 		APIVersion: "v1",
 		Kind:       "Namespace",
 		Metadata:   kubernetes.ObjectMeta{Name: Namespace},
 	})
-	return err
 }
 
 func (d *Deployer) ensureConfigMap(ctx context.Context) error {
-	path := fmt.Sprintf("/api/v1/namespaces/%s/configmaps/%s", Namespace, ConfigMapName)
-	_, err := d.client.Get(ctx, path)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return err
-	}
 	dataBytes, err := json.Marshal(map[string]string{"server.hcl": serverConfigHCL})
 	if err != nil {
 		return fmt.Errorf("marshal ConfigMap data: %w", err)
 	}
-	_, err = d.client.Create(ctx, fmt.Sprintf("/api/v1/namespaces/%s/configmaps", Namespace), kubernetes.Object{
+	return d.apply(ctx, namespacedPath("configmaps", ConfigMapName), kubernetes.Object{
 		APIVersion: "v1",
 		Kind:       "ConfigMap",
 		Metadata:   kubernetes.ObjectMeta{Name: ConfigMapName, Namespace: Namespace},
 		Data:       dataBytes,
 	})
-	return err
 }
 
 // ensurePVC deliberately omits storageClassName so Kubernetes picks
@@ -214,15 +212,10 @@ func (d *Deployer) ensureConfigMap(ctx context.Context) error {
 // binding, but the StatefulSet's Pod here IS a real consuming Pod, so
 // the provisioner's normal, as-designed dynamic-provisioning path
 // works with zero workarounds -- see plan.md's open-question 6.
+//
+// Applying without storageClassName never removes the class the cluster
+// defaulted in: apply only removes fields this manager applied before.
 func (d *Deployer) ensurePVC(ctx context.Context) error {
-	path := fmt.Sprintf("/api/v1/namespaces/%s/persistentvolumeclaims/%s", Namespace, PVCName)
-	_, err := d.client.Get(ctx, path)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return err
-	}
 	specBytes, err := json.Marshal(map[string]any{
 		"accessModes": []string{"ReadWriteOnce"},
 		"resources": map[string]any{
@@ -232,40 +225,33 @@ func (d *Deployer) ensurePVC(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("marshal PVC spec: %w", err)
 	}
-	_, err = d.client.Create(ctx, fmt.Sprintf("/api/v1/namespaces/%s/persistentvolumeclaims", Namespace), kubernetes.Object{
+	return d.apply(ctx, namespacedPath("persistentvolumeclaims", PVCName), kubernetes.Object{
 		APIVersion: "v1",
 		Kind:       "PersistentVolumeClaim",
 		Metadata:   kubernetes.ObjectMeta{Name: PVCName, Namespace: Namespace},
 		Spec:       specBytes,
 	})
-	return err
 }
 
+// ensureService names the port protocol explicitly: Service ports are an
+// associative list keyed by port and protocol, so the applied entry must
+// carry both keys.
 func (d *Deployer) ensureService(ctx context.Context) error {
-	path := fmt.Sprintf("/api/v1/namespaces/%s/services/%s", Namespace, ServiceName)
-	_, err := d.client.Get(ctx, path)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return err
-	}
 	specBytes, err := json.Marshal(map[string]any{
 		"selector": map[string]string{"app": "openbao"},
 		"ports": []map[string]any{
-			{"port": ListenPort, "targetPort": ListenPort},
+			{"port": ListenPort, "targetPort": ListenPort, "protocol": "TCP"},
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("marshal Service spec: %w", err)
 	}
-	_, err = d.client.Create(ctx, fmt.Sprintf("/api/v1/namespaces/%s/services", Namespace), kubernetes.Object{
+	return d.apply(ctx, namespacedPath("services", ServiceName), kubernetes.Object{
 		APIVersion: "v1",
 		Kind:       "Service",
 		Metadata:   kubernetes.ObjectMeta{Name: ServiceName, Namespace: Namespace},
 		Spec:       specBytes,
 	})
-	return err
 }
 
 // ensureStatefulSet's container args pass ONLY "server" -- a real,
@@ -288,14 +274,6 @@ func (d *Deployer) ensureService(ctx context.Context) error {
 // Passing just "server" relies entirely on the entrypoint's own
 // default, with no flag ever duplicated.
 func (d *Deployer) ensureStatefulSet(ctx context.Context) error {
-	path := fmt.Sprintf("/apis/apps/v1/namespaces/%s/statefulsets/%s", Namespace, StatefulSetName)
-	_, err := d.client.Get(ctx, path)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return err
-	}
 	labels := map[string]string{"app": "openbao"}
 	specBytes, err := json.Marshal(map[string]any{
 		"serviceName": ServiceName,
@@ -311,7 +289,7 @@ func (d *Deployer) ensureStatefulSet(ctx context.Context) error {
 						"image": Image,
 						"args":  []string{"server"},
 						"ports": []map[string]any{
-							{"containerPort": ListenPort},
+							{"containerPort": ListenPort, "protocol": "TCP"},
 						},
 						"volumeMounts": []map[string]any{
 							{"name": "config", "mountPath": "/openbao/config"},
@@ -357,11 +335,10 @@ func (d *Deployer) ensureStatefulSet(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("marshal StatefulSet spec: %w", err)
 	}
-	_, err = d.client.Create(ctx, fmt.Sprintf("/apis/apps/v1/namespaces/%s/statefulsets", Namespace), kubernetes.Object{
+	return d.apply(ctx, fmt.Sprintf("/apis/apps/v1/namespaces/%s/statefulsets/%s", Namespace, StatefulSetName), kubernetes.Object{
 		APIVersion: "apps/v1",
 		Kind:       "StatefulSet",
 		Metadata:   kubernetes.ObjectMeta{Name: StatefulSetName, Namespace: Namespace, Labels: labels},
 		Spec:       specBytes,
 	})
-	return err
 }

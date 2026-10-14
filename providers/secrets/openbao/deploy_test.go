@@ -32,123 +32,104 @@ func newTestKubeClient(t *testing.T, handler http.HandlerFunc) *kubernetes.Clien
 	return client
 }
 
-func TestDeployer_Ensure_AllMissing_CreatesAllFiveInDependencyOrder(t *testing.T) {
-	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
-	var created []string
-	statefulSetCreated := false
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			if r.URL.Path == statefulSetPath && statefulSetCreated {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(kubernetes.Object{Status: json.RawMessage(`{"readyReplicas":1}`)})
-				return
-			}
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		created = append(created, r.URL.Path)
-		if strings.HasSuffix(r.URL.Path, "/statefulsets") {
-			statefulSetCreated = true
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(kubernetes.Object{})
-	})
+const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
 
-	if err := NewDeployer(client).Ensure(context.Background()); err != nil {
-		t.Fatalf("Ensure() = %v", err)
-	}
-
-	want := []string{
-		"/api/v1/namespaces",
-		"/api/v1/namespaces/serendip-system/configmaps",
-		"/api/v1/namespaces/serendip-system/persistentvolumeclaims",
-		"/api/v1/namespaces/serendip-system/services",
-		"/apis/apps/v1/namespaces/serendip-system/statefulsets",
-	}
-	if len(created) != len(want) {
-		t.Fatalf("created %d objects %v, want %d %v", len(created), created, len(want), want)
-	}
-	for i, path := range want {
-		if created[i] != path {
-			t.Errorf("creation order[%d] = %q, want %q (dependency order matters: namespace, then ConfigMap/PVC, then Service, then StatefulSet)", i, created[i], path)
-		}
-	}
+// appliedObject is one server-side apply request the fake API server got.
+type appliedObject struct {
+	path, fieldManager, force string
+	body                      kubernetes.Object
 }
 
-func TestDeployer_Ensure_AllAlreadyExist_CreatesNothing(t *testing.T) {
-	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("unexpected %s %s, want only GET calls when everything already exists", r.Method, r.URL.Path)
-		}
+// applyRecorder answers every apply by echoing the body, and every GET of
+// the StatefulSet as ready.
+func applyRecorder(t *testing.T, got *[]appliedObject) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == statefulSetPath {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == statefulSetPath:
 			json.NewEncoder(w).Encode(kubernetes.Object{Status: json.RawMessage(`{"readyReplicas":1}`)})
-			return
+		case r.Method == http.MethodPatch && r.Header.Get("Content-Type") == "application/apply-patch+yaml":
+			var body kubernetes.Object
+			json.NewDecoder(r.Body).Decode(&body)
+			*got = append(*got, appliedObject{path: r.URL.Path, fieldManager: r.URL.Query().Get("fieldManager"), force: r.URL.Query().Get("force"), body: body})
+			json.NewEncoder(w).Encode(body)
+		default:
+			t.Errorf("unexpected request %s %s (want only applies and the readiness GET)", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
 		}
-		json.NewEncoder(w).Encode(kubernetes.Object{})
-	})
-
-	if err := NewDeployer(client).Ensure(context.Background()); err != nil {
-		t.Fatalf("Ensure() = %v", err)
 	}
 }
 
-func TestDeployer_Ensure_PartiallyExists_CreatesOnlyMissing(t *testing.T) {
-	// Namespace and ConfigMap already exist; PVC, Service, StatefulSet don't.
-	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
-	exists := map[string]bool{
-		"/api/v1/namespaces/serendip-system":                           true,
-		"/api/v1/namespaces/serendip-system/configmaps/openbao-config": true,
-	}
-	var created []string
-	statefulSetCreated := false
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			if r.URL.Path == statefulSetPath && statefulSetCreated {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(kubernetes.Object{Status: json.RawMessage(`{"readyReplicas":1}`)})
-				return
-			}
-			if exists[r.URL.Path] {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(kubernetes.Object{})
-				return
-			}
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		created = append(created, r.URL.Path)
-		if strings.HasSuffix(r.URL.Path, "/statefulsets") {
-			statefulSetCreated = true
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(kubernetes.Object{})
-	})
-
-	if err := NewDeployer(client).Ensure(context.Background()); err != nil {
+func TestDeployer_Ensure_AppliesAllFiveInDependencyOrder(t *testing.T) {
+	var got []appliedObject
+	if err := NewDeployer(newTestKubeClient(t, applyRecorder(t, &got))).Ensure(context.Background()); err != nil {
 		t.Fatalf("Ensure() = %v", err)
 	}
 
-	want := []string{
-		"/api/v1/namespaces/serendip-system/persistentvolumeclaims",
-		"/api/v1/namespaces/serendip-system/services",
-		"/apis/apps/v1/namespaces/serendip-system/statefulsets",
+	want := []struct{ path, kind string }{
+		{"/api/v1/namespaces/serendip-system", "Namespace"},
+		{"/api/v1/namespaces/serendip-system/configmaps/openbao-config", "ConfigMap"},
+		{"/api/v1/namespaces/serendip-system/persistentvolumeclaims/openbao-data", "PersistentVolumeClaim"},
+		{"/api/v1/namespaces/serendip-system/services/openbao", "Service"},
+		{statefulSetPath, "StatefulSet"},
 	}
-	if len(created) != len(want) {
-		t.Fatalf("created %v, want exactly %v (namespace/ConfigMap already existed, must not be re-created)", created, want)
+	if len(got) != len(want) {
+		t.Fatalf("applied %d objects, want %d: %+v", len(got), len(want), got)
 	}
-	for i, path := range want {
-		if created[i] != path {
-			t.Errorf("created[%d] = %q, want %q", i, created[i], path)
+	for i, w := range want {
+		a := got[i]
+		if a.path != w.path || a.body.Kind != w.kind {
+			t.Errorf("apply[%d] = %s (%s), want %s (%s) -- dependency order: namespace, ConfigMap/PVC, Service, StatefulSet", i, a.path, a.body.Kind, w.path, w.kind)
+		}
+		if a.fieldManager != "serendip" || a.force != "true" {
+			t.Errorf("apply[%d] fieldManager=%q force=%q, want serendip/true", i, a.fieldManager, a.force)
+		}
+		if a.body.Metadata.ResourceVersion != "" {
+			t.Errorf("apply[%d] carries resourceVersion %q", i, a.body.Metadata.ResourceVersion)
+		}
+	}
+
+	// List-map entries must carry every key of their associative list.
+	var svc struct {
+		Ports []map[string]any `json:"ports"`
+	}
+	json.Unmarshal(got[3].body.Spec, &svc)
+	if len(svc.Ports) != 1 || svc.Ports[0]["protocol"] != "TCP" {
+		t.Errorf("Service ports = %v, want one TCP port with protocol set", svc.Ports)
+	}
+	if !strings.Contains(string(got[4].body.Spec), `"image":"`+Image+`"`) ||
+		!strings.Contains(string(got[4].body.Spec), `"containerPort":8200,"protocol":"TCP"`) {
+		t.Errorf("StatefulSet spec missing image or protocol-keyed containerPort: %s", got[4].body.Spec)
+	}
+	var cmData map[string]string
+	json.Unmarshal(got[1].body.Data, &cmData)
+	if cmData["server.hcl"] != serverConfigHCL {
+		t.Errorf("ConfigMap data = %v", cmData)
+	}
+}
+
+// Re-running Ensure sends the identical applies: the API server, not this
+// code, decides there is nothing to change.
+func TestDeployer_Ensure_RepeatIsIdenticalApply(t *testing.T) {
+	var got []appliedObject
+	d := NewDeployer(newTestKubeClient(t, applyRecorder(t, &got)))
+	for range 2 {
+		if err := d.Ensure(context.Background()); err != nil {
+			t.Fatalf("Ensure() = %v", err)
+		}
+	}
+	if len(got) != 10 {
+		t.Fatalf("applies = %d, want 10", len(got))
+	}
+	for i := range 5 {
+		a, b := got[i], got[i+5]
+		if a.path != b.path || string(a.body.Spec) != string(b.body.Spec) || string(a.body.Data) != string(b.body.Data) {
+			t.Errorf("repeat apply %d differs: %+v vs %+v", i, a, b)
 		}
 	}
 }
 
 func TestDeployer_Ensure_WaitsAcrossMultipleNotYetReadyPolls(t *testing.T) {
-	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
 	readyAfterPolls := 3
 	polls := 0
 	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +149,6 @@ func TestDeployer_Ensure_WaitsAcrossMultipleNotYetReadyPolls(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(kubernetes.Object{})
 	})
 
@@ -185,7 +165,6 @@ func TestDeployer_Ensure_WaitsAcrossMultipleNotYetReadyPolls(t *testing.T) {
 }
 
 func TestDeployer_Ensure_TimesOutIfNeverReady(t *testing.T) {
-	const statefulSetPath = "/apis/apps/v1/namespaces/serendip-system/statefulsets/openbao"
 	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
@@ -197,7 +176,6 @@ func TestDeployer_Ensure_TimesOutIfNeverReady(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(kubernetes.Object{})
 	})
 
@@ -217,9 +195,7 @@ func TestDeployer_Ensure_TimesOutIfNeverReady(t *testing.T) {
 func TestDeployer_Ensure_UnexpectedErrorNamesWhichObjectFailed(t *testing.T) {
 	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/namespaces/serendip-system" && r.Method == http.MethodGet:
-			w.WriteHeader(http.StatusNotFound)
-		case r.URL.Path == "/api/v1/namespaces" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/namespaces/serendip-system" && r.Method == http.MethodPatch:
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("simulated server error"))
 		default:
@@ -229,7 +205,7 @@ func TestDeployer_Ensure_UnexpectedErrorNamesWhichObjectFailed(t *testing.T) {
 
 	err := NewDeployer(client).Ensure(context.Background())
 	if err == nil {
-		t.Fatal("Ensure() = nil error, want the simulated namespace-creation failure to propagate")
+		t.Fatal("Ensure() = nil error, want the simulated namespace apply failure to propagate")
 	}
 	if !strings.Contains(err.Error(), "namespace") || !strings.Contains(err.Error(), "serendip-system") {
 		t.Errorf("error = %q, want it to name the namespace that failed", err.Error())

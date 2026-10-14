@@ -7,6 +7,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/graph"
+	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/registry"
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -40,7 +41,11 @@ import (
 // first kind whose API surface is genuinely unavailable without one,
 // since SecretHandler's value routes have nothing underneath them to
 // call (specs/009-secrets-capability/plan.md resolution 6).
-func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, secretReconciler *reconcile.SecretReconciler) *http.Server {
+//
+// providers is the live capability registry whose readiness GET
+// /v1/readiness reports (specs/014-reconciliation-hardening plan.md
+// decision 4); nil reports no capabilities.
+func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, secretReconciler *reconcile.SecretReconciler, providers *provider.Registry) *http.Server {
 	apiMux := http.NewServeMux()
 
 	// 14 explicit instantiations, deliberately not abstracted further
@@ -80,6 +85,7 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, secretRecon
 
 	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
 	NewRegistryHandler(registry.NewCapabilityRegistry(capStore)).Register(apiMux)
+	NewReadinessHandler(providers).Register(apiMux)
 	// Catch-all for anything under /v1/ that doesn't match a registered
 	// kind/graph/registry route -- without this, an unmatched /v1/ path
 	// falls through to Go's default plain-text 404, violating acceptance

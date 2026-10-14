@@ -91,7 +91,7 @@ func (p *Provider) EnsureApplication(ctx context.Context, app resource.Applicati
 	project := projectName(app.Metadata.ID)
 	labels := serendipLabels(app.Metadata.ID, app.Metadata.Name)
 
-	if _, err := getOrCreate(ctx, p.client, namespacedPath("projects"), kubernetes.Object{
+	if _, err := apply(ctx, p.client, namespacedPath("projects"), kubernetes.Object{
 		APIVersion: apiVersion, Kind: "Project",
 		Metadata: kubernetes.ObjectMeta{Name: project, Namespace: ControlPlaneNamespace, Labels: labels},
 		Spec: mustJSON(map[string]any{
@@ -102,7 +102,7 @@ func (p *Provider) EnsureApplication(ctx context.Context, app resource.Applicati
 		return false, "", "", err
 	}
 
-	binding, err := getOrCreate(ctx, p.client, namespacedPath("projectreleasebindings"), kubernetes.Object{
+	binding, err := apply(ctx, p.client, namespacedPath("projectreleasebindings"), kubernetes.Object{
 		APIVersion: apiVersion, Kind: "ProjectReleaseBinding",
 		Metadata: kubernetes.ObjectMeta{Name: projectReleaseBindingName(app.Metadata.ID), Namespace: ControlPlaneNamespace, Labels: labels},
 		Spec: mustJSON(map[string]any{
@@ -171,7 +171,29 @@ func (p *Provider) ensureWorkloadReady(ctx context.Context, app resource.Applica
 	name := componentName(comp.Metadata.ID)
 	labels := serendipLabels(comp.Metadata.ID, comp.Metadata.Name)
 
-	existing, err := getOrCreate(ctx, p.client, namespacedPath("components"), kubernetes.Object{
+	// owner is immutable upstream, so check it before applying: moving a
+	// Component to another Application would need delete-and-recreate, and
+	// an apply would just be rejected.
+	existing, err := p.client.Get(ctx, namespacedPath("components")+"/"+name)
+	switch {
+	case errors.Is(err, kubernetes.ErrNotFound):
+	case err != nil:
+		return workloadState{}, fmt.Errorf("get Component %s: %w", name, err)
+	default:
+		var compSpec struct {
+			Owner ownerRef `json:"owner"`
+		}
+		if len(existing.Spec) == 0 {
+			// Nothing to compare yet; the apply below sets the owner.
+		} else if err := json.Unmarshal(existing.Spec, &compSpec); err != nil {
+			return workloadState{}, fmt.Errorf("decode Component %s spec: %w", name, err)
+		}
+		if compSpec.Owner.ProjectName != "" && compSpec.Owner.ProjectName != project {
+			return workloadState{reason: reconcile.ReasonUnsupported,
+				message: "moving a component to a different application is not supported; delete it and create a new component under the target application"}, nil
+		}
+	}
+	if _, err := apply(ctx, p.client, namespacedPath("components"), kubernetes.Object{
 		APIVersion: apiVersion, Kind: "Component",
 		Metadata: kubernetes.ObjectMeta{Name: name, Namespace: ControlPlaneNamespace, Labels: labels},
 		Spec: mustJSON(map[string]any{
@@ -179,21 +201,8 @@ func (p *Provider) ensureWorkloadReady(ctx context.Context, app resource.Applica
 			"autoDeploy":    true,
 			"componentType": map[string]string{"kind": "ClusterComponentType", "name": componentTypeWorkload + "/" + componentTypeName},
 		}),
-	})
-	if err != nil {
+	}); err != nil {
 		return workloadState{}, err
-	}
-	var compSpec struct {
-		Owner ownerRef `json:"owner"`
-	}
-	if err := json.Unmarshal(existing.Spec, &compSpec); err != nil {
-		return workloadState{}, fmt.Errorf("decode Component %s spec: %w", name, err)
-	}
-	if compSpec.Owner.ProjectName != project {
-		// owner is immutable upstream; moving a Component to another
-		// Application would need delete-and-recreate.
-		return workloadState{reason: reconcile.ReasonUnsupported,
-			message: "moving a component to a different application is not supported; delete it and create a new component under the target application"}, nil
 	}
 
 	patched, err := p.ensureWorkload(ctx, project, name, labels, comp.Spec)
@@ -434,40 +443,26 @@ func (p *Provider) DeleteComponent(ctx context.Context, comp resource.Component)
 	return p.deleteIgnoringNotFound(ctx, namespacedPath("components")+"/"+componentName(comp.Metadata.ID))
 }
 
-// ensureWorkload creates the Workload, or patches it only when a field this
-// provider owns actually differs -- a no-drift reconcile makes no writes.
-// Reports whether an existing Workload was patched.
+// ensureWorkload server-side-applies the Workload and reports whether an
+// existing Workload's spec just changed. That is read off metadata.generation
+// before and after: the API server bumps it only for a real spec change, and
+// a no-drift apply stores nothing. A fresh create is not a change -- there
+// is no previous release to mistake for the current one.
 func (p *Provider) ensureWorkload(ctx context.Context, project, name string, labels map[string]string, spec resource.ComponentSpec) (bool, error) {
-	desired := desiredWorkload(project, name, spec)
-	path := namespacedPath("workloads") + "/" + name
-
-	existing, err := p.client.Get(ctx, path)
-	if errors.Is(err, kubernetes.ErrNotFound) {
-		_, err = p.client.Create(ctx, namespacedPath("workloads"), kubernetes.Object{
-			APIVersion: apiVersion, Kind: "Workload",
-			Metadata: kubernetes.ObjectMeta{Name: name, Namespace: ControlPlaneNamespace, Labels: labels},
-			Spec:     mustJSON(desired),
-		})
-		if err != nil {
-			return false, fmt.Errorf("create Workload %s: %w", name, err)
-		}
-		return false, nil
-	}
-	if err != nil {
+	before, err := p.client.Get(ctx, namespacedPath("workloads")+"/"+name)
+	existed := err == nil
+	if err != nil && !errors.Is(err, kubernetes.ErrNotFound) {
 		return false, fmt.Errorf("get Workload %s: %w", name, err)
 	}
-
-	var current workloadSpec
-	if err := json.Unmarshal(existing.Spec, &current); err != nil {
-		return false, fmt.Errorf("decode Workload %s spec: %w", name, err)
+	after, err := apply(ctx, p.client, namespacedPath("workloads"), kubernetes.Object{
+		APIVersion: apiVersion, Kind: "Workload",
+		Metadata: kubernetes.ObjectMeta{Name: name, Namespace: ControlPlaneNamespace, Labels: labels},
+		Spec:     mustJSON(desiredWorkload(project, name, spec)),
+	})
+	if err != nil {
+		return false, err
 	}
-	if workloadsEqual(current, desired) {
-		return false, nil
-	}
-	if _, err := p.client.Patch(ctx, path, map[string]any{"spec": workloadPatch(current, desired)}); err != nil {
-		return false, fmt.Errorf("patch Workload %s: %w", name, err)
-	}
-	return true, nil
+	return existed && after.Metadata.Generation != before.Metadata.Generation, nil
 }
 
 func desiredWorkload(project, name string, spec resource.ComponentSpec) workloadSpec {
@@ -490,6 +485,9 @@ func desiredWorkload(project, name string, spec resource.ComponentSpec) workload
 	return w
 }
 
+// workloadsEqual compares the fields this provider sets, for telling whether
+// a ComponentRelease was cut from the desired workload (not for drift
+// detection on the Workload itself -- server-side apply does that).
 func workloadsEqual(a, b workloadSpec) bool {
 	return a.Container.Image == b.Container.Image &&
 		envEqual(a.Container.Env, b.Container.Env) &&
@@ -516,33 +514,6 @@ func endpointsEqual(a, b map[string]workloadEndpoint) bool {
 		return true
 	}
 	return reflect.DeepEqual(a, b)
-}
-
-// workloadPatch builds a JSON merge patch body for spec. Merge patch
-// replaces arrays wholesale (fine for env) but merges objects key by key,
-// so endpoints removed from the desired set must be sent as explicit nulls.
-func workloadPatch(current, desired workloadSpec) map[string]any {
-	endpoints := make(map[string]any, len(desired.Endpoints)+len(current.Endpoints))
-	for k := range current.Endpoints {
-		endpoints[k] = nil
-	}
-	for k, v := range desired.Endpoints {
-		// Nested objects merge too: an endpoint going from exposed back to
-		// cluster-internal must clear visibility explicitly.
-		var visibility any = v.Visibility
-		if len(v.Visibility) == 0 {
-			visibility = nil
-		}
-		endpoints[k] = map[string]any{"type": v.Type, "port": v.Port, "visibility": visibility}
-	}
-	var env any = desired.Container.Env
-	if len(desired.Container.Env) == 0 {
-		env = nil
-	}
-	return map[string]any{
-		"container": map[string]any{"image": desired.Container.Image, "env": env},
-		"endpoints": endpoints,
-	}
 }
 
 // failureReasons are upstream Ready-condition reasons (ReleaseBinding and

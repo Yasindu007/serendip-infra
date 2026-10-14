@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 )
@@ -45,6 +46,10 @@ func MapStoreError(err error) (status int, title string) {
 		return http.StatusConflict, "resource has children"
 	case errors.Is(err, resource.ErrValidation):
 		return http.StatusBadRequest, "validation failed"
+	case errors.Is(err, reconcile.ErrProviderNotReady):
+		// The capability is still being set up in the background
+		// (cmd/serendipd retries it); "try again", not a server fault.
+		return http.StatusServiceUnavailable, "capability not ready"
 	default:
 		return http.StatusInternalServerError, "internal error"
 	}

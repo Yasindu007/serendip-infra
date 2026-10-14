@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
@@ -18,32 +18,21 @@ import (
 const fakeCASecretDataB64 = "ZmFrZS1jYS1wZW0tZGF0YQ=="
 
 // newFakeTrustBootstrapClient builds a fake *kubernetes.Client serving
-// exactly the requests ensureDataPlaneTrustsControlPlane makes on a
-// fresh cluster: the data-plane namespace and its cluster-gateway-ca
-// ConfigMap don't exist yet (404), the control plane's real
-// cert-manager-issued Secret does.
+// exactly the requests ensureDataPlaneTrustsControlPlane makes: applies of
+// the data-plane namespace and its cluster-gateway-ca ConfigMap, and a GET
+// of the control plane's real cert-manager-issued Secret.
 func newFakeTrustBootstrapClient(t *testing.T) *kubernetes.Client {
 	t.Helper()
-	srcPath := "/api/v1/namespaces/" + ControlPlaneNamespace + "/secrets/" + clusterGatewayCASecretName
-	dstPath := "/api/v1/namespaces/" + DataPlaneNamespace + "/configmaps/" + clusterGatewayCAConfigMapName
-	nsPath := "/api/v1/namespaces/" + DataPlaneNamespace
-	return newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == nsPath:
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && r.URL.Path == dstPath:
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && r.URL.Path == srcPath:
-			json.NewEncoder(w).Encode(kubernetes.Object{Data: json.RawMessage(`{"ca.crt":"` + fakeCASecretDataB64 + `"}`)})
-		case r.Method == http.MethodPost:
-			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(kubernetes.Object{})
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	})
+	api := newFakeAPI()
+	api.put(caSecretPath, kubernetes.Object{Data: json.RawMessage(`{"ca.crt":"` + fakeCASecretDataB64 + `"}`)})
+	return newTestKubeClient(t, api.handler(t))
 }
+
+var (
+	caSecretPath    = "/api/v1/namespaces/" + ControlPlaneNamespace + "/secrets/" + clusterGatewayCASecretName
+	caConfigMapPath = "/api/v1/namespaces/" + DataPlaneNamespace + "/configmaps/" + clusterGatewayCAConfigMapName
+	dataPlaneNSPath = "/api/v1/namespaces/" + DataPlaneNamespace
+)
 
 func TestDeployer_Ensure_InstallsThreeReleasesInOrderWithExpectedFlags(t *testing.T) {
 	fake := &fakeHelmRunner{}
@@ -132,123 +121,62 @@ func TestDeployer_Ensure_ControlPlaneFailureStopsBeforeDataPlane(t *testing.T) {
 	}
 }
 
-func TestEnsureDataPlaneTrustsControlPlane_CreatesConfigMapFromRealSecretAndNamespace(t *testing.T) {
-	srcPath := "/api/v1/namespaces/" + ControlPlaneNamespace + "/secrets/" + clusterGatewayCASecretName
-	dstPath := "/api/v1/namespaces/" + DataPlaneNamespace + "/configmaps/" + clusterGatewayCAConfigMapName
-	nsPath := "/api/v1/namespaces/" + DataPlaneNamespace
-	var nsCreated, configMapCreated bool
-	var gotConfigMap kubernetes.Object
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == nsPath:
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/namespaces":
-			nsCreated = true
-			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(kubernetes.Object{})
-		case r.Method == http.MethodGet && r.URL.Path == dstPath:
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && r.URL.Path == srcPath:
-			json.NewEncoder(w).Encode(kubernetes.Object{Data: json.RawMessage(`{"ca.crt":"` + fakeCASecretDataB64 + `"}`)})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/namespaces/"+DataPlaneNamespace+"/configmaps":
-			configMapCreated = true
-			json.NewDecoder(r.Body).Decode(&gotConfigMap)
-			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(gotConfigMap)
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	})
-	d := &Deployer{client: client}
+func TestEnsureDataPlaneTrustsControlPlane_AppliesNamespaceAndConfigMapFromRealSecret(t *testing.T) {
+	api := newFakeAPI()
+	api.put(caSecretPath, kubernetes.Object{Data: json.RawMessage(`{"ca.crt":"` + fakeCASecretDataB64 + `"}`)})
+	d := &Deployer{client: newTestKubeClient(t, api.handler(t))}
 
 	if err := d.ensureDataPlaneTrustsControlPlane(context.Background()); err != nil {
 		t.Fatalf("ensureDataPlaneTrustsControlPlane() = %v", err)
 	}
-	if !nsCreated {
-		t.Error("data plane namespace was not created")
+	if ns := api.lastApply(t, dataPlaneNSPath); ns.Kind != "Namespace" || ns.Metadata.Name != DataPlaneNamespace {
+		t.Errorf("namespace apply = %+v", ns)
 	}
-	if !configMapCreated {
-		t.Fatal("cluster-gateway-ca ConfigMap was not created in the data plane namespace")
+	cm := api.lastApply(t, caConfigMapPath)
+	if cm.Kind != "ConfigMap" || cm.Metadata.Namespace != DataPlaneNamespace {
+		t.Errorf("configmap apply = %+v", cm)
 	}
 	var gotData map[string]string
-	if err := json.Unmarshal(gotConfigMap.Data, &gotData); err != nil {
-		t.Fatalf("unmarshal created configmap data = %v", err)
+	if err := json.Unmarshal(cm.Data, &gotData); err != nil {
+		t.Fatalf("unmarshal configmap data = %v", err)
 	}
 	if gotData["ca.crt"] != "fake-ca-pem-data" {
 		t.Errorf("configmap ca.crt = %q, want the Secret's base64-decoded value %q", gotData["ca.crt"], "fake-ca-pem-data")
 	}
-}
 
-func TestEnsureDataPlaneTrustsControlPlane_AlreadyCopied_DoesNothing(t *testing.T) {
-	nsPath := "/api/v1/namespaces/" + DataPlaneNamespace
-	dstPath := "/api/v1/namespaces/" + DataPlaneNamespace + "/configmaps/" + clusterGatewayCAConfigMapName
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			t.Fatalf("unexpected POST %s, want no create call when namespace+configmap already exist", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case nsPath, dstPath:
-			json.NewEncoder(w).Encode(kubernetes.Object{})
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	})
-	d := &Deployer{client: client}
-
+	// Re-running stores nothing while the CA is unchanged...
+	api.writes = 0
 	if err := d.ensureDataPlaneTrustsControlPlane(context.Background()); err != nil {
-		t.Fatalf("ensureDataPlaneTrustsControlPlane() = %v", err)
+		t.Fatal(err)
+	}
+	if api.writes != 0 {
+		t.Errorf("repeat stored %d writes, want 0", api.writes)
+	}
+	// ...and carries a rotated CA over.
+	api.put(caSecretPath, kubernetes.Object{Data: json.RawMessage(`{"ca.crt":"cm90YXRlZA=="}`)})
+	if err := d.ensureDataPlaneTrustsControlPlane(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(api.objects[caConfigMapPath].Data), "rotated") {
+		t.Errorf("configmap data = %s, want the rotated CA", api.objects[caConfigMapPath].Data)
 	}
 }
 
 func TestEnsureDataPlaneTrustsControlPlane_SourceSecretMissing_PropagatesError(t *testing.T) {
-	nsPath := "/api/v1/namespaces/" + DataPlaneNamespace
-	dstPath := "/api/v1/namespaces/" + DataPlaneNamespace + "/configmaps/" + clusterGatewayCAConfigMapName
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case nsPath:
-			json.NewEncoder(w).Encode(kubernetes.Object{})
-		case dstPath:
-			w.WriteHeader(http.StatusNotFound)
-		default:
-			// The control-plane source Secret GET -- simulate it
-			// genuinely missing (cert-manager hasn't issued it yet,
-			// or the control-plane chart install somehow didn't
-			// create the Certificate).
-			w.WriteHeader(http.StatusNotFound)
-		}
-	})
-	d := &Deployer{client: client}
-
+	// cert-manager hasn't issued it yet, or the control-plane chart didn't
+	// create the Certificate.
+	d := &Deployer{client: newTestKubeClient(t, newFakeAPI().handler(t))}
 	if err := d.ensureDataPlaneTrustsControlPlane(context.Background()); err == nil {
 		t.Fatal("ensureDataPlaneTrustsControlPlane() = nil, want an error when the source Secret is missing")
 	}
 }
 
 func TestEnsureDataPlaneTrustsControlPlane_SecretMissingCACrtKey_PropagatesError(t *testing.T) {
-	srcPath := "/api/v1/namespaces/" + ControlPlaneNamespace + "/secrets/" + clusterGatewayCASecretName
-	nsPath := "/api/v1/namespaces/" + DataPlaneNamespace
-	dstPath := "/api/v1/namespaces/" + DataPlaneNamespace + "/configmaps/" + clusterGatewayCAConfigMapName
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case nsPath:
-			json.NewEncoder(w).Encode(kubernetes.Object{})
-		case dstPath:
-			w.WriteHeader(http.StatusNotFound)
-		case srcPath:
-			// A real TLS Secret always has tls.crt/tls.key/ca.crt, but
-			// assert the explicit check fires if that ever isn't true
-			// rather than panicking on a nil map lookup.
-			json.NewEncoder(w).Encode(kubernetes.Object{Data: json.RawMessage(`{"tls.crt":"` + fakeCASecretDataB64 + `"}`)})
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	})
-	d := &Deployer{client: client}
-
+	// A real TLS Secret always has tls.crt/tls.key/ca.crt, but assert the
+	// explicit check fires if that ever isn't true rather than panicking.
+	api := newFakeAPI()
+	api.put(caSecretPath, kubernetes.Object{Data: json.RawMessage(`{"tls.crt":"` + fakeCASecretDataB64 + `"}`)})
+	d := &Deployer{client: newTestKubeClient(t, api.handler(t))}
 	if err := d.ensureDataPlaneTrustsControlPlane(context.Background()); err == nil {
 		t.Fatal("ensureDataPlaneTrustsControlPlane() = nil, want an error when the Secret has no ca.crt key")
 	}

@@ -122,6 +122,12 @@ lives, type-asserted out of `Registry.Lookup`'s `any` result — `core/
 provider` doesn't know or care what any specific capability's interface
 looks like.
 
+Since spec 014 the registry also carries **readiness** per capability
+(`SetReadiness`, `Readiness()`; `Readiness{Ready, Reason, Message, Since}`,
+mutex-guarded, in-memory). The composition root reports setup progress
+there, and `GET /v1/readiness` serves it. `Since` moves only when `Ready` or
+`Reason` changes. See `reconciliation.md`.
+
 Proven, not just designed: spec 006 registered a deliberately trivial
 `nodeLister` capability (list Kubernetes Nodes) through this exact
 mechanism, end-to-end against a real K3s cluster (`serendipd` logged
@@ -148,8 +154,10 @@ concrete `StorageProvider` (capability-shaped, defined alongside the
 Reconciler in the same package, mirroring `ClusterReconciler`/
 `HealthChecker`'s existing precedent) injected via its constructor —
 **not** looked up from `core/provider.Registry` inside `Reconcile`
-itself. The `Registry.Lookup` + type-assert happens exactly once, in
-`cmd/serendipd`'s composition root, when wiring the Reconciler — this
+itself. The `Registry.Lookup` + type-assert happened exactly once, in
+`cmd/serendipd`'s composition root, when wiring the Reconciler (since spec
+014 the Kubernetes-facing providers are handed to the Reconciler through a
+lazy handle instead; see "Lazy provider handles" below) — this
 turned out to be the right call: it keeps `core/reconcile` free of any
 import of `core/provider` at all, and matches `ClusterReconciler`'s own
 `HealthChecker` injection exactly, rather than introducing a second,
@@ -214,7 +222,7 @@ API objects. `providers/application/openchoreo` (spec 010) is the first to
 instead shell out to a real external CLI tool (`helm`, via `os/exec`) as its
 primary integration mechanism, using `providers/kubernetes.Client` only for
 the one piece Helm itself can't do (the `DataPlane` CR, the CA-trust
-ConfigMap). ADR 0010 is the authoritative record for why this is justified
+ConfigMap; applied server-side since spec 014). ADR 0010 is the authoritative record for why this is justified
 for OpenChoreo specifically and why it does not reopen ADR 0002/0009's "no
 Helm, direct objects" precedent for Storage/Secrets — this is a
 per-capability evaluation, not a new default. The concrete lesson for the
@@ -267,7 +275,8 @@ type GatewayProvider interface {
 Fourth data point after Storage, Secrets and Application Platform: the shape
 comes from what the capability does (make one shared gateway exist, say where
 it is), so there is no `Delete` and no per-resource reconciler. It is ensured
-once at startup because there is no `Gateway` resource kind yet.
+by background setup, then re-ensured on an interval (spec 014), rather than
+reconciled per resource, because there is no `Gateway` resource kind yet.
 
 **Pattern for capabilities that must cooperate without importing each
 other.** The Application Platform provider needs to know which gateway to
@@ -287,6 +296,73 @@ consequence: `cmd/serendipd` cannot call them, so each provider ensures its
 own prerequisite (both `kgateway.Deployer.Ensure` and the OpenChoreo wiring
 call `gatewayapi.EnsureCRDs`; the second call is a few GETs). Detail:
 `gateway.md`.
+
+## Server-side apply for Serendip-owned objects (spec 014)
+
+Providers used to create objects with get-or-create, then merge-patch on
+difference. A merge patch cannot remove a field it does not mention, so a
+label or map key Serendip dropped in a later version stayed on the live
+object forever. Objects Serendip's providers own are now written with
+server-side apply.
+
+`providers/kubernetes.Client.Apply(ctx, path, obj, fieldManager)` sends
+`PATCH <path>?fieldManager=serendip&force=true` with
+`Content-Type: application/apply-patch+yaml` (the JSON body is valid YAML, so
+no dependency). `obj` carries the full desired state of the fields Serendip
+owns. The field manager is the constant `kubernetes.FieldManager`
+(`"serendip"`), one stable name for every provider and release. `ErrNotFound`
+on 404 (parent namespace missing).
+
+- **Why `force=true` is safe.** An apply names only fields Serendip declares
+  on objects it created. A conflict there means something else changed a
+  Serendip-owned field, which drift repair should undo. Fields set only by
+  other managers (an operator's labels, controllers' status) are not in the
+  apply, so they are never touched.
+- **Removal is automatic.** A field applied before and omitted now is removed
+  by the API server; this replaced the hand-written drift checks and patch
+  builders, and the explicit-null special cases (such as the Workload's
+  endpoint `visibility`).
+- **A no-drift apply stores nothing.** The request is made, but
+  `resourceVersion` and generation are unchanged. "Did I just change it?" is
+  read from `metadata.generation` before (the GET the provider already does)
+  and after (the apply response).
+
+**Applied by Serendip:** local-path PV, PVC and the `serendip-system`
+Namespace; OpenBao's Namespace, ConfigMap, PVC, Service and StatefulSet;
+OpenChoreo's DataPlane, `cluster-gateway-ca` ConfigMap, the four platform
+defaults, Project, ProjectReleaseBinding, Component and Workload; kgateway's
+GatewayParameters and Gateway.
+
+**Stays merge patch:**
+
+- the `openchoreo-control-plane` Namespace label: Helm created the namespace,
+  Serendip owns one label on it;
+- the Gateway API CRD installer (`providers/internal/gatewayapi`): it is
+  version-gated by bundle annotation and upgrade-only, not a desired-state
+  object owned field by field.
+
+**Helm-owned** (cert-manager, OpenChoreo and kgateway charts) stays Helm's.
+
+**Migration note.** Objects created before spec 014 (by POST and merge patch)
+have their fields recorded under an older `Update` manager. The first apply
+makes `serendip` co-own every field it applies; nothing is wiped. A field the
+old manager set that Serendip no longer sets stays once, because it was never
+applied and apply cannot remove it. Clusters created under specs 007-013 may
+carry such leftovers; clean up by hand by removing the field with `kubectl`.
+New clusters are clean. Rewriting `managedFields` was rejected as not worth
+its risk for a project with no production clusters.
+
+## Lazy provider handles (spec 014)
+
+The Kubernetes-facing providers no longer have to exist when reconcilers are
+registered. `cmd/serendipd/lazy.go` holds one small wrapper per interface
+(`StorageProvider`, `SecretsProvider`, `ApplicationPlatformProvider`) over an
+atomic pointer. Background setup stores the real provider once it succeeds;
+until then every method returns `reconcile.ErrProviderNotReady`, a sibling of
+`ErrNotConfigured`, which reconcilers turn into a `ProviderNotReady`
+Condition plus an early re-check. The wrappers live in the composition root
+so neither `core/` nor the providers change shape. A new capability whose
+setup can be slow follows the same pattern. Detail: `reconciliation.md`.
 
 ## Open questions
 

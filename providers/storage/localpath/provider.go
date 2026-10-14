@@ -55,7 +55,7 @@ type Provider struct {
 	client *kubernetes.Client
 }
 
-// NewProvider ensures Namespace exists (idempotent get-then-create)
+// NewProvider ensures Namespace exists (server-side apply, idempotent)
 // before returning. Setup failures surface at cmd/serendipd startup,
 // not on the first Volume creation.
 func NewProvider(ctx context.Context, client *kubernetes.Client) (*Provider, error) {
@@ -67,18 +67,11 @@ func NewProvider(ctx context.Context, client *kubernetes.Client) (*Provider, err
 }
 
 func (p *Provider) ensureNamespace(ctx context.Context) error {
-	_, err := p.client.Get(ctx, "/api/v1/namespaces/"+Namespace)
-	if err == nil {
-		return nil // already exists
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return err
-	}
-	_, err = p.client.Create(ctx, "/api/v1/namespaces", kubernetes.Object{
+	_, err := p.client.Apply(ctx, "/api/v1/namespaces/"+Namespace, kubernetes.Object{
 		APIVersion: "v1",
 		Kind:       "Namespace",
 		Metadata:   kubernetes.ObjectMeta{Name: Namespace},
-	})
+	}, kubernetes.FieldManager)
 	return err
 }
 
@@ -139,28 +132,27 @@ func quantityBytes(sizeBytes int64) string {
 	return strconv.FormatInt(sizeBytes, 10)
 }
 
-// Ensure creates vol's backing PersistentVolume and
-// PersistentVolumeClaim (statically bound to each other) if they don't
-// exist yet, then reports the PVC's real status.phase -- "Pending",
-// "Bound", or "Lost" are the real, standard Kubernetes PVC phase
-// values, used directly as reason so an operator reading the Volume's
-// Condition sees the real upstream state, not a Serendip-invented
-// label. Static binding means Bound should appear essentially
-// immediately once both objects exist -- no provisioner, no consuming
-// Pod in the loop at all.
+// Ensure server-side-applies vol's PersistentVolumeClaim and its
+// statically bound PersistentVolume, then reports the PVC's real
+// status.phase -- "Pending", "Bound", or "Lost" are the real, standard
+// Kubernetes PVC phase values, used directly as reason so an operator
+// reading the Volume's Condition sees the real upstream state, not a
+// Serendip-invented label. Static binding means Bound should appear
+// essentially immediately once both objects exist -- no provisioner, no
+// consuming Pod in the loop at all.
+//
+// The PVC is applied first: its spec is largely immutable once bound, so a
+// change the API server refuses (e.g. a resize) fails here, before the PV
+// is touched, and surfaces as an honest Ensure error rather than leaving
+// the two objects disagreeing. A PVC naming a PV that doesn't exist yet
+// just stays Pending until the PV appears a moment later.
 func (p *Provider) Ensure(ctx context.Context, vol resource.Volume) (bound bool, reason, message string, err error) {
-	if err := p.ensurePV(ctx, vol); err != nil {
-		return false, "", "", fmt.Errorf("localpath: ensure PV %s: %w", pvName(vol), err)
+	obj, err := p.applyPVC(ctx, vol)
+	if err != nil {
+		return false, "", "", fmt.Errorf("localpath: apply PVC %s: %w", pvcName(vol), err)
 	}
-
-	obj, err := p.client.Get(ctx, p.pvcPath(vol))
-	if errors.Is(err, kubernetes.ErrNotFound) {
-		obj, err = p.createPVC(ctx, vol)
-		if err != nil {
-			return false, "", "", fmt.Errorf("localpath: create PVC %s: %w", pvcName(vol), err)
-		}
-	} else if err != nil {
-		return false, "", "", fmt.Errorf("localpath: get PVC %s: %w", pvcName(vol), err)
+	if err := p.applyPV(ctx, vol); err != nil {
+		return false, "", "", fmt.Errorf("localpath: apply PV %s: %w", pvName(vol), err)
 	}
 
 	var status pvcStatusWire
@@ -176,15 +168,7 @@ func (p *Provider) Ensure(ctx context.Context, vol resource.Volume) (bound bool,
 	return phase == "Bound", phase, "", nil
 }
 
-func (p *Provider) ensurePV(ctx context.Context, vol resource.Volume) error {
-	_, err := p.client.Get(ctx, p.pvPath(vol))
-	if err == nil {
-		return nil // already exists
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return err
-	}
-
+func (p *Provider) applyPV(ctx context.Context, vol resource.Volume) error {
 	specBytes, err := json.Marshal(pvSpecWire{
 		Capacity:                      map[string]string{"storage": quantityBytes(vol.Spec.SizeBytes)},
 		AccessModes:                   []string{"ReadWriteOnce"},
@@ -195,16 +179,16 @@ func (p *Provider) ensurePV(ctx context.Context, vol resource.Volume) error {
 	if err != nil {
 		return fmt.Errorf("marshal PV spec: %w", err)
 	}
-	_, err = p.client.Create(ctx, "/api/v1/persistentvolumes", kubernetes.Object{
+	_, err = p.client.Apply(ctx, p.pvPath(vol), kubernetes.Object{
 		APIVersion: "v1",
 		Kind:       "PersistentVolume",
 		Metadata:   kubernetes.ObjectMeta{Name: pvName(vol)},
 		Spec:       specBytes,
-	})
+	}, kubernetes.FieldManager)
 	return err
 }
 
-func (p *Provider) createPVC(ctx context.Context, vol resource.Volume) (kubernetes.Object, error) {
+func (p *Provider) applyPVC(ctx context.Context, vol resource.Volume) (kubernetes.Object, error) {
 	specBytes, err := json.Marshal(pvcSpecWire{
 		AccessModes: []string{"ReadWriteOnce"},
 		Resources: pvcResources{Requests: map[string]string{
@@ -216,13 +200,12 @@ func (p *Provider) createPVC(ctx context.Context, vol resource.Volume) (kubernet
 	if err != nil {
 		return kubernetes.Object{}, fmt.Errorf("marshal PVC spec: %w", err)
 	}
-	createPath := fmt.Sprintf("/api/v1/namespaces/%s/persistentvolumeclaims", Namespace)
-	return p.client.Create(ctx, createPath, kubernetes.Object{
+	return p.client.Apply(ctx, p.pvcPath(vol), kubernetes.Object{
 		APIVersion: "v1",
 		Kind:       "PersistentVolumeClaim",
 		Metadata:   kubernetes.ObjectMeta{Name: pvcName(vol), Namespace: Namespace},
 		Spec:       specBytes,
-	})
+	}, kubernetes.FieldManager)
 }
 
 // Delete removes vol's backing PersistentVolumeClaim and

@@ -3,7 +3,6 @@ package openchoreo
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/serendip-infra/serendip-infra/providers/internal/helm"
@@ -144,12 +143,12 @@ const (
 	clusterGatewayCASecretName    = "cluster-gateway-ca"
 )
 
-// ensureDataPlaneTrustsControlPlane idempotently ensures the
-// DataPlaneNamespace exists and creates a cluster-gateway-ca ConfigMap
-// in it containing the control plane's real CA certificate, so the
-// data plane chart's cluster-agent (installed right after this
-// returns) can mount its expected server-ca ConfigMap with real
-// content on its very first boot.
+// ensureDataPlaneTrustsControlPlane ensures the DataPlaneNamespace exists
+// and server-side-applies a cluster-gateway-ca ConfigMap in it containing
+// the control plane's real CA certificate, so the data plane chart's
+// cluster-agent (installed right after this returns) can mount its
+// expected server-ca ConfigMap with real content on its very first boot.
+// Applied on every call, so a rotated CA is carried over too.
 //
 // Reads the CA from the control plane's cluster-gateway-ca Secret
 // (cert-manager-issued, type kubernetes.io/tls), NOT from the control
@@ -172,13 +171,6 @@ func (d *Deployer) ensureDataPlaneTrustsControlPlane(ctx context.Context) error 
 		return fmt.Errorf("ensure %s namespace: %w", DataPlaneNamespace, err)
 	}
 
-	dstPath := fmt.Sprintf("/api/v1/namespaces/%s/configmaps/%s", DataPlaneNamespace, clusterGatewayCAConfigMapName)
-	if _, err := d.client.Get(ctx, dstPath); err == nil {
-		return nil
-	} else if !errors.Is(err, kubernetes.ErrNotFound) {
-		return fmt.Errorf("get %s/%s configmap: %w", DataPlaneNamespace, clusterGatewayCAConfigMapName, err)
-	}
-
 	srcPath := fmt.Sprintf("/api/v1/namespaces/%s/secrets/%s", ControlPlaneNamespace, clusterGatewayCASecretName)
 	src, err := d.client.Get(ctx, srcPath)
 	if err != nil {
@@ -198,30 +190,19 @@ func (d *Deployer) ensureDataPlaneTrustsControlPlane(ctx context.Context) error 
 		return fmt.Errorf("marshal configmap data: %w", err)
 	}
 
-	_, err = d.client.Create(ctx, fmt.Sprintf("/api/v1/namespaces/%s/configmaps", DataPlaneNamespace), kubernetes.Object{
+	_, err = apply(ctx, d.client, fmt.Sprintf("/api/v1/namespaces/%s/configmaps", DataPlaneNamespace), kubernetes.Object{
 		APIVersion: "v1",
 		Kind:       "ConfigMap",
 		Metadata:   kubernetes.ObjectMeta{Name: clusterGatewayCAConfigMapName, Namespace: DataPlaneNamespace},
 		Data:       configMapData,
 	})
-	if err != nil {
-		return fmt.Errorf("create %s/%s configmap: %w", DataPlaneNamespace, clusterGatewayCAConfigMapName, err)
-	}
-	return nil
+	return err
 }
 
-// ensureNamespace idempotently creates namespace if it doesn't exist
-// -- mirrors providers/secrets/openbao/deploy.go's own ensureNamespace
-// exactly (same pattern, different package).
+// ensureNamespace server-side-applies namespace (no fields beyond its
+// name, so it never contends with Helm's --create-namespace).
 func ensureNamespace(ctx context.Context, client *kubernetes.Client, namespace string) error {
-	_, err := client.Get(ctx, "/api/v1/namespaces/"+namespace)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return err
-	}
-	_, err = client.Create(ctx, "/api/v1/namespaces", kubernetes.Object{
+	_, err := apply(ctx, client, "/api/v1/namespaces", kubernetes.Object{
 		APIVersion: "v1",
 		Kind:       "Namespace",
 		Metadata:   kubernetes.ObjectMeta{Name: namespace},

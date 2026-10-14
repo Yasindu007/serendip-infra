@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -84,6 +83,11 @@ type fakeAPI struct {
 	failPath string
 	// onGet lets a test mutate state (e.g. mark programmed) on each GET.
 	onGet func(path string, obj *kubernetes.Object)
+	// applies is every server-side apply body, keyed by path, in order;
+	// writes counts the applies that changed a stored spec.
+	applies map[string][]kubernetes.Object
+	queries []string
+	writes  int
 }
 
 func newFakeAPI() *fakeAPI { return &fakeAPI{objects: map[string]kubernetes.Object{}} }
@@ -129,14 +133,31 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(obj)
 	case http.MethodPatch:
-		body, _ := io.ReadAll(r.Body)
-		var p struct {
-			Spec json.RawMessage `json:"spec"`
+		if r.Header.Get("Content-Type") != "application/apply-patch+yaml" {
+			w.WriteHeader(http.StatusUnsupportedMediaType)
+			return
 		}
-		json.Unmarshal(body, &p)
-		obj := f.objects[r.URL.Path]
-		obj.Spec = p.Spec
-		obj.Metadata.Generation++
+		// Server-side apply, modeled for this package's objects: the
+		// applied spec replaces the stored one (Serendip owns all of it),
+		// generation moves only on a real change, status is kept.
+		var in kubernetes.Object
+		json.NewDecoder(r.Body).Decode(&in)
+		if f.applies == nil {
+			f.applies = map[string][]kubernetes.Object{}
+		}
+		f.applies[r.URL.Path] = append(f.applies[r.URL.Path], in)
+		f.queries = append(f.queries, r.URL.RawQuery)
+		obj, ok := f.objects[r.URL.Path]
+		switch {
+		case !ok:
+			obj = in
+			obj.Metadata.Generation = 1
+			f.writes++
+		case string(obj.Spec) != string(in.Spec):
+			obj.Spec = in.Spec
+			obj.Metadata.Generation++
+			f.writes++
+		}
 		f.objects[r.URL.Path] = obj
 		json.NewEncoder(w).Encode(obj)
 	}
@@ -176,7 +197,7 @@ func testProvider(t *testing.T, api *fakeAPI) *Provider {
 	return p
 }
 
-func TestEnsureGateway_FreshCreatesParametersAndGateway(t *testing.T) {
+func TestEnsureGateway_FreshAppliesParametersAndGateway(t *testing.T) {
 	api := newFakeAPI()
 	api.onGet = markProgrammed
 	p := testProvider(t, api)
@@ -189,6 +210,14 @@ func TestEnsureGateway_FreshCreatesParametersAndGateway(t *testing.T) {
 		t.Errorf("endpoint = %+v", ep)
 	}
 
+	if n := api.count(http.MethodPost); n != 0 {
+		t.Errorf("POST calls = %d, want 0 (apply creates)", n)
+	}
+	for _, q := range api.queries {
+		if q != "fieldManager=serendip&force=true" {
+			t.Errorf("apply query = %q, want fieldManager=serendip&force=true", q)
+		}
+	}
 	params := api.objects[parametersPath+"/"+GatewayName]
 	if params.Kind != "GatewayParameters" || params.APIVersion != "gateway.kgateway.dev/v1alpha1" {
 		t.Errorf("parameters kind/apiVersion = %s/%s", params.Kind, params.APIVersion)
@@ -207,38 +236,57 @@ func TestEnsureGateway_FreshCreatesParametersAndGateway(t *testing.T) {
 	}
 }
 
-func TestEnsureGateway_UnchangedMakesNoWrites(t *testing.T) {
+func TestEnsureGateway_UnchangedStoresNothing(t *testing.T) {
 	api := newFakeAPI()
 	api.onGet = markProgrammed
 	p := testProvider(t, api)
 	if _, _, _, _, err := p.EnsureGateway(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	api.calls = nil
+	api.writes = 0
 
 	if _, ready, _, _, err := p.EnsureGateway(context.Background()); err != nil || !ready {
 		t.Fatalf("second EnsureGateway() = (%v, %v)", ready, err)
 	}
-	if n := api.count(http.MethodPost) + api.count(http.MethodPatch); n != 0 {
-		t.Errorf("writes on unchanged ensure = %v", api.calls)
+	if api.writes != 0 {
+		t.Errorf("stored writes on unchanged ensure = %d, want 0", api.writes)
 	}
 }
 
-func TestEnsureGateway_ChangedNodePortPatchesParameters(t *testing.T) {
+// A Gateway deleted by hand is recreated on the next ensure (cmd's
+// foundations loop).
+func TestEnsureGateway_DeletedGatewayIsRecreated(t *testing.T) {
+	api := newFakeAPI()
+	api.onGet = markProgrammed
+	p := testProvider(t, api)
+	if _, _, _, _, err := p.EnsureGateway(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	delete(api.objects, gatewaysPath+"/"+GatewayName)
+
+	if _, ready, _, _, err := p.EnsureGateway(context.Background()); err != nil || !ready {
+		t.Fatalf("EnsureGateway() after delete = (%v, %v)", ready, err)
+	}
+	if _, ok := api.objects[gatewaysPath+"/"+GatewayName]; !ok {
+		t.Error("deleted Gateway was not recreated")
+	}
+}
+
+func TestEnsureGateway_ChangedNodePortIsApplied(t *testing.T) {
 	api := newFakeAPI()
 	api.onGet = markProgrammed
 	if _, _, _, _, err := testProvider(t, api).EnsureGateway(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	api.calls = nil
+	api.writes = 0
 
 	p := NewProvider(newTestClient(t, api), "localhost", 31000, map[string]string{"example.dev/proxy": "gateway"})
 	p.pollInterval, p.timeout = time.Millisecond, 50*time.Millisecond
 	if _, _, _, _, err := p.EnsureGateway(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if n := api.count(http.MethodPatch); n != 1 {
-		t.Fatalf("PATCH calls = %v, want exactly one (GatewayParameters)", api.calls)
+	if api.writes != 1 {
+		t.Fatalf("stored writes = %d, want exactly one (GatewayParameters)", api.writes)
 	}
 	if !strings.Contains(string(api.objects[parametersPath+"/"+GatewayName].Spec), `"nodePort":31000`) {
 		t.Errorf("parameters spec = %s", api.objects[parametersPath+"/"+GatewayName].Spec)

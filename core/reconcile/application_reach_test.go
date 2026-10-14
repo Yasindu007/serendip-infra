@@ -36,6 +36,7 @@ func TestComponentReconciler_Reachability(t *testing.T) {
 		wantReachable *resource.ConditionStatus // nil: no Reachable condition
 		wantReason    string
 		wantEndpoints int
+		wantRequeue   bool
 	}{
 		{name: "not exposed: no Reachable condition, no endpoints", appReady: resource.ConditionTrue,
 			result: ensureResult{ready: true, reason: reconcile.ReasonDeployed}},
@@ -46,13 +47,17 @@ func TestComponentReconciler_Reachability(t *testing.T) {
 		{name: "exposed and pending publishes no endpoints", expose: true, appReady: resource.ConditionTrue,
 			result: ensureResult{reason: reconcile.ReasonProgressing,
 				reach: &reconcile.Reachability{Reason: reconcile.ReasonPending, Endpoints: testEndpoints}},
-			wantReachable: ptr(resource.ConditionFalse), wantReason: reconcile.ReasonPending},
+			wantReachable: ptr(resource.ConditionFalse), wantReason: reconcile.ReasonPending, wantRequeue: true},
+		{name: "deployed but route not serving yet: requeue", expose: true, appReady: resource.ConditionTrue,
+			result: ensureResult{ready: true, reason: reconcile.ReasonDeployed,
+				reach: &reconcile.Reachability{Reason: reconcile.ReasonPending}},
+			wantReachable: ptr(resource.ConditionFalse), wantReason: reconcile.ReasonPending, wantRequeue: true},
 		{name: "route rejected", expose: true, appReady: resource.ConditionTrue,
 			result: ensureResult{ready: true, reason: reconcile.ReasonDeployed,
 				reach: &reconcile.Reachability{Reason: reconcile.ReasonRouteRejected, Message: "listener not found"}},
 			wantReachable: ptr(resource.ConditionFalse), wantReason: reconcile.ReasonRouteRejected},
 		{name: "exposed but application not ready: pending without provider call", expose: true, appReady: resource.ConditionFalse,
-			wantReachable: ptr(resource.ConditionFalse), wantReason: reconcile.ReasonPending},
+			wantReachable: ptr(resource.ConditionFalse), wantReason: reconcile.ReasonPending, wantRequeue: true},
 		{name: "exposed and provider error: pending", expose: true, appReady: resource.ConditionTrue,
 			result:        ensureResult{err: errors.New("timeout")},
 			wantReachable: ptr(resource.ConditionFalse), wantReason: reconcile.ReasonPending},
@@ -64,9 +69,7 @@ func TestComponentReconciler_Reachability(t *testing.T) {
 			comp := createExposedComponent(t, s, app.Metadata.ID, tt.expose)
 			r := reconcile.NewComponentReconciler(s.components, s.apps, &fakeAppPlatform{comp: tt.result})
 
-			if err := r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindComponent, ID: comp.Metadata.ID}); err != nil {
-				t.Fatalf("Reconcile() = %v", err)
-			}
+			checkRequeue(t, r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindComponent, ID: comp.Metadata.ID}), tt.wantRequeue)
 			got, _ := s.components.Get(context.Background(), comp.Metadata.ID)
 			c := findCond(got.Status.Conditions, "Reachable")
 			switch {
@@ -167,9 +170,7 @@ func TestComponentReconciler_ReachableWithoutReadyIsDowngraded(t *testing.T) {
 	p := &fakeAppPlatform{comp: ensureResult{reason: reconcile.ReasonProgressing,
 		reach: &reconcile.Reachability{Reachable: true, Reason: reconcile.ReasonServing, Endpoints: testEndpoints}}}
 	r := reconcile.NewComponentReconciler(s.components, s.apps, p)
-	if err := r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindComponent, ID: comp.Metadata.ID}); err != nil {
-		t.Fatal(err)
-	}
+	checkRequeue(t, r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindComponent, ID: comp.Metadata.ID}), true)
 	got, _ := s.components.Get(context.Background(), comp.Metadata.ID)
 	if c := findCond(got.Status.Conditions, "Reachable"); c == nil || c.Status != resource.ConditionFalse || c.Reason != reconcile.ReasonPending {
 		t.Errorf("Reachable = %+v, want False/Pending while the workload isn't Ready", c)

@@ -2,10 +2,10 @@ package openchoreo
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
@@ -27,70 +27,62 @@ func newTestKubeClient(t *testing.T, handler http.HandlerFunc) *kubernetes.Clien
 	return client
 }
 
-func TestEnsureDefaultDataPlane_Absent_CreatesWithExpectedShape(t *testing.T) {
-	const wantPath = "/apis/openchoreo.dev/v1alpha1/namespaces/openchoreo-control-plane/dataplanes"
-	var created bool
-	var gotObj kubernetes.Object
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		if r.URL.Path != wantPath {
-			t.Errorf("POST path = %q, want %q", r.URL.Path, wantPath)
-		}
-		created = true
-		json.NewDecoder(r.Body).Decode(&gotObj)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(gotObj)
-	})
+func TestEnsureDataPlane_AppliesAgentTrustAndGatewayInOneObject(t *testing.T) {
+	api := newFakeAPI()
+	client := newTestKubeClient(t, api.handler(t))
 
-	if err := EnsureDefaultDataPlane(context.Background(), client); err != nil {
-		t.Fatalf("EnsureDefaultDataPlane() = %v", err)
+	if err := EnsureDataPlane(context.Background(), client, testGateway); err != nil {
+		t.Fatalf("EnsureDataPlane() = %v", err)
 	}
-	if !created {
-		t.Fatal("DataPlane was not created")
+	if len(api.applies) != 1 {
+		t.Fatalf("applies = %d (%v), want 1", len(api.applies), api.calls)
 	}
-	if gotObj.APIVersion != "openchoreo.dev/v1alpha1" || gotObj.Kind != "DataPlane" {
-		t.Errorf("created object apiVersion/kind = %q/%q, want openchoreo.dev/v1alpha1/DataPlane", gotObj.APIVersion, gotObj.Kind)
+	a := api.applies[0]
+	if a.path != dataPlanePath() || a.fieldManager != kubernetes.FieldManager || a.force != "true" {
+		t.Errorf("apply = %s fieldManager=%q force=%q", a.path, a.fieldManager, a.force)
 	}
-	if gotObj.Metadata.Name != DefaultDataPlaneName || gotObj.Metadata.Namespace != ControlPlaneNamespace {
-		t.Errorf("created object metadata = %+v, want name=%q namespace=%q", gotObj.Metadata, DefaultDataPlaneName, ControlPlaneNamespace)
+	if a.body.APIVersion != "openchoreo.dev/v1alpha1" || a.body.Kind != "DataPlane" ||
+		a.body.Metadata.Name != DefaultDataPlaneName || a.body.Metadata.Namespace != ControlPlaneNamespace {
+		t.Errorf("envelope = %+v", a.body)
+	}
+	want := `{"clusterAgent":{"clientCA":{"secretKeyRef":{"name":"cluster-agent-tls","namespace":"openchoreo-data-plane","key":"ca.crt"}}},` +
+		`"gateway":{"ingress":{"external":{"name":"serendip-external","namespace":"kgateway-system","http":{"port":30080,"host":"localhost"}}}}}`
+	if string(a.body.Spec) != want {
+		t.Errorf("spec = %s\nwant  %s", a.body.Spec, want)
 	}
 
-	var spec dataPlaneSpec
-	if err := json.Unmarshal(gotObj.Spec, &spec); err != nil {
-		t.Fatalf("unmarshal created spec = %v", err)
+	// A repeat pass is the same request and stores nothing.
+	api.writes = 0
+	if err := EnsureDataPlane(context.Background(), client, testGateway); err != nil {
+		t.Fatal(err)
 	}
-	ref := spec.ClusterAgent.ClientCA.SecretKeyRef
-	if ref.Name != clusterAgentTLSSecretName || ref.Namespace != DataPlaneNamespace || ref.Key != clusterAgentTLSSecretKey {
-		t.Errorf("secretKeyRef = %+v, want name=%q namespace=%q key=%q", ref, clusterAgentTLSSecretName, DataPlaneNamespace, clusterAgentTLSSecretKey)
+	if api.writes != 0 || string(api.applies[1].body.Spec) != want {
+		t.Errorf("repeat: writes = %d, spec = %s", api.writes, api.applies[1].body.Spec)
 	}
 }
 
-func TestEnsureDefaultDataPlane_AlreadyExists_DoesNotReCreate(t *testing.T) {
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			t.Fatalf("unexpected POST %s, want no create call when the DataPlane already exists", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(kubernetes.Object{})
-	})
-
-	if err := EnsureDefaultDataPlane(context.Background(), client); err != nil {
-		t.Fatalf("EnsureDefaultDataPlane() = %v", err)
+func TestEnsureDataPlane_GatewayChangeIsApplied(t *testing.T) {
+	api := newFakeAPI()
+	client := newTestKubeClient(t, api.handler(t))
+	if err := EnsureDataPlane(context.Background(), client, testGateway); err != nil {
+		t.Fatal(err)
+	}
+	moved := testGateway
+	moved.Port = 31080
+	api.writes = 0
+	if err := EnsureDataPlane(context.Background(), client, moved); err != nil {
+		t.Fatal(err)
+	}
+	if api.writes != 1 || !strings.Contains(string(api.objects[dataPlanePath()].Spec), `"port":31080`) {
+		t.Errorf("writes = %d, spec = %s; want the new port applied", api.writes, api.objects[dataPlanePath()].Spec)
 	}
 }
 
-func TestEnsureDefaultDataPlane_UnexpectedGetError_Propagates(t *testing.T) {
-	client := newTestKubeClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("simulated server error"))
-	})
-
-	err := EnsureDefaultDataPlane(context.Background(), client)
-	if err == nil {
-		t.Fatal("EnsureDefaultDataPlane() = nil, want the simulated GET failure to propagate")
+func TestEnsureDataPlane_APIErrorPropagates(t *testing.T) {
+	api := newFakeAPI()
+	api.failPath = dataPlanePath()
+	if err := EnsureDataPlane(context.Background(), newTestKubeClient(t, api.handler(t)), testGateway); err == nil ||
+		!strings.Contains(err.Error(), "DataPlane") {
+		t.Fatalf("EnsureDataPlane() = %v, want an error naming the DataPlane", err)
 	}
 }

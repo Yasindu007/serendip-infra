@@ -9,7 +9,7 @@ mechanism and the fallbacks.
 Code: `core/reconcile/gateway.go` (interface), `providers/gateway/kgateway/`
 (provider), `providers/internal/gatewayapi/` (Gateway API definitions),
 `providers/application/openchoreo/` (route rendering side), `cmd/serendipd`
-`wireGateway` (wiring). Pins: `providers/gateway/kgateway/VERSIONS.md`.
+`wiring.go`/`setup.go` (wiring and background setup). Pins: `providers/gateway/kgateway/VERSIONS.md`.
 
 ## Capability split
 
@@ -28,21 +28,25 @@ type GatewayProvider interface {
 }
 ```
 
-Composition happens only in `cmd/serendipd`: `wireGateway` installs kgateway,
-registers the provider under `"gateway"`, looks it up, calls `EnsureGateway`,
-and fails startup if the gateway is not ready (same contract as
-`CheckReady`). The resulting `GatewayEndpoint` is passed to `wireOpenChoreo`,
-which calls `EnsureDataPlaneGateway` (merge-patches
-`DataPlane/default.spec.gateway.ingress.external = {name, namespace,
-http:{port, host}}`, only on difference) and hands it to
+Composition happens only in `cmd/serendipd`. The gateway's background setup
+step (spec 014) installs kgateway and calls `EnsureGateway`; a gateway that is
+not programmed within the provider's wait is a failed attempt, retried with
+backoff and reported by `GET /v1/readiness`, not a startup failure. On
+success it registers the provider under `"gateway"`, and the resulting
+`GatewayEndpoint` is handed to the application platform's setup step, which
+applies it as `DataPlane/default.spec.gateway.ingress.external = {name,
+namespace, http:{port, host}}` (`EnsureDataPlane`) and passes it to
 `openchoreo.NewProvider`. OpenChoreo then renders each external endpoint's
 HTTPRoute with that Gateway as `parentRef`. Neither provider imports the
 other. The Gateway is configured on the DataPlane, not the Environment,
 because OpenChoreo's release controller watches DataPlanes and re-renders on
 change.
 
-There is no `Gateway` resource kind. The gateway is ensured at startup, not
-reconciled live; its health surfaces on each exposed Component's `Reachable`
+There is no `Gateway` resource kind. The gateway is ensured at setup and then
+re-ensured on the foundations interval (Gateway API CRDs, then
+`EnsureGateway`; `SERENDIP_REENSURE_INTERVAL`, default 5m; see
+`reconciliation.md`), so a deleted or edited Gateway is restored without a
+restart. Its health also surfaces on each exposed Component's `Reachable`
 Condition.
 
 ## Install
@@ -54,7 +58,8 @@ controller runs with `KGW_ENABLE_EXPERIMENTAL_GATEWAY_API_FEATURES=false`
 because only standard-channel CRDs are installed. The chart does not render a
 GatewayClass; the controller creates `kgateway` at runtime.
 
-`EnsureGateway` then get-or-creates (merge-patching on difference):
+`EnsureGateway` then server-side-applies (field manager `serendip`;
+`provider-model.md`):
 
 - `GatewayParameters/serendip-external` (`gateway.kgateway.dev/v1alpha1`):
   Service type `NodePort`, `ports: [{port: 80, nodePort}]`.
@@ -64,8 +69,9 @@ GatewayClass; the controller creates `kgateway` at runtime.
   GatewayParameters, and `spec.infrastructure.labels` (see proxy labels).
 
 It polls (2s interval, 2 min bound) for `Programmed=True` on the current
-generation. Timeout is reported as not-ready with upstream's reason, which
-`wireGateway` turns into a startup error that names `SERENDIP_GATEWAY_NODE_PORT`.
+generation. Timeout is reported as not-ready with upstream's reason, which the
+setup step turns into a retried failure whose message names
+`SERENDIP_GATEWAY_NODE_PORT` (a port already in use is the usual cause).
 
 ### Gateway API pin (v1.6.1, upgrade-only)
 
@@ -127,9 +133,10 @@ unchanged). Mapping in the OpenChoreo provider:
 
 `serendip-service` renders an HTTPRoute (`httproute-external`) only for
 endpoints that are HTTP and have `external` visibility, so only the exposed
-port gets a route. Un-expose works because the visibility key is cleared
-explicitly in the Workload merge patch (a merge patch would otherwise leave
-it); the route disappears and status follows. Toggling only changes the
+port gets a route. Un-expose works because the Workload is server-side
+applied without the visibility key, and the API server removes a field the
+`serendip` manager no longer applies (spec 012 had to send an explicit null in
+a merge patch); the route disappears and status follows. Toggling only changes the
 Workload; autoDeploy cuts a new release.
 
 ## The `Reachable` Condition
@@ -159,8 +166,10 @@ endpoints. Honesty rules enforced in the reconciler and provider:
   endpoint list changes, so an unchanged exposed Component produces no
   `Update`, audit row, or `ResourceVersion` bump.
 
-Status follows the 30s resync; route acceptance is an upstream state change,
-not a Serendip event. There is no HTTP probe from `serendipd`.
+Route acceptance is an upstream state change, not a Serendip event, so while
+`Reachable=Pending` the reconciler asks for early re-checks (2s doubling,
+spec 014; `reconciliation.md`) instead of waiting for the 30s resync. There
+is no HTTP probe from `serendipd`.
 
 ### Proxy labels (NetworkPolicy finding)
 
@@ -191,6 +200,18 @@ Cluster pre-seeded with Gateway API v1.3.0 CRDs.
 - Restart (about 37s): Gateway patched once (proxy labels added); nothing else
   changed.
 
+## Real-cluster verification (spec 014, kind, Kubernetes 1.34)
+
+- After the server-side apply conversion the spec 012 flow passed again
+  (expose, curl 200, un-expose with route removed and curl 404, re-expose).
+- Exposed Component create to `Serving` with a cached image: 14.2s (4 of 4
+  runs), `Serving` 0.2-0.3s after `Deployed` (was about 28s in spec 012).
+- A `Gateway` deleted by hand was recreated by the foundations loop
+  (`SERENDIP_REENSURE_INTERVAL=30s`); the Component returned to `Serving` and
+  curl returned 200, with no restart.
+- Idle: Gateway and GatewayParameters generation and `serendip` apply time
+  unchanged across 75s of re-ensure passes.
+
 ## Footprint
 
 The systematic numbers are in `profiles/edge-1/bench/002-edge1-footprint.md`
@@ -215,12 +236,14 @@ ADR 0011.
   gateway provider; non-HTTP (TCP/UDP) exposure; gateway HA.
 - Disabling Traefik to serve on 80/443 through a LoadBalancer Service (needs a
   migration story for existing clusters).
-- A `Gateway` resource kind and live reconciliation: a Gateway deleted by hand
-  is repaired on the next restart; Components report it meanwhile.
+- A `Gateway` resource kind. (~~Live repair~~: since spec 014 the
+  foundations loop restores a deleted or edited Gateway within the re-ensure
+  interval.)
 - An HTTP reachability probe from `serendipd`.
-- Removing a proxy label: a merge patch cannot drop keys it does not send, so
-  dropping a label from the configured set leaves it on the live Gateway (same
-  limit as the component-type update).
+- ~~Removing a proxy label~~: fixed in spec 014. The Gateway is server-side
+  applied, so a label dropped from the configured set is removed. Clusters
+  created before spec 014 keep a dropped label once (see the migration note in
+  `provider-model.md`).
 
 ## Open questions
 

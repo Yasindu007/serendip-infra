@@ -115,11 +115,21 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, ref graph.Resourc
 	}
 
 	ready, reason, message, err := r.provider.EnsureApplication(ctx, app)
+	if errors.Is(err, ErrProviderNotReady) {
+		return requeueWhen(r.setCondition(ctx, app, resource.ConditionFalse, ReasonProviderNotReady,
+			providerNotReadyMessage(applicationPlatformCapability)), true)
+	}
 	if err != nil {
 		return r.setCondition(ctx, app, resource.ConditionFalse, ReasonEnsureFailed, err.Error())
 	}
-	return r.setCondition(ctx, app, readyStatus(ready), reason, message)
+	// Still rolling out: ask for an early re-check, since nothing on the
+	// Serendip side will announce the upstream catching up.
+	return requeueWhen(r.setCondition(ctx, app, readyStatus(ready), reason, message), !ready && reason == ReasonProgressing)
 }
+
+// applicationPlatformCapability names the capability in not-ready
+// messages.
+const applicationPlatformCapability = "application platform"
 
 // setCondition writes only when {Status, Reason} changes -- the same
 // idempotency guarantee as VolumeReconciler.setCondition. Message is
@@ -170,42 +180,74 @@ func (r *ComponentReconciler) Reconcile(ctx context.Context, ref graph.ResourceR
 		return err
 	}
 
+	obs, err := r.observe(ctx, comp)
+	if err != nil {
+		return err
+	}
+	return requeueWhen(r.setState(ctx, comp, obs), componentConverging(obs))
+}
+
+// observe works out comp's state: a provider observation, or a not-deployed
+// outcome reached before asking the provider. An error means the store
+// couldn't be read.
+func (r *ComponentReconciler) observe(ctx context.Context, comp resource.Component) (ComponentObservation, error) {
 	if err := validateComponentSpec(comp.Spec); err != nil {
-		return r.setNotDeployed(ctx, comp, ReasonInvalidSpec, err.Error())
+		return notDeployed(comp, ReasonInvalidSpec, err.Error()), nil
 	}
 	appID, err := owningApplicationID(comp)
 	if err != nil {
-		return r.setNotDeployed(ctx, comp, ReasonInvalidSpec, err.Error())
+		return notDeployed(comp, ReasonInvalidSpec, err.Error()), nil
 	}
 
 	app, err := r.apps.Get(ctx, appID)
 	if errors.Is(err, store.ErrNotFound) {
-		return r.setNotDeployed(ctx, comp, ReasonWaitingForApplication,
-			fmt.Sprintf("owning Application %s not found", appID))
+		return notDeployed(comp, ReasonWaitingForApplication,
+			fmt.Sprintf("owning Application %s not found", appID)), nil
 	}
 	if err != nil {
-		return err
+		return ComponentObservation{}, err
 	}
 	if c := findCondition(app.Status.Conditions, conditionReady); c == nil || c.Status != resource.ConditionTrue {
-		return r.setNotDeployed(ctx, comp, ReasonWaitingForApplication,
-			fmt.Sprintf("owning Application %s is not Ready yet", appID))
+		return notDeployed(comp, ReasonWaitingForApplication,
+			fmt.Sprintf("owning Application %s is not Ready yet", appID)), nil
 	}
 
 	obs, err := r.provider.EnsureComponent(ctx, app, comp)
-	if err != nil {
-		return r.setNotDeployed(ctx, comp, ReasonEnsureFailed, err.Error())
+	if errors.Is(err, ErrProviderNotReady) {
+		return notDeployed(comp, ReasonProviderNotReady, providerNotReadyMessage(applicationPlatformCapability)), nil
 	}
-	return r.setState(ctx, comp, obs)
+	if err != nil {
+		return notDeployed(comp, ReasonEnsureFailed, err.Error()), nil
+	}
+	return obs, nil
 }
 
-// setNotDeployed records a Ready=False outcome reached without the
-// provider's observation. Any exposed port is then not reachable either.
-func (r *ComponentReconciler) setNotDeployed(ctx context.Context, comp resource.Component, reason, message string) error {
+// notDeployed is a Ready=False outcome reached without the provider's
+// observation. Any exposed port is then not reachable either.
+func notDeployed(comp resource.Component, reason, message string) ComponentObservation {
 	obs := ComponentObservation{Reason: reason, Message: message}
 	if exposesAny(comp.Spec) {
 		obs.Reachable = &Reachability{Reason: ReasonPending, Message: "workload is not deployed"}
 	}
-	return r.setState(ctx, comp, obs)
+	return obs
+}
+
+// componentConverging reports whether obs is a state expected to change
+// soon without any Serendip-side event: a rollout in progress, a route not
+// yet serving a Ready workload, an owning Application that isn't Ready yet
+// (its becoming Ready is an Application event, not a Component one), or a
+// provider still being set up. Settled (Deployed and Serving) and terminal
+// (InvalidSpec, DeployFailed, Unsupported, RouteRejected, EnsureFailed)
+// outcomes ride the normal resync.
+func componentConverging(obs ComponentObservation) bool {
+	if !obs.Ready {
+		switch obs.Reason {
+		case ReasonProgressing, ReasonWaitingForApplication, ReasonProviderNotReady:
+			return true
+		}
+		return false
+	}
+	return obs.Reachable != nil && !obs.Reachable.Reachable && obs.Reachable.Reason == ReasonPending
 }
 
 // setState writes the Ready and Reachable Conditions and the endpoint

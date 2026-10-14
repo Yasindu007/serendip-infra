@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -37,7 +38,7 @@ type Engine struct {
 	resyncEvery      time.Duration
 	reconcileTimeout time.Duration
 	regs             map[resource.Kind]registration
-	workCh           chan graph.ResourceRef
+	workCh           chan workItem
 	ready            chan struct{}
 
 	// failed holds refs whose last Reconcile returned an error. Resync
@@ -46,7 +47,20 @@ type Engine struct {
 	// teardown that fails once (provider unreachable during a delete) would
 	// orphan the external state forever. Only touched from Run's goroutine.
 	failed map[graph.ResourceRef]struct{}
+
+	// due and backoff schedule early re-checks requested via RequeueAfter:
+	// due is when ref is next reconciled, backoff the delay last applied
+	// (requeueBase, doubling, capped at resyncEvery -- past that the ref
+	// just rides the normal resync). Both are cleared when a Reconcile
+	// returns nil. Only touched from Run's goroutine.
+	due         map[graph.ResourceRef]time.Time
+	backoff     map[graph.ResourceRef]time.Duration
+	requeueBase time.Duration
 }
+
+// defaultRequeueBase is the first early re-check delay after a Reconciler
+// returns RequeueAfter.
+const defaultRequeueBase = 2 * time.Second
 
 // NewEngine returns an Engine that bounds each Reconcile call to
 // reconcileTimeout and resyncs every registered kind at least once per
@@ -57,9 +71,12 @@ func NewEngine(bus event.Bus, resyncEvery, reconcileTimeout time.Duration) *Engi
 		resyncEvery:      resyncEvery,
 		reconcileTimeout: reconcileTimeout,
 		regs:             make(map[resource.Kind]registration),
-		workCh:           make(chan graph.ResourceRef, 256),
+		workCh:           make(chan workItem, 256),
 		ready:            make(chan struct{}),
 		failed:           make(map[graph.ResourceRef]struct{}),
+		due:              make(map[graph.ResourceRef]time.Time),
+		backoff:          make(map[graph.ResourceRef]time.Duration),
+		requeueBase:      defaultRequeueBase,
 	}
 }
 
@@ -91,7 +108,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			return
 		}
 		select {
-		case e.workCh <- graph.ResourceRef{Kind: ev.Kind, ID: ev.ID}:
+		case e.workCh <- workItem{ref: graph.ResourceRef{Kind: ev.Kind, ID: ev.ID}, trigger: triggerEvent}:
 		default:
 			// Queue full -- dropped. Safe: periodic resync re-lists and
 			// re-enqueues everything anyway, so nothing is lost forever,
@@ -103,17 +120,61 @@ func (e *Engine) Run(ctx context.Context) error {
 	ticker := time.NewTicker(e.resyncEvery)
 	defer ticker.Stop()
 
+	// One timer, re-armed each iteration for the earliest scheduled early
+	// re-check; dueC stays nil (never ready) while nothing is scheduled.
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+	defer timer.Stop()
+
 	close(e.ready)
 
 	for {
+		var dueC <-chan time.Time
+		if next, ok := e.nextDue(); ok {
+			timer.Reset(time.Until(next))
+			dueC = timer.C
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case ref := <-e.workCh:
-			e.reconcileOne(ctx, ref)
+		case w := <-e.workCh:
+			e.reconcileOne(ctx, w.ref, w.trigger)
 		case <-ticker.C:
 			e.resyncAll(ctx)
+		case <-dueC:
+			e.reconcileDue(ctx)
 		}
+		timer.Stop()
+	}
+}
+
+// nextDue returns the earliest scheduled early re-check, if any.
+func (e *Engine) nextDue() (time.Time, bool) {
+	var next time.Time
+	for _, at := range e.due {
+		if next.IsZero() || at.Before(next) {
+			next = at
+		}
+	}
+	return next, !next.IsZero()
+}
+
+// reconcileDue reconciles every ref whose early re-check is due. Done
+// directly rather than via workCh so a full queue can't drop a schedule.
+func (e *Engine) reconcileDue(ctx context.Context) {
+	now := time.Now()
+	var refs []graph.ResourceRef
+	for ref, at := range e.due {
+		if !at.After(now) {
+			refs = append(refs, ref)
+		}
+	}
+	for _, ref := range refs {
+		if ctx.Err() != nil {
+			return
+		}
+		delete(e.due, ref)
+		e.reconcileOne(ctx, ref, triggerEarly)
 	}
 }
 
@@ -123,7 +184,7 @@ func (e *Engine) Run(ctx context.Context) error {
 func (e *Engine) resyncAll(ctx context.Context) {
 	for ref := range e.failed {
 		select {
-		case e.workCh <- ref:
+		case e.workCh <- workItem{ref: ref, trigger: triggerResync}:
 		default:
 		}
 	}
@@ -135,14 +196,16 @@ func (e *Engine) resyncAll(ctx context.Context) {
 		}
 		for _, ref := range refs {
 			select {
-			case e.workCh <- ref:
+			case e.workCh <- workItem{ref: ref, trigger: triggerResync}:
 			default:
 			}
 		}
 	}
 }
 
-func (e *Engine) reconcileOne(ctx context.Context, ref graph.ResourceRef) {
+// reconcileOne runs ref's Reconciler once; trigger says what caused the
+// call, which decides how a RequeueAfter moves the backoff (scheduleEarly).
+func (e *Engine) reconcileOne(ctx context.Context, ref graph.ResourceRef, trigger trigger) {
 	reg, ok := e.regs[ref.Kind]
 	if !ok {
 		return
@@ -152,10 +215,78 @@ func (e *Engine) reconcileOne(ctx context.Context, ref graph.ResourceRef) {
 	reconcileCtx = audit.WithInterface(reconcileCtx, InterfaceName)
 	reconcileCtx = audit.WithActor(reconcileCtx, ActorName)
 
-	if err := reg.reconciler.Reconcile(reconcileCtx, ref); err != nil {
+	err := reg.reconciler.Reconcile(reconcileCtx, ref)
+	var requeue RequeueAfter
+	switch {
+	case err == nil:
+		delete(e.failed, ref)
+		delete(e.due, ref)
+		delete(e.backoff, ref)
+	case errors.As(err, &requeue):
+		delete(e.failed, ref)
+		e.scheduleEarly(ref, requeue.Delay, trigger)
+	default:
+		delete(e.due, ref)
+		delete(e.backoff, ref)
 		e.failed[ref] = struct{}{}
 		log.Printf("reconcile: %s/%s: %v (will retry on next resync)", ref.Kind, ref.ID, err)
+	}
+}
+
+// scheduleEarly arms ref's next early re-check at max(hint, backoff), with
+// the backoff moved according to what triggered the reconcile:
+//
+//   - an early re-check doubles it, capped at the resync interval: a
+//     resource that keeps converging without change backs off;
+//   - an event resets it to the base: events come only from store writes,
+//     which reconcilers make only when state changed (or a user edited the
+//     resource), so the resource is moving and fast re-checks start over --
+//     e.g. after a long outage pushed it to the cap, the first sign of
+//     progress brings early re-checks back;
+//   - resync leaves it alone.
+//
+// Event and resync reconciles only ever pull an existing schedule earlier,
+// never push it later. Once the backoff reaches the resync interval the ref
+// stops being scheduled early: normal resync covers it, so a resource that
+// never converges (and so never writes) costs nothing extra beyond the
+// first few re-checks.
+func (e *Engine) scheduleEarly(ref graph.ResourceRef, hint time.Duration, t trigger) {
+	b, ok := e.backoff[ref]
+	switch {
+	case !ok || t == triggerEvent:
+		b = e.requeueBase
+	case t == triggerEarly:
+		b *= 2
+	}
+	b = min(b, e.resyncEvery)
+	e.backoff[ref] = b
+	delay := max(b, hint)
+	if delay >= e.resyncEvery {
+		if t == triggerEarly {
+			delete(e.due, ref)
+		}
 		return
 	}
-	delete(e.failed, ref)
+	at := time.Now().Add(delay)
+	// An event during a long early backoff therefore brings the next
+	// re-check forward to the base delay, by design.
+	if existing, ok := e.due[ref]; ok && t != triggerEarly && existing.Before(at) {
+		return
+	}
+	e.due[ref] = at
+}
+
+// trigger is what caused a reconcile.
+type trigger int
+
+const (
+	triggerEvent trigger = iota
+	triggerResync
+	triggerEarly
+)
+
+// workItem is one queued reconcile request.
+type workItem struct {
+	ref     graph.ResourceRef
+	trigger trigger
 }

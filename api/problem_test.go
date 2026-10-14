@@ -3,10 +3,12 @@ package api_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/api"
+	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 )
@@ -22,6 +24,7 @@ func TestMapStoreError(t *testing.T) {
 		{"has children", store.ErrHasChildren, 409},
 		{"validation", resource.ErrValidation, 400},
 		{"wrapped validation", errWrap(resource.ErrValidation), 400},
+		{"provider not ready", fmt.Errorf("read value: %w", reconcile.ErrProviderNotReady), 503},
 		{"unrecognized", errors.New("boom"), 500},
 	}
 	for _, tt := range tests {

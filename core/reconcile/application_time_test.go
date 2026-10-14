@@ -17,9 +17,7 @@ func TestComponentReconciler_ReachableChangeKeepsReadyTransitionTime(t *testing.
 		reach: &reconcile.Reachability{Reason: reconcile.ReasonPending}}}
 	r := reconcile.NewComponentReconciler(s.components, s.apps, p)
 	ref := graph.ResourceRef{Kind: resource.KindComponent, ID: comp.Metadata.ID}
-	if err := r.Reconcile(context.Background(), ref); err != nil {
-		t.Fatal(err)
-	}
+	checkRequeue(t, r.Reconcile(context.Background(), ref), true) // route still pending
 	first, _ := s.components.Get(context.Background(), comp.Metadata.ID)
 	readyAt := findCond(first.Status.Conditions, "Ready").LastTransitionTime
 

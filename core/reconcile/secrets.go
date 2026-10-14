@@ -90,6 +90,10 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, ref graph.ResourceRef)
 	}
 
 	exists, err := r.provider.Exists(ctx, sec)
+	if errors.Is(err, ErrProviderNotReady) {
+		return requeueWhen(r.setCondition(ctx, sec, resource.ConditionUnknown, ReasonProviderNotReady,
+			providerNotReadyMessage("secrets")), true)
+	}
 	if err != nil {
 		return r.setCondition(ctx, sec, resource.ConditionUnknown, "CheckFailed", err.Error())
 	}

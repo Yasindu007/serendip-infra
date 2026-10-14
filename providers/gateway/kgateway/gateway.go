@@ -1,12 +1,9 @@
 package kgateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
@@ -125,15 +122,18 @@ func (p *Provider) desiredGateway() gatewaySpec {
 	return s
 }
 
-// EnsureGateway creates (or corrects) the GatewayParameters and Gateway,
-// then waits, bounded, for the Gateway to be programmed.
+// EnsureGateway server-side-applies the GatewayParameters and Gateway,
+// then waits, bounded, for the Gateway to be programmed. Safe to call
+// repeatedly (cmd's foundations loop does): a deleted or edited object is
+// restored, a proxy label no longer configured is removed, and a no-drift
+// apply stores nothing.
 func (p *Provider) EnsureGateway(ctx context.Context) (reconcile.GatewayEndpoint, bool, string, string, error) {
 	ep := reconcile.GatewayEndpoint{Name: GatewayName, Namespace: Namespace, Host: p.host, Port: p.nodePort}
 
-	if err := ensureObject(ctx, p.client, parametersPath, "GatewayParameters", "gateway.kgateway.dev/v1alpha1", p.desiredParameters()); err != nil {
+	if err := applyObject(ctx, p.client, parametersPath, "GatewayParameters", "gateway.kgateway.dev/v1alpha1", p.desiredParameters()); err != nil {
 		return ep, false, "", "", err
 	}
-	if err := ensureObject(ctx, p.client, gatewaysPath, "Gateway", "gateway.networking.k8s.io/v1", p.desiredGateway()); err != nil {
+	if err := applyObject(ctx, p.client, gatewaysPath, "Gateway", "gateway.networking.k8s.io/v1", p.desiredGateway()); err != nil {
 		return ep, false, "", "", err
 	}
 
@@ -141,48 +141,20 @@ func (p *Provider) EnsureGateway(ctx context.Context) (reconcile.GatewayEndpoint
 	return ep, ready, reason, message, err
 }
 
-// ensureObject creates GatewayName under collection with spec, or merge
-// patches the spec when the fields this provider owns differ. spec must be
-// a struct whose JSON shape is the subset of the object's spec it owns, so
-// decoding the live object into the same type ignores server defaults.
-func ensureObject[S any](ctx context.Context, client *kubernetes.Client, collection, kind, apiVersion string, spec S) error {
+// applyObject server-side-applies GatewayName under collection with spec,
+// which carries exactly the fields this provider owns.
+func applyObject(ctx context.Context, client *kubernetes.Client, collection, kind, apiVersion string, spec any) error {
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return fmt.Errorf("kgateway: marshal %s spec: %w", kind, err)
 	}
-	existing, err := client.Get(ctx, collection+"/"+GatewayName)
-	if errors.Is(err, kubernetes.ErrNotFound) {
-		_, err := client.Create(ctx, collection, kubernetes.Object{
-			APIVersion: apiVersion, Kind: kind,
-			Metadata: kubernetes.ObjectMeta{Name: GatewayName, Namespace: Namespace},
-			Spec:     raw,
-		})
-		if err != nil {
-			return fmt.Errorf("kgateway: create %s %s: %w", kind, GatewayName, err)
-		}
-		return nil
-	}
+	_, err = client.Apply(ctx, collection+"/"+GatewayName, kubernetes.Object{
+		APIVersion: apiVersion, Kind: kind,
+		Metadata: kubernetes.ObjectMeta{Name: GatewayName, Namespace: Namespace},
+		Spec:     raw,
+	}, kubernetes.FieldManager)
 	if err != nil {
-		return fmt.Errorf("kgateway: get %s %s: %w", kind, GatewayName, err)
-	}
-	var current S
-	if err := json.Unmarshal(existing.Spec, &current); err != nil {
-		return fmt.Errorf("kgateway: decode %s %s spec: %w", kind, GatewayName, err)
-	}
-	// Compare re-marshaled JSON rather than the decoded structs: omitempty
-	// treats a nil and an empty map alike, so a server-side "{}" doesn't
-	// cause a patch on every startup. Known limit: dropping a key from an
-	// owned map (e.g. one fewer proxy label) leaves it on the live object,
-	// since a merge patch only deletes keys sent as null.
-	currentRaw, err := json.Marshal(current)
-	if err != nil {
-		return fmt.Errorf("kgateway: marshal %s %s spec: %w", kind, GatewayName, err)
-	}
-	if bytes.Equal(currentRaw, raw) {
-		return nil
-	}
-	if _, err := client.Patch(ctx, collection+"/"+GatewayName, map[string]json.RawMessage{"spec": raw}); err != nil {
-		return fmt.Errorf("kgateway: patch %s %s: %w", kind, GatewayName, err)
+		return fmt.Errorf("kgateway: apply %s %s: %w", kind, GatewayName, err)
 	}
 	return nil
 }

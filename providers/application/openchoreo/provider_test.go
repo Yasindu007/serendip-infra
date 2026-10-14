@@ -100,8 +100,8 @@ func TestEnsureApplication_ReadyBinding(t *testing.T) {
 	if !ready || reason != reconcile.ReasonDeployed {
 		t.Errorf("EnsureApplication = (%v, %q), want (true, Deployed)", ready, reason)
 	}
-	if api.count(http.MethodPost) != 0 {
-		t.Errorf("unexpected creates on second ensure: %v", api.calls)
+	if api.count(http.MethodPost) != 0 || api.writes != 2 {
+		t.Errorf("second ensure stored something (writes %d, calls %v), want only the first ensure's 2", api.writes, api.calls)
 	}
 }
 
@@ -148,61 +148,69 @@ func TestEnsureComponent_FreshCreatesComponentAndWorkload(t *testing.T) {
 	}
 }
 
-func TestEnsureComponent_UnchangedWorkloadIsNotPatched(t *testing.T) {
+func TestEnsureComponent_UnchangedWorkloadStoresNothing(t *testing.T) {
 	api := newFakeAPI()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
 	}
-	api.calls = nil
+	api.calls, api.writes = nil, 0
 
 	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
 	}
-	if n := api.count(http.MethodPost) + api.count(http.MethodPatch); n != 0 {
-		t.Errorf("writes on no-drift ensure = %v, want none", api.calls)
+	if n := api.count(http.MethodPost) + api.count(http.MethodPatch); n != 0 || api.writes != 0 {
+		t.Errorf("no-drift ensure: %d create/merge writes, %d stored applies (%v), want none", n, api.writes, api.calls)
+	}
+	for _, a := range api.applies {
+		if a.fieldManager != kubernetes.FieldManager || a.force != "true" {
+			t.Errorf("%s: fieldManager=%q force=%q", a.path, a.fieldManager, a.force)
+		}
 	}
 }
 
-func TestEnsureComponent_ChangedSpecPatchesOnlyOwnedFields(t *testing.T) {
+func TestEnsureComponent_ChangedSpecIsAppliedAndReportsProgressing(t *testing.T) {
 	api := newFakeAPI()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
 	}
-	api.calls = nil
+	wlPath := nsItem("workloads", componentName(testCompID))
+	genBefore := api.objects[wlPath].Metadata.Generation
 
 	changed := resource.ComponentSpec{
 		Image: "nginx:1.28-alpine",
 		Ports: []resource.ComponentPort{{Name: "metrics", Port: 9090}},
 	}
 	// A Ready binding for the previous release must not make the update
-	// look Deployed in the same pass that patched the Workload.
+	// look Deployed in the same pass that changed the Workload.
 	api.put(nsItem("releasebindings", releaseBindingName(testCompID)), kubernetes.Object{Status: readyStatus("True", "Ready")})
 	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(changed))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ready || reason != reconcile.ReasonProgressing {
-		t.Errorf("after patch = (%v, %q), want (false, Progressing)", ready, reason)
+		t.Errorf("after change = (%v, %q), want (false, Progressing)", ready, reason)
 	}
-	if n := api.count(http.MethodPatch); n != 1 {
-		t.Fatalf("PATCH calls = %d (%v), want 1", n, api.calls)
+	if api.objects[wlPath].Metadata.Generation == genBefore {
+		t.Error("Workload generation unchanged; the spec change was not applied")
 	}
-	var body struct {
-		Spec map[string]json.RawMessage `json:"spec"`
+	// The whole desired spec is applied, owner included (unchanged, so no
+	// clash with its immutability); the removed endpoint is simply absent
+	// and the API server drops it.
+	var got workloadSpec
+	json.Unmarshal(api.lastApply(t, wlPath).Spec, &got)
+	if got.Owner.ProjectName != projectName(testAppID) || got.Container.Image != "nginx:1.28-alpine" || len(got.Container.Env) != 0 {
+		t.Errorf("Workload apply = %+v", got)
 	}
-	if err := json.Unmarshal(api.lastPatch, &body); err != nil {
-		t.Fatalf("decode patch: %v", err)
+	if _, ok := got.Endpoints["http"]; ok || got.Endpoints["metrics"].Port != 9090 || got.Endpoints["metrics"].Type != "TCP" {
+		t.Errorf("endpoints = %+v, want only metrics", got.Endpoints)
 	}
-	if _, ok := body.Spec["owner"]; ok {
-		t.Error("patch touches immutable spec.owner")
-	}
-	if got := string(body.Spec["container"]); got != `{"env":null,"image":"nginx:1.28-alpine"}` {
-		t.Errorf("patch container = %s", got)
-	}
-	if got := string(body.Spec["endpoints"]); got != `{"http":null,"metrics":{"port":9090,"type":"TCP","visibility":null}}` {
-		t.Errorf("patch endpoints = %s, want removed endpoint nulled", got)
+
+	// The next pass with no further change is not "rolling out" again.
+	api.put(nsItem("releasebindings", releaseBindingName(testCompID)), kubernetes.Object{})
+	if _, _, msg, _ := ensureComp(p, context.Background(), testApp(), testComp(changed)); msg == "rolling out updated workload" {
+		t.Error("unchanged second pass still reports a fresh rollout")
 	}
 }
 

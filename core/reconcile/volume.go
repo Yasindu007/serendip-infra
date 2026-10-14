@@ -53,6 +53,10 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, ref graph.ResourceRef)
 	}
 
 	bound, reason, message, err := r.provider.Ensure(ctx, vol)
+	if errors.Is(err, ErrProviderNotReady) {
+		return requeueWhen(r.setCondition(ctx, vol, resource.ConditionFalse, ReasonProviderNotReady,
+			providerNotReadyMessage("storage")), true)
+	}
 	if err != nil {
 		return r.setCondition(ctx, vol, resource.ConditionFalse, "EnsureFailed", err.Error())
 	}
@@ -61,7 +65,8 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, ref graph.ResourceRef)
 	if bound {
 		status = resource.ConditionTrue
 	}
-	return r.setCondition(ctx, vol, status, reason, message)
+	// Not bound yet but on its way: re-check early rather than at resync.
+	return requeueWhen(r.setCondition(ctx, vol, status, reason, message), !bound && reason == ReasonPending)
 }
 
 // setCondition upserts the "Bound" Condition on vol and writes it back

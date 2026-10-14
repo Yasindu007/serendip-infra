@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,11 +23,6 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
-	"github.com/serendip-infra/serendip-infra/providers/application/openchoreo"
-	"github.com/serendip-infra/serendip-infra/providers/gateway/kgateway"
-	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
-	"github.com/serendip-infra/serendip-infra/providers/secrets/openbao"
-	"github.com/serendip-infra/serendip-infra/providers/storage/localpath"
 )
 
 // resyncEvery/reconcileTimeout are specs/003-reconciliation-engine/plan.md's
@@ -77,19 +71,24 @@ func run() error {
 
 	bus := event.NewInProcessBus()
 	engine := newReconcileEngine(db, bus)
+	registry := provider.NewRegistry()
 
-	// wireKubernetes runs before api.NewServer (reordered from this
-	// package's original spec-002 sequencing) because api.SecretHandler
-	// (spec 009) needs the *reconcile.SecretReconciler wireKubernetes
-	// constructs -- unlike every prior resource kind, whose
-	// api.ResourceHandler only ever needed a store.Store, built
-	// independently of any Kubernetes-facing wiring.
-	secretReconciler, err := wireKubernetes(ctx, os.Getenv("SERENDIP_KUBECONFIG"), db, bus, engine)
+	// wireKubernetes runs before api.NewServer because api.SecretHandler
+	// needs the *reconcile.SecretReconciler it constructs. It only wires:
+	// installing and connecting the cluster-facing providers happens in the
+	// background once the API is up (kube.plan.start below), so a slow or
+	// unreachable cluster degrades serendipd instead of stopping it
+	// (specs/014-reconciliation-hardening plan.md decision 4).
+	kube, err := wireKubernetes(os.Getenv("SERENDIP_KUBECONFIG"), registry, db, bus, engine)
 	if err != nil {
 		return fmt.Errorf("kubernetes: %w", err)
 	}
+	var secretReconciler *reconcile.SecretReconciler
+	if kube != nil {
+		secretReconciler = kube.secretReconciler
+	}
 
-	srv := api.NewServer(db, bus, apiKeys, secretReconciler)
+	srv := api.NewServer(db, bus, apiKeys, secretReconciler, registry)
 	srv.Addr = addr
 
 	errCh := make(chan error, 1)
@@ -121,6 +120,14 @@ func run() error {
 			engineErrCh <- err
 		}
 	}()
+
+	if kube != nil {
+		// Setup goroutines touch only the cluster API and the registry,
+		// never the store, so shutdown doesn't wait for them.
+		kube.plan.start(ctx, newTracker(registry, setupBackoff, capStorage, capSecrets, capGateway, capAppPlatform))
+	} else {
+		log.Print("serendipd: all capabilities ready")
+	}
 
 	select {
 	case <-ctx.Done():
@@ -165,269 +172,6 @@ func newReconcileEngine(db *sql.DB, bus event.Bus) *reconcile.Engine {
 			return refs, nil
 		})
 	return engine
-}
-
-// wireKubernetes conditionally sets up Kubernetes access: if
-// kubeconfigPath is empty, no Kubernetes-facing providers are active --
-// a supported, non-fatal startup state, since not every Serendip
-// install necessarily has a cluster yet at first boot. If set,
-// constructs the real local-path Storage provider (spec 007, replacing
-// spec 006's throwaway Node-listing proof-of-concept entirely -- not
-// left alongside it), registers it in the core/provider.Registry, and
-// wires a VolumeReconciler into engine. The Lookup + type-assert
-// happens once here, in the composition root -- core/reconcile never
-// imports core/provider at all (plan.md's resolved design, mirroring
-// ClusterReconciler's constructor-injected HealthChecker exactly).
-// Returns the *reconcile.SecretReconciler wireOpenBao constructs (nil
-// if kubeconfigPath is empty) -- api.NewServer's SecretHandler needs
-// it, unlike every other resource kind's handler.
-func wireKubernetes(ctx context.Context, kubeconfigPath string, db *sql.DB, bus event.Bus, engine *reconcile.Engine) (*reconcile.SecretReconciler, error) {
-	if kubeconfigPath == "" {
-		log.Print("serendipd: SERENDIP_KUBECONFIG not set, no Kubernetes-facing providers active")
-		return nil, nil
-	}
-
-	cfg, err := kubernetes.LoadConfig(kubeconfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("load kubeconfig %s: %w", kubeconfigPath, err)
-	}
-	client, err := kubernetes.NewClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("build client: %w", err)
-	}
-
-	storageProvider, err := localpath.NewProvider(ctx, client)
-	if err != nil {
-		return nil, fmt.Errorf("storage provider: %w", err)
-	}
-
-	registry := provider.NewRegistry()
-	registry.Register("storage", storageProvider)
-
-	impl, ok := registry.Lookup("storage")
-	if !ok {
-		return nil, fmt.Errorf("internal: just-registered capability not found in registry")
-	}
-	sp, ok := impl.(reconcile.StorageProvider)
-	if !ok {
-		return nil, fmt.Errorf("internal: registered implementation does not satisfy reconcile.StorageProvider")
-	}
-
-	volumes := sqlite.NewStore[resource.VolumeSpec, resource.VolumeStatus](db, resource.KindVolume).SetBus(bus)
-	engine.Register(resource.KindVolume, reconcile.NewVolumeReconciler(volumes, sp),
-		func(ctx context.Context) ([]graph.ResourceRef, error) {
-			list, err := volumes.List(ctx, store.ListOptions{})
-			if err != nil {
-				return nil, err
-			}
-			refs := make([]graph.ResourceRef, len(list))
-			for i, v := range list {
-				refs[i] = graph.ResourceRef{Kind: resource.KindVolume, ID: v.Metadata.ID}
-			}
-			return refs, nil
-		})
-
-	log.Print("serendipd: kubernetes: storage provider (local-path) active")
-
-	secretReconciler, err := wireOpenBao(ctx, client, registry, db, bus, engine)
-	if err != nil {
-		return nil, fmt.Errorf("openbao: %w", err)
-	}
-
-	gateway, err := wireGateway(ctx, client, kubeconfigPath, registry)
-	if err != nil {
-		return nil, fmt.Errorf("gateway: %w", err)
-	}
-
-	if err := wireOpenChoreo(ctx, client, kubeconfigPath, registry, db, bus, engine, gateway); err != nil {
-		return nil, fmt.Errorf("openchoreo: %w", err)
-	}
-
-	return secretReconciler, nil
-}
-
-// wireGateway installs kgateway (spec 012, ADR 0011), registers it under
-// the "gateway" capability, and ensures the shared external gateway. The
-// returned GatewayEndpoint is handed to the application platform provider,
-// so neither provider imports the other. A gateway that never becomes
-// ready fails startup, the same contract as the application platform's
-// own readiness check.
-func wireGateway(ctx context.Context, client *kubernetes.Client, kubeconfigPath string, registry *provider.Registry) (reconcile.GatewayEndpoint, error) {
-	host := envOr("SERENDIP_GATEWAY_HOST", "localhost")
-	nodePort, err := parseNodePort(os.Getenv("SERENDIP_GATEWAY_NODE_PORT"))
-	if err != nil {
-		return reconcile.GatewayEndpoint{}, err
-	}
-
-	deployer, err := kgateway.NewDeployer(client, kubeconfigPath)
-	if err != nil {
-		return reconcile.GatewayEndpoint{}, fmt.Errorf("deployer: %w", err)
-	}
-	if err := deployer.Ensure(ctx); err != nil {
-		return reconcile.GatewayEndpoint{}, fmt.Errorf("deploy: %w", err)
-	}
-
-	registry.Register("gateway", kgateway.NewProvider(client, host, nodePort, openchoreo.GatewayProxyLabels()))
-	impl, ok := registry.Lookup("gateway")
-	if !ok {
-		return reconcile.GatewayEndpoint{}, fmt.Errorf("internal: just-registered capability not found in registry")
-	}
-	gp, ok := impl.(reconcile.GatewayProvider)
-	if !ok {
-		return reconcile.GatewayEndpoint{}, fmt.Errorf("internal: registered implementation does not satisfy reconcile.GatewayProvider")
-	}
-
-	ep, ready, reason, message, err := gp.EnsureGateway(ctx)
-	if err != nil {
-		return reconcile.GatewayEndpoint{}, err
-	}
-	if !ready {
-		return reconcile.GatewayEndpoint{}, fmt.Errorf("gateway %s/%s not ready: %s: %s (if NodePort %d is already in use, set SERENDIP_GATEWAY_NODE_PORT)",
-			ep.Namespace, ep.Name, reason, message, ep.Port)
-	}
-
-	log.Printf("serendipd: kubernetes: gateway provider (kgateway) active, external routes on %s:%d", ep.Host, ep.Port)
-	return ep, nil
-}
-
-// parseNodePort parses SERENDIP_GATEWAY_NODE_PORT; empty means the default.
-// Kubernetes only allocates NodePorts from 30000-32767 by default.
-func parseNodePort(raw string) (int32, error) {
-	if raw == "" {
-		return kgateway.DefaultNodePort, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 30000 || n > 32767 {
-		return 0, fmt.Errorf("SERENDIP_GATEWAY_NODE_PORT=%q: must be a port in the NodePort range 30000-32767", raw)
-	}
-	return int32(n), nil
-}
-
-// wireOpenBao deploys OpenBao into the cluster (idempotent, spec 008),
-// runs its init/unseal bootstrap, registers the resulting
-// *openbao.Provider adapter (spec 009 -- supersedes spec 008's bare
-// *openbao.Client registration, same "replace, don't leave a parallel
-// path" precedent spec 007 set for spec 006's nodeLister) under the
-// "secrets" capability, constructs the Secret store, and wires a
-// SecretReconciler into engine (mirrors wireKubernetes' own
-// VolumeReconciler wiring block immediately above).
-func wireOpenBao(ctx context.Context, client *kubernetes.Client, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine) (*reconcile.SecretReconciler, error) {
-	if err := openbao.NewDeployer(client).Ensure(ctx); err != nil {
-		return nil, fmt.Errorf("deploy: %w", err)
-	}
-
-	baoClient := openbao.NewClient(client.ProxyURL(openbao.Namespace, openbao.ServiceName, openbao.ListenPort), client.HTTPClient())
-
-	credentialsPath := envOr("SERENDIP_OPENBAO_CREDENTIALS_PATH", defaultOpenBaoCredentialsPath)
-	if err := openbao.Bootstrap(ctx, baoClient, credentialsPath); err != nil {
-		return nil, fmt.Errorf("bootstrap: %w", err)
-	}
-
-	registry.Register("secrets", openbao.NewProvider(baoClient))
-
-	impl, ok := registry.Lookup("secrets")
-	if !ok {
-		return nil, fmt.Errorf("internal: just-registered capability not found in registry")
-	}
-	secretsProvider, ok := impl.(reconcile.SecretsProvider)
-	if !ok {
-		return nil, fmt.Errorf("internal: registered implementation does not satisfy reconcile.SecretsProvider")
-	}
-
-	secrets := sqlite.NewStore[resource.SecretSpec, resource.SecretStatus](db, resource.KindSecret).SetBus(bus)
-	secretReconciler := reconcile.NewSecretReconciler(secrets, secretsProvider)
-	engine.Register(resource.KindSecret, secretReconciler,
-		func(ctx context.Context) ([]graph.ResourceRef, error) {
-			list, err := secrets.List(ctx, store.ListOptions{})
-			if err != nil {
-				return nil, err
-			}
-			refs := make([]graph.ResourceRef, len(list))
-			for i, s := range list {
-				refs[i] = graph.ResourceRef{Kind: resource.KindSecret, ID: s.Metadata.ID}
-			}
-			return refs, nil
-		})
-
-	log.Print("serendipd: kubernetes: secrets provider (openbao) active")
-	return secretReconciler, nil
-}
-
-// wireOpenChoreo deploys OpenChoreo into the cluster (idempotent,
-// spec 010 -- cert-manager, then the control-plane and data-plane
-// Helm charts, each `helm upgrade --install`), registers the default
-// DataPlane CR and the platform defaults Applications/Components deploy
-// through (spec 011), confirms readiness, registers the real
-// *openchoreo.Provider under "application-platform", and wires
-// ApplicationReconciler/ComponentReconciler into engine (mirrors
-// wireOpenBao's wiring block).
-func wireOpenChoreo(ctx context.Context, client *kubernetes.Client, kubeconfigPath string, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine, gateway reconcile.GatewayEndpoint) error {
-	deployer, err := openchoreo.NewDeployer(client, kubeconfigPath)
-	if err != nil {
-		return fmt.Errorf("deployer: %w", err)
-	}
-	if err := deployer.Ensure(ctx); err != nil {
-		return fmt.Errorf("deploy: %w", err)
-	}
-
-	if err := openchoreo.EnsureDefaultDataPlane(ctx, client); err != nil {
-		return fmt.Errorf("default data plane: %w", err)
-	}
-	if err := openchoreo.EnsureDataPlaneGateway(ctx, client, gateway); err != nil {
-		return fmt.Errorf("data plane gateway: %w", err)
-	}
-	if err := openchoreo.EnsureGatewayAPICRDs(ctx, client); err != nil {
-		return fmt.Errorf("gateway api crds: %w", err)
-	}
-	if err := openchoreo.EnsurePlatformDefaults(ctx, client); err != nil {
-		return fmt.Errorf("platform defaults: %w", err)
-	}
-
-	if err := openchoreo.CheckReady(ctx, client); err != nil {
-		return fmt.Errorf("readiness: %w", err)
-	}
-
-	registry.Register("application-platform", openchoreo.NewProvider(client, gateway))
-
-	impl, ok := registry.Lookup("application-platform")
-	if !ok {
-		return fmt.Errorf("internal: just-registered capability not found in registry")
-	}
-	platform, ok := impl.(reconcile.ApplicationPlatformProvider)
-	if !ok {
-		return fmt.Errorf("internal: registered implementation does not satisfy reconcile.ApplicationPlatformProvider")
-	}
-
-	apps := sqlite.NewStore[resource.ApplicationSpec, resource.ApplicationStatus](db, resource.KindApplication).SetBus(bus)
-	components := sqlite.NewStore[resource.ComponentSpec, resource.ComponentStatus](db, resource.KindComponent).SetBus(bus)
-
-	engine.Register(resource.KindApplication, reconcile.NewApplicationReconciler(apps, platform),
-		func(ctx context.Context) ([]graph.ResourceRef, error) {
-			list, err := apps.List(ctx, store.ListOptions{})
-			if err != nil {
-				return nil, err
-			}
-			refs := make([]graph.ResourceRef, len(list))
-			for i, a := range list {
-				refs[i] = graph.ResourceRef{Kind: resource.KindApplication, ID: a.Metadata.ID}
-			}
-			return refs, nil
-		})
-	engine.Register(resource.KindComponent, reconcile.NewComponentReconciler(components, apps, platform),
-		func(ctx context.Context) ([]graph.ResourceRef, error) {
-			list, err := components.List(ctx, store.ListOptions{})
-			if err != nil {
-				return nil, err
-			}
-			refs := make([]graph.ResourceRef, len(list))
-			for i, c := range list {
-				refs[i] = graph.ResourceRef{Kind: resource.KindComponent, ID: c.Metadata.ID}
-			}
-			return refs, nil
-		})
-
-	log.Print("serendipd: kubernetes: application platform provider (openchoreo) active")
-	return nil
 }
 
 func envOr(key, fallback string) string {

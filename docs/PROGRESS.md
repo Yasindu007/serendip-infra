@@ -9,17 +9,21 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-10-11
+Last updated: 2026-10-13
 
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** Specs 002-011 are committed locally only (spec 012 not yet) — decided explicitly
+PR #24.** Specs 002-013 are committed locally only — decided explicitly
 with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
-**Spec 013 (edge-1 benchmark harness, simulated T470) — COMPLETE.** See "Next up".
+**Spec 014 (reconciliation hardening) — implementation and real-cluster
+verification done; both final reviews PASS and docs synced. Only the
+benchmark re-run (T010 item 7) is left; not yet committed.** Detail below, under "Spec 014 — what actually got built."
+
+**Spec 013 (edge-1 benchmark harness, simulated T470) — COMPLETE** (`3361e46`).
 
 **Spec 012 (Gateway capability, kgateway) — COMPLETE, T001-T011 all done,
 both final reviews (`contract-guardian`, `go-reviewer`) PASS, committed
@@ -281,6 +285,62 @@ project,workflow` only when Projects v2 board work or a
 `.github/workflows/*.yml` push is actually needed, not preemptively.
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
+
+## Spec 014 — what actually got built
+
+Fixes the four weaknesses specs 010-013 left (spec.md "Problem"). Detail:
+`docs/architecture/reconciliation.md`, `provider-model.md`.
+
+- **Early re-checks** (`core/reconcile`): `RequeueAfter` typed error (not a
+  failure). Engine-owned backoff 2s→4→8→16, capped at the 30s resync; an
+  early re-check doubles it, an **event resets it** (events only come from
+  real store changes), resync leaves it. Component/Application/Volume return
+  it while converging. Two real-cluster bugs fixed on the way: the
+  reconciler's own status-write events were doubling the backoff (gaps
+  ballooned to 16s), and a resource capped during an outage stayed
+  resync-paced after recovery.
+- **Server-side apply** (`providers/kubernetes.Client.Apply`, manager
+  `serendip`, force=true) for every Serendip-owned object: local-path PV/PVC,
+  OpenBao's 5 objects, OpenChoreo DataPlane (one object incl. gateway wiring,
+  `EnsureDataPlane` replaced two functions)/CA ConfigMap/4 defaults/
+  Project/PRB/Component/Workload, kgateway GatewayParameters/Gateway. Drift
+  code deleted (`ensureObject`, `containsJSON`, `updateSpecIfDifferent`,
+  `workloadPatch`, `getOrCreate`). Stays merge patch: the org namespace label
+  and the version-gated Gateway API CRD installer. One-time migration limit:
+  fields an old `Update` manager set and Serendip no longer sets stay once on
+  pre-014 clusters.
+- **Degraded startup** (`cmd/serendipd/{wiring,setup,lazy}.go`): fail fast
+  only on config errors; per-capability background setup (5s→2m forever; app
+  platform after gateway); lazy provider handles return
+  `ErrProviderNotReady` → `ProviderNotReady` Conditions, secret value calls
+  503; `GET /v1/readiness`; log `serendipd: all capabilities ready` (bench
+  harness now waits for it).
+- **Foundations loop**: gateway (CRDs + Gateway) and platform (DataPlane +
+  defaults) re-ensured every `SERENDIP_REENSURE_INTERVAL` (default 5m);
+  failures → `RepairFailed` readiness, never fatal.
+- **Verified on kind** (`T010`): spec 011/012 regression flow passed after the
+  SSA conversion; Component create→`Serving` **14.2s** (4/4, cached image) vs
+  OpenChoreo's own Ready at 11-13s (was a flat 30s) — the plan's ≤10s target
+  is unreachable because upstream itself takes ~12s; idle 75s: 20 owned
+  objects unchanged, 0 store writes; force-deleted Environment recreated in
+  12s, deleted Gateway recreated, Component back to Serving; stale
+  `serendip`-owned label removed, other manager's label kept; cluster-down
+  startup: API up, honest readiness/Conditions, 503, self-recovery with no
+  restart (post-outage convergence resync-paced, ≤~1 min). Also live: the
+  spec-013 failure (OpenBao 90s wait missed on a slow pull) now just retries.
+- **Reviews**: `contract-guardian` PASS (4 non-blocking; fixed: gateway
+  repair starts before the platform is up, backoff reset on error; audit gap
+  deferred, below). `go-reviewer` PASS (non-blocking; fixed: no spurious
+  `RepairFailed` on shutdown, empty-spec guard on the Component owner check,
+  looser timing bounds and a `sync.Once` in tests, new `componentConverging`/
+  `requeueWhen` tests). Declined on purpose: mapping `ErrProviderNotReady` on
+  delete paths to `RequeueAfter` — a requeue leaves the failed set, and a
+  deleted ref is never listed again, so its teardown could be lost.
+- **Deferred**: auditing foundations-loop repairs (they mutate the cluster
+  outside the reconcile path; constitution rule 8 — needs an audit actor for
+  system repairs); a "resync now" kick when a capability becomes ready (and
+  waking Components on Application change) to shorten post-outage recovery;
+  watching upstream objects.
 
 ## Spec 012 — what actually got built
 
@@ -839,16 +899,13 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 - **The real T470 run is still the open gate.** It's one command once the
   hardware exists (README).
 
-1. **Spec 014 — reconciliation hardening**, agreed with the user, informed by
-   the benchmark:
-   - faster re-checks while something is `Progressing`/`Pending`
-     (time-to-`Serving` is always exactly the 30 s resync);
-   - periodic re-ensure of platform defaults and the gateway (today they're
-     repaired only on restart);
-   - server-side apply, so dropped fields are actually removed;
-   - **new from the benchmark:** `serendipd` exits on startup if a provider
-     isn't ready within its wait (one transient image-pull `EOF` from
-     quay.io killed a run). Startup should retry provider setup instead.
+1. **Finish spec 014**: both reviews PASS; remaining is T010 item 7, the
+   benchmark re-run (two simulated-T470 runs, compared with spec 013 run 1).
+   The first attempt (2026-10-13) was stopped during cold start because the
+   host ran critically low on memory; no results were produced and the
+   scratch clusters were deleted. Re-run with the host otherwise idle, using
+   the spec 013 commands in `profiles/edge-1/bench/README.md` and an output
+   folder `results/<date>-spec014-simulated-t470/`.
 2. **HTTPS**: the natural path is cert-manager (already installed) issuing
    certificates for an HTTPS listener on the existing gateway, not a second
    proxy such as Caddy. It needs a decision on where trusted names come from
@@ -857,7 +914,7 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
    session): `Secret` injection into Components (spec 009 meets spec 011);
    disabling Traefik to serve on 80/443 (needs a migration story); TLS;
    Identity/Thunder, still gated by ADR 0006's maturity window.
-4. **specs 002-012 are still unpushed by deliberate choice** (user
+4. **specs 002-014 are still unpushed by deliberate choice** (user
    confirmed: keep working locally, push everything together at a later
    checkpoint) — GitHub auth itself is no longer the blocker (see
    GitHub note above), so this is a scheduling decision to revisit, not

@@ -2,8 +2,6 @@ package openchoreo
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
@@ -35,13 +33,13 @@ func dataPlaneAPIPath(namespace string) string {
 	return fmt.Sprintf("/apis/openchoreo.dev/v1alpha1/namespaces/%s/dataplanes", namespace)
 }
 
-// dataPlaneSpec mirrors just the one required nested field this spec
-// populates (spec.clusterAgent.clientCA.secretKeyRef) -- the CRD's
-// real schema has much more (gateway listener config,
-// observabilityPlaneRef, secretStoreRef), all optional and left unset
-// here; this package has no reason to know about them yet.
+// dataPlaneSpec mirrors just the fields this package owns on the DataPlane:
+// the cluster agent's client CA, and the external gateway routes attach
+// to. The CRD's real schema has more (observabilityPlaneRef,
+// secretStoreRef, ...), all optional and left unset here.
 type dataPlaneSpec struct {
 	ClusterAgent dataPlaneClusterAgent `json:"clusterAgent"`
+	Gateway      dataPlaneGateway      `json:"gateway"`
 }
 
 type dataPlaneClusterAgent struct {
@@ -58,46 +56,45 @@ type dataPlaneSecretKeyRef struct {
 	Key       string `json:"key"`
 }
 
-// EnsureDefaultDataPlane idempotently registers the one DataPlane CR
-// this single-cluster install needs, in ControlPlaneNamespace --
-// nothing can actually deploy through OpenChoreo until this exists
-// (plan.md's own finding, confirmed against the real chart/CRD, not
-// the project's add-default-dataplane.sh script -- hand-construction
-// turned out exactly as reliable once the CRD schema and the cert
-// Secret's real name/namespace/key were traced directly).
-func EnsureDefaultDataPlane(ctx context.Context, client *kubernetes.Client) error {
-	path := dataPlaneAPIPath(ControlPlaneNamespace) + "/" + DefaultDataPlaneName
-	_, err := client.Get(ctx, path)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return fmt.Errorf("openchoreo: get DataPlane %s: %w", DefaultDataPlaneName, err)
-	}
+type dataPlaneGateway struct {
+	Ingress dataPlaneIngress `json:"ingress"`
+}
 
-	specBytes, err := json.Marshal(dataPlaneSpec{
-		ClusterAgent: dataPlaneClusterAgent{
-			ClientCA: dataPlaneClientCA{
-				SecretKeyRef: dataPlaneSecretKeyRef{
-					Name:      clusterAgentTLSSecretName,
-					Namespace: DataPlaneNamespace,
-					Key:       clusterAgentTLSSecretKey,
-				},
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("openchoreo: marshal DataPlane spec: %w", err)
-	}
+type dataPlaneIngress struct {
+	External gatewayEndpointSpec `json:"external"`
+}
 
-	_, err = client.Create(ctx, dataPlaneAPIPath(ControlPlaneNamespace), kubernetes.Object{
-		APIVersion: "openchoreo.dev/v1alpha1",
+// EnsureDataPlane server-side-applies the one DataPlane CR this
+// single-cluster install needs, in ControlPlaneNamespace: nothing can
+// deploy through OpenChoreo until it exists. It trusts the data plane
+// chart's cluster-agent certificate, and points external ingress at the
+// shared gateway ep, so external Workload endpoints render HTTPRoutes
+// attached to it. The gateway is configured on the DataPlane rather than
+// the Environment because the release controller watches DataPlanes and
+// re-renders on change. Safe to call repeatedly (cmd's foundations loop
+// does); a no-drift apply stores nothing.
+func EnsureDataPlane(ctx context.Context, client *kubernetes.Client, ep reconcile.GatewayEndpoint) error {
+	_, err := apply(ctx, client, dataPlaneAPIPath(ControlPlaneNamespace), kubernetes.Object{
+		APIVersion: apiVersion,
 		Kind:       "DataPlane",
 		Metadata:   kubernetes.ObjectMeta{Name: DefaultDataPlaneName, Namespace: ControlPlaneNamespace},
-		Spec:       specBytes,
+		Spec: mustJSON(dataPlaneSpec{
+			ClusterAgent: dataPlaneClusterAgent{
+				ClientCA: dataPlaneClientCA{
+					SecretKeyRef: dataPlaneSecretKeyRef{
+						Name:      clusterAgentTLSSecretName,
+						Namespace: DataPlaneNamespace,
+						Key:       clusterAgentTLSSecretKey,
+					},
+				},
+			},
+			Gateway: dataPlaneGateway{Ingress: dataPlaneIngress{External: gatewayEndpointSpec{
+				Name: ep.Name, Namespace: ep.Namespace, HTTP: gatewayListener{Port: ep.Port, Host: ep.Host},
+			}}},
+		}),
 	})
 	if err != nil {
-		return fmt.Errorf("openchoreo: create DataPlane %s: %w", DefaultDataPlaneName, err)
+		return fmt.Errorf("openchoreo: %w", err)
 	}
 	return nil
 }
@@ -122,38 +119,4 @@ type gatewayEndpointSpec struct {
 	Name      string          `json:"name"`
 	Namespace string          `json:"namespace"`
 	HTTP      gatewayListener `json:"http"`
-}
-
-// EnsureDataPlaneGateway points the default DataPlane's external ingress at
-// the shared gateway, so external Workload endpoints render HTTPRoutes
-// attached to it. Configured on the DataPlane rather than the Environment
-// because the release controller watches DataPlanes and re-renders on
-// change. Patches only when the configured gateway differs.
-func EnsureDataPlaneGateway(ctx context.Context, client *kubernetes.Client, ep reconcile.GatewayEndpoint) error {
-	path := dataPlaneAPIPath(ControlPlaneNamespace) + "/" + DefaultDataPlaneName
-	dp, err := client.Get(ctx, path)
-	if err != nil {
-		return fmt.Errorf("openchoreo: get DataPlane %s: %w", DefaultDataPlaneName, err)
-	}
-	var current struct {
-		Gateway struct {
-			Ingress struct {
-				External gatewayEndpointSpec `json:"external"`
-			} `json:"ingress"`
-		} `json:"gateway"`
-	}
-	if len(dp.Spec) > 0 {
-		if err := json.Unmarshal(dp.Spec, &current); err != nil {
-			return fmt.Errorf("openchoreo: decode DataPlane %s spec: %w", DefaultDataPlaneName, err)
-		}
-	}
-	desired := gatewayEndpointSpec{Name: ep.Name, Namespace: ep.Namespace, HTTP: gatewayListener{Port: ep.Port, Host: ep.Host}}
-	if current.Gateway.Ingress.External == desired {
-		return nil
-	}
-	patch := map[string]any{"spec": map[string]any{"gateway": map[string]any{"ingress": map[string]any{"external": desired}}}}
-	if _, err := client.Patch(ctx, path, patch); err != nil {
-		return fmt.Errorf("openchoreo: set DataPlane %s gateway: %w", DefaultDataPlaneName, err)
-	}
-	return nil
 }

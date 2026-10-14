@@ -24,8 +24,11 @@ OpenBao runs as a **standalone** instance (ADR 0009: not `-dev`, not
 HA/Raft) in the `serendip-system` namespace (shared with
 `providers/storage/localpath`), built directly via the existing generic
 `providers/kubernetes.Client` — **no Helm**, same precedent spec 007
-set. `providers/secrets/openbao.Deployer.Ensure` idempotently
-GET-then-Creates, in dependency order:
+set. `providers/secrets/openbao.Deployer.Ensure` server-side-applies
+(field manager `serendip`, spec 014; `provider-model.md`), in dependency
+order, so a changed image rolls the StatefulSet and an object deleted by hand
+is recreated on the next setup (until spec 014 these were create-if-missing
+only):
 
 1. **Namespace** `serendip-system`.
 2. **ConfigMap** `openbao-config` — one key, `server.hcl`:
@@ -90,8 +93,8 @@ and crashed on a "no endpoints available" 503.
 ## Init/unseal lifecycle
 
 `providers/secrets/openbao.Bootstrap(ctx, client, credentialsPath)`
-runs on every `serendipd` startup (`cmd/serendipd`'s `wireOpenBao`,
-after `Deployer.Ensure`). It checks `/v1/sys/health` first, then
+runs on every `serendipd` startup, in the secrets capability's background
+setup step after `Deployer.Ensure` (spec 014; `reconciliation.md`). It checks `/v1/sys/health` first, then
 branches:
 
 - **Fresh instance** (`!Initialized`): calls `Init(ctx, 1, 1)` — a
@@ -190,7 +193,7 @@ func (c *Client) HTTPClient() *http.Client
 func (c *Client) ProxyURL(namespace, service string, port int) string
 ```
 
-`wireOpenBao` builds the OpenBao `Client` as
+The secrets setup step builds the OpenBao `Client` as
 `openbao.NewClient(client.ProxyURL(openbao.Namespace,
 openbao.ServiceName, openbao.ListenPort), client.HTTPClient())` —
 reusing the already-TLS-configured, already-authenticated transport
@@ -205,13 +208,23 @@ through the real client returned byte-for-byte identical data.
 
 ## Registration
 
-`wireOpenBao` now registers a `*providers/secrets/openbao.Provider`
+The secrets setup step registers a `*providers/secrets/openbao.Provider`
 (not the bare `*openbao.Client` spec 008 registered — superseded, not
-left alongside it) under `"secrets"` in `core/provider.Registry`.
-`cmd/serendipd`'s composition root looks this up, type-asserts it to
-`core/reconcile.SecretsProvider`, and injects it into
-`SecretReconciler` — the same registry pattern every capability since
-spec 006 uses, now with a real consumer.
+left alongside it) under `"secrets"` in `core/provider.Registry`, and
+hands it to the lazy `SecretsProvider` handle that `SecretReconciler` and
+`api.SecretHandler` were wired with at startup (spec 014). Until then
+the handle returns `reconcile.ErrProviderNotReady`: Secrets report
+`Reachable=Unknown`, reason `ProviderNotReady`, and the value endpoints
+answer **503** ("capability not ready") instead of 500, so callers know
+to retry. `/v1/secrets` is therefore always mounted when
+`SERENDIP_KUBECONFIG` is set, even before OpenBao is up.
+
+**Startup no longer dies on a slow OpenBao (spec 014).** The 90s
+readiness wait still bounds one setup attempt, but a missed wait is
+retried (5s doubling to 2m) instead of exiting `serendipd`. Seen live
+during spec 014's verification: a slow image pull missed the wait (the
+failure that stopped spec 013's run), the next attempt 5s later
+succeeded, and the API was up throughout.
 
 ## The `Secret` resource kind
 

@@ -30,8 +30,12 @@ type daemon struct {
 	exitErr error
 }
 
-// start launches serendipd and waits for its "listening on" line, which
-// it only logs after every provider (and so every install) is ready.
+// readyLine is what serendipd logs once every capability's background
+// setup has succeeded (spec 014). "listening on" now comes first, before
+// any install, so it no longer marks a finished cold start.
+const readyLine = "serendipd: all capabilities ready"
+
+// start launches serendipd and waits for readyLine.
 func (d *daemon) start(ctx context.Context, timeout time.Duration) (time.Duration, error) {
 	logFile, err := os.Create(d.log)
 	if err != nil {
@@ -52,7 +56,7 @@ func (d *daemon) start(ctx context.Context, timeout time.Duration) (time.Duratio
 		logFile.Close()
 		close(done)
 	}()
-	if err := waitForLogLine(ctx, d.log, "listening on", timeout, done, func() error { return d.exitErr }); err != nil {
+	if err := waitForLogLine(ctx, d.log, readyLine, timeout, done, func() error { return d.exitErr }); err != nil {
 		return 0, err
 	}
 	return time.Since(began), nil

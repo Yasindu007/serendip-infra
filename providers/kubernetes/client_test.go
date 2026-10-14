@@ -367,3 +367,58 @@ func TestClient_Create_StillSendsJSONContentType(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/json", gotContentType)
 	}
 }
+
+func TestClient_Apply_RequestShape(t *testing.T) {
+	var gotMethod, gotPath, gotCT string
+	var gotQuery map[string][]string
+	var gotBody map[string]any
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotCT = r.Method, r.URL.Path, r.Header.Get("Content-Type")
+		gotQuery = r.URL.Query()
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		json.NewEncoder(w).Encode(Object{APIVersion: "v1", Kind: "ConfigMap", Metadata: ObjectMeta{Name: "cm", Namespace: "ns", Generation: 3}})
+	})
+
+	got, err := client.Apply(context.Background(), "/api/v1/namespaces/ns/configmaps/cm", Object{
+		APIVersion: "v1", Kind: "ConfigMap",
+		Metadata: ObjectMeta{Name: "cm", Namespace: "ns", Labels: map[string]string{"a": "b"}},
+		Data:     json.RawMessage(`{"k":"v"}`),
+	}, "serendip")
+	if err != nil {
+		t.Fatalf("Apply() = %v", err)
+	}
+	if gotMethod != http.MethodPatch || gotPath != "/api/v1/namespaces/ns/configmaps/cm" {
+		t.Errorf("request = %s %s, want PATCH to the item path", gotMethod, gotPath)
+	}
+	if gotCT != "application/apply-patch+yaml" {
+		t.Errorf("Content-Type = %q, want application/apply-patch+yaml", gotCT)
+	}
+	if fm, force := gotQuery["fieldManager"], gotQuery["force"]; len(fm) != 1 || fm[0] != "serendip" || len(force) != 1 || force[0] != "true" {
+		t.Errorf("query = %v, want fieldManager=serendip&force=true", gotQuery)
+	}
+	meta, _ := gotBody["metadata"].(map[string]any)
+	if gotBody["apiVersion"] != "v1" || gotBody["kind"] != "ConfigMap" || meta["name"] != "cm" || meta["namespace"] != "ns" {
+		t.Errorf("body = %v, want apiVersion/kind/metadata.name/namespace", gotBody)
+	}
+	if _, ok := meta["resourceVersion"]; ok {
+		t.Errorf("body carries resourceVersion: %v", meta)
+	}
+	if got.Metadata.Generation != 3 {
+		t.Errorf("decoded generation = %d, want 3", got.Metadata.Generation)
+	}
+}
+
+func TestClient_Apply_Errors(t *testing.T) {
+	client, _ := newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	if _, err := client.Apply(context.Background(), "/x", Object{}, "serendip"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("404: err = %v, want ErrNotFound", err)
+	}
+	client, _ = newTestServerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	})
+	if _, err := client.Apply(context.Background(), "/x", Object{}, "serendip"); err == nil || errors.Is(err, ErrNotFound) {
+		t.Errorf("409: err = %v, want an unexpected-status error", err)
+	}
+}

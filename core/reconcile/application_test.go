@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -112,15 +113,17 @@ func createApp(t *testing.T, s appStores, readyStatus resource.ConditionStatus) 
 
 func TestApplicationReconciler_Cases(t *testing.T) {
 	tests := []struct {
-		name       string
-		result     ensureResult
-		wantStatus resource.ConditionStatus
-		wantReason string
+		name        string
+		result      ensureResult
+		wantStatus  resource.ConditionStatus
+		wantReason  string
+		wantRequeue bool
 	}{
-		{"deployed", ensureResult{ready: true, reason: reconcile.ReasonDeployed}, resource.ConditionTrue, reconcile.ReasonDeployed},
-		{"progressing", ensureResult{reason: reconcile.ReasonProgressing, message: "namespace pending"}, resource.ConditionFalse, reconcile.ReasonProgressing},
-		{"failed", ensureResult{reason: reconcile.ReasonDeployFailed}, resource.ConditionFalse, reconcile.ReasonDeployFailed},
-		{"provider error", ensureResult{err: errors.New("connection refused")}, resource.ConditionFalse, reconcile.ReasonEnsureFailed},
+		{"deployed", ensureResult{ready: true, reason: reconcile.ReasonDeployed}, resource.ConditionTrue, reconcile.ReasonDeployed, false},
+		{"progressing", ensureResult{reason: reconcile.ReasonProgressing, message: "namespace pending"}, resource.ConditionFalse, reconcile.ReasonProgressing, true},
+		{"failed", ensureResult{reason: reconcile.ReasonDeployFailed}, resource.ConditionFalse, reconcile.ReasonDeployFailed, false},
+		{"provider error", ensureResult{err: errors.New("connection refused")}, resource.ConditionFalse, reconcile.ReasonEnsureFailed, false},
+		{"provider not ready", ensureResult{err: fmt.Errorf("wrapped: %w", reconcile.ErrProviderNotReady)}, resource.ConditionFalse, reconcile.ReasonProviderNotReady, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -129,9 +132,7 @@ func TestApplicationReconciler_Cases(t *testing.T) {
 			p := &fakeAppPlatform{app: tt.result}
 			r := reconcile.NewApplicationReconciler(s.apps, p)
 
-			if err := r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindApplication, ID: app.Metadata.ID}); err != nil {
-				t.Fatalf("Reconcile() = %v", err)
-			}
+			checkRequeue(t, r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindApplication, ID: app.Metadata.ID}), tt.wantRequeue)
 			got, err := s.apps.Get(context.Background(), app.Metadata.ID)
 			if err != nil {
 				t.Fatalf("Get() = %v", err)
@@ -140,10 +141,63 @@ func TestApplicationReconciler_Cases(t *testing.T) {
 			if c.Status != tt.wantStatus || c.Reason != tt.wantReason {
 				t.Errorf("Ready = {%s, %s}, want {%s, %s}", c.Status, c.Reason, tt.wantStatus, tt.wantReason)
 			}
-			if tt.result.err != nil && c.Message != tt.result.err.Error() {
+			if tt.result.err != nil && tt.wantReason == reconcile.ReasonEnsureFailed && c.Message != tt.result.err.Error() {
 				t.Errorf("Message = %q, want provider error text", c.Message)
 			}
 		})
+	}
+}
+
+// checkRequeue asserts Reconcile's result: RequeueAfter while the resource
+// is converging, nil once it has settled or failed terminally.
+func checkRequeue(t *testing.T, err error, wantRequeue bool) {
+	t.Helper()
+	var rq reconcile.RequeueAfter
+	if wantRequeue {
+		if !errors.As(err, &rq) {
+			t.Fatalf("Reconcile() = %v, want RequeueAfter (still converging)", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("Reconcile() = %v, want nil (settled)", err)
+	}
+}
+
+// A delete arriving while the provider is still being set up is an error,
+// so the engine's failed-retry path finishes the teardown later.
+func TestComponentReconciler_DeleteWhileProviderNotReadyIsAnError(t *testing.T) {
+	s := newAppStores(t)
+	p := &fakeAppPlatform{deleteCompErr: reconcile.ErrProviderNotReady}
+	r := reconcile.NewComponentReconciler(s.components, s.apps, p)
+	err := r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindComponent, ID: "gone"})
+	var rq reconcile.RequeueAfter
+	if !errors.Is(err, reconcile.ErrProviderNotReady) || errors.As(err, &rq) {
+		t.Errorf("Reconcile() = %v, want ErrProviderNotReady as a plain error", err)
+	}
+}
+
+// Re-checking a converging Component that hasn't changed makes no store
+// write, even though each pass asks for another early re-check.
+func TestComponentReconciler_ConvergingRecheckWritesOnce(t *testing.T) {
+	s := newAppStores(t)
+	app := createApp(t, s, resource.ConditionTrue)
+	comp, err := s.components.Create(context.Background(), resource.Component{
+		Metadata: resource.Metadata{Name: "web", OwnerRefs: []resource.OwnerRef{{Kind: resource.KindApplication, ID: app.Metadata.ID}}},
+		Spec:     resource.ComponentSpec{Image: "nginx"},
+	})
+	if err != nil {
+		t.Fatalf("Create(component) = %v", err)
+	}
+	p := &fakeAppPlatform{comp: ensureResult{reason: reconcile.ReasonProgressing}}
+	r := reconcile.NewComponentReconciler(s.components, s.apps, p)
+	ref := graph.ResourceRef{Kind: resource.KindComponent, ID: comp.Metadata.ID}
+
+	checkRequeue(t, r.Reconcile(context.Background(), ref), true)
+	rows := countAuditRowsDB(t, s.db, comp.Metadata.ID)
+	checkRequeue(t, r.Reconcile(context.Background(), ref), true)
+	if got := countAuditRowsDB(t, s.db, comp.Metadata.ID); got != rows {
+		t.Errorf("audit rows %d -> %d, want no write on an unchanged re-check", rows, got)
 	}
 }
 
@@ -213,11 +267,16 @@ func TestComponentReconciler_Cases(t *testing.T) {
 		wantStatus     resource.ConditionStatus
 		wantReason     string
 		wantEnsureCall bool
+		wantRequeue    bool
 	}{
 		{name: "deployed", appReady: resource.ConditionTrue, spec: validSpec,
 			result: ensureResult{ready: true, reason: reconcile.ReasonDeployed}, wantStatus: resource.ConditionTrue, wantReason: reconcile.ReasonDeployed, wantEnsureCall: true},
 		{name: "progressing", appReady: resource.ConditionTrue, spec: validSpec,
-			result: ensureResult{reason: reconcile.ReasonProgressing}, wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonProgressing, wantEnsureCall: true},
+			result: ensureResult{reason: reconcile.ReasonProgressing}, wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonProgressing, wantEnsureCall: true, wantRequeue: true},
+		{name: "provider not ready", appReady: resource.ConditionTrue, spec: validSpec,
+			result: ensureResult{err: reconcile.ErrProviderNotReady}, wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonProviderNotReady, wantEnsureCall: true, wantRequeue: true},
+		{name: "deploy failed", appReady: resource.ConditionTrue, spec: validSpec,
+			result: ensureResult{reason: reconcile.ReasonDeployFailed}, wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonDeployFailed, wantEnsureCall: true},
 		{name: "unsupported", appReady: resource.ConditionTrue, spec: resource.ComponentSpec{Image: "worker"},
 			result: ensureResult{reason: reconcile.ReasonUnsupported}, wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonUnsupported, wantEnsureCall: true},
 		{name: "provider error", appReady: resource.ConditionTrue, spec: validSpec,
@@ -238,9 +297,9 @@ func TestComponentReconciler_Cases(t *testing.T) {
 		{name: "two application owners", appReady: resource.ConditionTrue, twoOwners: true, spec: validSpec,
 			wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonInvalidSpec},
 		{name: "application missing", spec: validSpec,
-			wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonWaitingForApplication},
+			wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonWaitingForApplication, wantRequeue: true},
 		{name: "application not ready", appReady: resource.ConditionFalse, spec: validSpec,
-			wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonWaitingForApplication},
+			wantStatus: resource.ConditionFalse, wantReason: reconcile.ReasonWaitingForApplication, wantRequeue: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -268,9 +327,7 @@ func TestComponentReconciler_Cases(t *testing.T) {
 
 			p := &fakeAppPlatform{comp: tt.result}
 			r := reconcile.NewComponentReconciler(s.components, s.apps, p)
-			if err := r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindComponent, ID: comp.Metadata.ID}); err != nil {
-				t.Fatalf("Reconcile() = %v", err)
-			}
+			checkRequeue(t, r.Reconcile(context.Background(), graph.ResourceRef{Kind: resource.KindComponent, ID: comp.Metadata.ID}), tt.wantRequeue)
 
 			got, err := s.components.Get(context.Background(), comp.Metadata.ID)
 			if err != nil {

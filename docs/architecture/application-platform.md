@@ -11,8 +11,8 @@ exception to ADR 0002/0009's direct-object-construction precedent).
 
 Code: `providers/application/openchoreo/` (provider side),
 `core/reconcile/application.go` (interface + reconcilers),
-`core/resource/app.go` (resource kinds), `cmd/serendipd` `wireOpenChoreo`
-(wiring). Pinned versions: `providers/application/openchoreo/VERSIONS.md`.
+`core/resource/app.go` (resource kinds), `cmd/serendipd` `wireKubernetes`
+and `setup.go` (wiring and background setup). Pinned versions: `providers/application/openchoreo/VERSIONS.md`.
 
 ## The capability (spec 011)
 
@@ -36,12 +36,15 @@ other, and deleting an Application is deleting one Project. Serendip's own
 `Organization`/`Team`/`Project` kinds are not mapped to anything yet.
 
 Provider calls (`Provider`, `provider.go`) only use
-`providers/kubernetes.Client`: GET-or-create for each object, never helm.
-`EnsureComponent` creates the Component CR (immutable fields never patched;
-if its owner project differs from the requested Application it returns
-`Unsupported`), then the Workload. An existing Workload is compared on only
-the fields Serendip owns (image, env, endpoints) and merge-patched only on
-real difference, so a no-drift reconcile makes no writes on either side.
+`providers/kubernetes.Client`: a server-side apply of each object under field
+manager `serendip` (spec 014; `provider-model.md`), never helm. The API
+server does the diff, so a no-drift reconcile stores nothing on either side,
+and a field Serendip stops setting is removed.
+`EnsureComponent` first GETs the Component: its owner is immutable, so if
+it differs from the requested Application it returns `Unsupported` before
+any apply. It then applies the Component CR, then the Workload. "Did I just
+change the Workload?" is read from `metadata.generation` before and after the
+apply; a change returns `Progressing` ("rolling out updated workload").
 A port becomes a `TCP` endpoint, unless it sets `expose: true` (below).
 Workload env is OpenChoreo's
 `[{key,value}]` list, sorted by key; OpenChoreo delivers it via the type's
@@ -63,10 +66,13 @@ ClusterProjectType or ClusterComponentType objects; Serendip creates its own.
 
 ### Platform defaults
 
-`EnsurePlatformDefaults` runs once at startup (like `EnsureDefaultDataPlane`;
-GET-then-create, not reconciled):
+`EnsurePlatformDefaults` runs at platform setup and then on every foundations
+re-ensure pass (`reconciliation.md`; default every 5m), so a default deleted
+or edited by hand is restored. Each is server-side applied, except the
+namespace label:
 
-- Label on the org namespace (merge-patched only if missing).
+- Label on the org namespace (merge-patched only if missing; Helm created the
+  namespace, Serendip owns one label).
 - `ClusterProjectType/serendip-default`: its template creates the cell
   namespace. Copied from v1.3.1 `samples/getting-started/all.yaml`.
 - `ClusterComponentType/serendip-service` (`workloadType: deployment`): a
@@ -79,13 +85,11 @@ GET-then-create, not reconciled):
   scope), file-mount config, command/args, and the workflow/trait
   allow-lists (nothing uses them). Kept: the "at least one endpoint"
   validation, which is why port-less Components are unsupported (below).
-  **Update path:** `EnsurePlatformDefaults` is GET-then-create for every
-  default, except that the ClusterComponentType is also merge-patched when the
-  desired spec is not *contained* in the stored one (containment, not
-  equality, because the API server adds defaults). This is how clusters that
-  predate spec 012 pick up the route. Existing releases snapshot the type, so
-  running Components are untouched until their next Workload change. A key
-  removed from the desired spec would not be removed from a live type.
+  **Update path:** the type is applied like every other default, so a
+  Serendip release that changes it (spec 012 added the route) reaches existing
+  clusters on the next setup or re-ensure pass, and a key removed from the
+  desired spec is removed from the live type. Existing releases snapshot the
+  type, so running Components are untouched until their next Workload change.
 - `Environment/development` pointing at `DataPlane/default`.
 - `DeploymentPipeline/serendip`, single environment. A pipeline with an empty
   `targetEnvironmentRefs` was confirmed accepted on a real cluster
@@ -119,6 +123,7 @@ vocabulary in `core/`; upstream detail goes in `Message`):
 | `InvalidSpec` | reconciler | Empty image, bad/duplicate port name, port outside 1-65535, no or multiple Application owner refs |
 | `WaitingForApplication` | reconciler | Owning Application missing or not `Ready=True`; provider not called |
 | `EnsureFailed` | reconciler | Provider returned an error (API call failed) |
+| `ProviderNotReady` | reconciler | The platform's background setup has not finished (spec 014); provider not called, resource re-checked early |
 
 Upstream mapping (`mapReady`): a Component reads the `ReleaseBinding` `Ready`
 condition (a missing ReleaseBinding is `Progressing`, since autoDeploy has not
@@ -134,23 +139,29 @@ honesty rules keep an update from looking `Deployed` before it is:
 
 - A `Ready` condition whose `observedGeneration` is older than the object's
   `metadata.generation` is `Progressing`, because it describes a stale spec.
-- Right after Serendip patches a Workload, `EnsureComponent` returns
-  `Progressing` without reading the ReleaseBinding.
+- Right after an apply changes the Workload's generation, `EnsureComponent`
+  returns `Progressing` without reading the ReleaseBinding.
 - The ReleaseBinding's `Ready` is only trusted once the `ComponentRelease` it
   points at (`spec.releaseName`) has a `spec.workload` snapshot equal to the
   desired workload. Otherwise the result is `Progressing`.
 
 The third rule is what actually closes the gap: the second rule alone wasn't
 enough on a real cluster. The reconciler's own status write publishes an event
-that re-runs the reconcile within milliseconds of the patch. OpenChoreo takes
+that re-runs the reconcile within milliseconds of the apply. OpenChoreo takes
 about 80 ms to cut a new release and retarget the binding, so the re-run saw
 the old release still `Ready` and briefly reported `Deployed`. Each Component
 reconcile therefore makes one extra GET, for the bound ComponentRelease.
 
 Reconcilers write only when `{Status, Reason}` changes (`Message` excluded,
 since upstream text churns), so an unchanged Component produces no `Update`,
-audit row, or `ResourceVersion` bump. There is no `CheckReady`-style retry
-loop: every 30s resync retries for free.
+audit row, or `ResourceVersion` bump.
+
+Convergence is not left to the 30s resync (spec 014). A Component that is
+`Progressing`, `WaitingForApplication`, `ProviderNotReady`, or Ready with
+`Reachable=Pending` (and an Application that is `Progressing` or
+`ProviderNotReady`) makes its reconciler return `RequeueAfter`, after the
+status write, and the engine re-checks it on its own 2s-doubling backoff.
+Settled and terminal reasons ride the normal resync. See `reconciliation.md`.
 
 Both reconcilers' not-found branches call `Delete*` with an ID-only resource.
 Delete issues a DELETE on the Project/Component (404 is success) and returns;
@@ -160,10 +171,9 @@ OpenChoreo's finalizers do the teardown asynchronously.
 
 `ComponentPort.Expose` (default false) maps to a Workload endpoint
 `{type: HTTP, visibility: [external]}`; other ports stay `TCP` as before.
-`EnsureDataPlaneGateway` (in `dataplane.go`, called after
-`EnsureDefaultDataPlane`) merge-patches `DataPlane/default.spec.gateway.ingress.
-external` with the `GatewayEndpoint` that `cmd/serendipd` hands over from the
-Gateway capability, only when it differs. `EnsureComponent` returns a
+`EnsureDataPlane` (in `dataplane.go`) applies `DataPlane/default` including
+`spec.gateway.ingress.external`, the `GatewayEndpoint` that `cmd/serendipd`
+hands over from the Gateway capability. `EnsureComponent` returns a
 `ComponentObservation`; when a port is exposed and the workload is Deployed it
 also finds the rendered HTTPRoutes (by `openchoreo.dev/component` and
 `endpoint-visibility=external` labels, in the cell namespace from
@@ -183,9 +193,10 @@ the data plane on every reconcile, and fails every reconcile with "not found"
 when those CRDs are missing, **even with `gateway.enabled=false` on both
 charts**. Result: no release ever reported status and nothing became Ready.
 
-`EnsureGatewayAPICRDs` (run in `wireOpenChoreo` after `EnsureDataPlaneGateway`,
-before `EnsurePlatformDefaults`) is a one-line delegate to
+`EnsureGatewayAPICRDs` is a one-line delegate to
 `providers/internal/gatewayapi.EnsureCRDs`, shared with the kgateway provider.
+It runs as part of the gateway's setup (the kgateway `Deployer`) and the
+gateway foundations re-ensure, both of which come before the platform's.
 Spec 011 pinned v1.3.0 and never touched existing CRDs; that is **superseded**:
 the pin is now **v1.6.1** (forced by kgateway 2.4.x, ADR 0011) with
 **upgrade-only** semantics. Older CRDs are upgraded in place by bundle-version
@@ -197,11 +208,12 @@ github.com; air-gapped installs need the manifest embedded or mirrored later.
 
 ### Observed rollout semantics
 
-During an image update the old Pod keeps serving. Serendip patches the
+During an image update the old Pod keeps serving. Serendip applies the
 Workload once and reports `Progressing` until the ReleaseBinding is bound to a
-release cut from the new spec and is `Ready`, then `Deployed`. In the
+release cut from the new spec and is `Ready`, then `Deployed`. In the spec 011
 verification run, `Progressing` held from the update until the new Pod was
-serving, about 29s (one resync).
+serving, about 29s (one resync); since spec 014 it is re-checked early, so
+status trails the upstream change by seconds.
 
 ## Deployment foundation (spec 010)
 
@@ -242,11 +254,12 @@ Each disabled flag turns off a dependency deferred rather than removed:
 
 ### `DataPlane` CR and CA-trust bootstrapping
 
-`EnsureDefaultDataPlane` GET-then-creates `DataPlane/default` in
-`openchoreo-control-plane`, with `spec.clusterAgent.clientCA.secretKeyRef`
-pointing at `cluster-agent-tls` / `ca.crt` in `openchoreo-data-plane`. It is
-built directly with `providers/kubernetes.Client` rather than by shelling out
-to OpenChoreo's `add-default-dataplane.sh`.
+`EnsureDataPlane` applies `DataPlane/default` in `openchoreo-control-plane`
+as one object: `spec.clusterAgent.clientCA.secretKeyRef` pointing at
+`cluster-agent-tls` / `ca.crt` in `openchoreo-data-plane`, plus the gateway
+wiring (spec 012). It is built directly with `providers/kubernetes.Client`
+rather than by shelling out to OpenChoreo's `add-default-dataplane.sh`. (Until
+spec 014 this was two calls, a create and a gateway merge patch.)
 
 The control-plane chart promises a "CA extractor hook job" to populate the
 data plane's trust ConfigMap; no such job exists (the only Job is the unrelated
@@ -254,7 +267,8 @@ authz bootstrap), and the ConfigMap it ships holds a permanent placeholder. The
 real CA sits in a `cluster-gateway-ca` Secret the chart never reads.
 `Deployer.ensureDataPlaneTrustsControlPlane`, run between the two chart
 installs, copies it from that Secret into the data plane's
-`cluster-gateway-ca` ConfigMap. Confirmed: the agent logged "connected to
+`cluster-gateway-ca` ConfigMap (applied on every setup, so a rotated CA is
+carried over). Confirmed: the agent logged "connected to
 control plane" and `DataPlane.status.agentConnection` showed
 `connected: true, connectedAgents: 1`.
 
@@ -267,18 +281,18 @@ not kill the daemon).
 
 ### Startup wiring
 
-`wireOpenChoreo` (called from `wireKubernetes` after `wireOpenBao`; skipped
-entirely when `SERENDIP_KUBECONFIG` is unset) takes the `GatewayEndpoint` from
-`wireGateway` (which runs first) and runs, in order: `Deployer.Ensure`,
-`EnsureDefaultDataPlane`, `EnsureDataPlaneGateway`, `EnsureGatewayAPICRDs`,
-`EnsurePlatformDefaults`, `CheckReady`. It then registers
-`openchoreo.NewProvider(client, gateway)` under
-`"application-platform"`, does the single Lookup and type-assert to
-`reconcile.ApplicationPlatformProvider`, and registers the Application and
-Component reconcilers with the engine (30s resync, 10s per-reconcile timeout).
-`providers/kubernetes.Client` gained `Patch` (JSON merge patch) for this: it
-labels the namespace and updates Workloads without round-tripping fields the
-client's `Object` envelope does not model.
+`wireKubernetes` (skipped entirely when `SERENDIP_KUBECONFIG` is unset)
+registers the Application and Component reconcilers with the engine at
+startup, against a lazy `ApplicationPlatformProvider` handle that returns
+`ErrProviderNotReady` until setup finishes (spec 014; `reconciliation.md`).
+The platform's setup step runs in the background once the gateway's has
+succeeded, with the gateway's `GatewayEndpoint`: `Deployer.Ensure`, then
+`EnsureDataPlane` and `EnsurePlatformDefaults`, then `CheckReady`. On
+success it registers `openchoreo.NewProvider(client, gateway)` under
+`"application-platform"` and hands it to the lazy handle; on failure it is
+retried (5s doubling to 2m) and reported by `GET /v1/readiness`. The
+DataPlane and the defaults are re-ensured afterwards on the foundations
+interval.
 
 ## Not done / deferred
 
@@ -297,10 +311,12 @@ client's `Object` envelope does not model.
 - **Secret injection** into Components (spec 009 `Secret`s are not wired in).
 - **Multi-environment promotion** (one `development` Environment, a
   single-environment pipeline).
-- **Live reconciliation of platform defaults**: repaired on `serendipd`
-  restart only.
-- **Status lag of up to ~30s**: OpenChoreo-side progress is not a Serendip
-  event and the engine has no per-resource requeue.
+- ~~Live reconciliation of platform defaults~~ and ~~status lag of up to
+  ~30s~~: fixed in spec 014 (foundations re-ensure loop; early re-checks
+  while converging). See `reconciliation.md`.
+- **Watching upstream objects** instead of re-checking them: status still
+  trails OpenChoreo by up to one early re-check step (about 2s at the
+  observed rollout times). Out of scope for edge-1 (spec 014).
 - **Build Plane, Observability Plane, Thunder** (ADR 0005 and prior scope).
   kgateway is deployed by the Gateway capability (`gateway.md`), not here.
 
@@ -320,6 +336,22 @@ client's `Object` envelope does not model.
   control plane and about 7 MiB for the data plane, and the whole edge-1
   stack about 1.3 GiB. This is still **not** ADR 0005's reference-hardware
   gate.
+
+## Real-cluster verification (spec 014, kind, Kubernetes 1.34.0)
+
+- The spec 011/012 flow (deploy, expose, curl 200, image update, un-expose,
+  re-expose, delete, cascade) passed after the server-side apply conversion;
+  un-exposing left no `visibility` field on the Workload.
+- Component create to `Deployed`/`Serving` with a cached image: 14.2s in 4 of
+  4 runs, against OpenChoreo's own ReleaseBinding `Ready` at 11-13s (was a
+  flat 30s in spec 013).
+- Idle over 75s: generation and `serendip` apply time unchanged on all 20
+  owned objects, no Component write, no audit rows.
+- A force-deleted `Environment` was recreated in 12s by the foundations loop
+  (`SERENDIP_REENSURE_INTERVAL=30s`). A plain delete never completes:
+  OpenChoreo blocks it while the DeploymentPipeline references it.
+- A label applied under manager `serendip` was removed on the next re-ensure;
+  a label set by another manager survived.
 
 ## Open questions
 

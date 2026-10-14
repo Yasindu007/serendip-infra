@@ -3,7 +3,6 @@ package openchoreo
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
@@ -35,21 +34,14 @@ func namespacedPath(plural string) string {
 	return fmt.Sprintf("/apis/openchoreo.dev/v1alpha1/namespaces/%s/%s", ControlPlaneNamespace, plural)
 }
 
-// getOrCreate returns the object named obj.Metadata.Name under collection,
-// creating obj first if it doesn't exist.
-func getOrCreate(ctx context.Context, client *kubernetes.Client, collection string, obj kubernetes.Object) (kubernetes.Object, error) {
-	existing, err := client.Get(ctx, collection+"/"+obj.Metadata.Name)
-	if err == nil {
-		return existing, nil
-	}
-	if !errors.Is(err, kubernetes.ErrNotFound) {
-		return kubernetes.Object{}, fmt.Errorf("get %s %s: %w", obj.Kind, obj.Metadata.Name, err)
-	}
-	created, err := client.Create(ctx, collection, obj)
+// apply server-side-applies obj into collection (its item path is
+// collection/name) under kubernetes.FieldManager and returns the result.
+func apply(ctx context.Context, client *kubernetes.Client, collection string, obj kubernetes.Object) (kubernetes.Object, error) {
+	applied, err := client.Apply(ctx, collection+"/"+obj.Metadata.Name, obj, kubernetes.FieldManager)
 	if err != nil {
-		return kubernetes.Object{}, fmt.Errorf("create %s %s: %w", obj.Kind, obj.Metadata.Name, err)
+		return kubernetes.Object{}, fmt.Errorf("apply %s %s: %w", obj.Kind, obj.Metadata.Name, err)
 	}
-	return created, nil
+	return applied, nil
 }
 
 func mustJSON(v any) json.RawMessage {
@@ -60,92 +52,29 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
-// EnsurePlatformDefaults idempotently creates the platform-level objects
+// EnsurePlatformDefaults server-side-applies the platform-level objects
 // every Serendip Application/Component deploys through, none of which the
-// OpenChoreo charts seed themselves: the org-namespace label on
-// ControlPlaneNamespace (reused as the org namespace because the default
-// DataPlane already lives there), a project type, a component type, the
-// single Environment, and a single-environment DeploymentPipeline. Ensured
-// once at startup, like EnsureDefaultDataPlane -- not reconciled.
+// OpenChoreo charts seed themselves: a project type, a component type, the
+// single Environment, and a single-environment DeploymentPipeline. It also
+// labels ControlPlaneNamespace as the org namespace (reused because the
+// default DataPlane already lives there). Safe to call repeatedly -- cmd's
+// foundations loop does, so a default deleted or edited by hand is
+// restored, and a field a newer Serendip stops setting is removed. A
+// no-drift pass stores nothing.
 func EnsurePlatformDefaults(ctx context.Context, client *kubernetes.Client) error {
 	if err := ensureNamespaceLabel(ctx, client); err != nil {
 		return fmt.Errorf("openchoreo: label namespace %s: %w", ControlPlaneNamespace, err)
 	}
 	for _, d := range platformDefaults() {
-		existing, err := getOrCreate(ctx, client, d.collection, d.obj)
-		if err != nil {
+		if _, err := apply(ctx, client, d.collection, d.obj); err != nil {
 			return fmt.Errorf("openchoreo: platform defaults: %w", err)
 		}
-		if d.obj.Kind == "ClusterComponentType" {
-			if err := updateSpecIfDifferent(ctx, client, d.collection, d.obj, existing); err != nil {
-				return fmt.Errorf("openchoreo: platform defaults: %w", err)
-			}
-		}
 	}
 	return nil
 }
 
-// updateSpecIfDifferent merge-patches existing's spec to desired's when
-// desired is not already contained in it. Only the component type is kept
-// in sync this way: its definition changes between Serendip versions
-// (spec 012 added external routes), while the other defaults are stable.
-// Containment rather than equality, because the API server fills in
-// defaults (e.g. targetPlane on each resource) that the desired spec omits.
-func updateSpecIfDifferent(ctx context.Context, client *kubernetes.Client, collection string, desired, existing kubernetes.Object) error {
-	var want, have any
-	if err := json.Unmarshal(desired.Spec, &want); err != nil {
-		return fmt.Errorf("decode desired %s spec: %w", desired.Kind, err)
-	}
-	if len(existing.Spec) > 0 {
-		if err := json.Unmarshal(existing.Spec, &have); err != nil {
-			return fmt.Errorf("decode %s %s spec: %w", desired.Kind, desired.Metadata.Name, err)
-		}
-	}
-	if containsJSON(have, want) {
-		return nil
-	}
-	if _, err := client.Patch(ctx, collection+"/"+desired.Metadata.Name, map[string]json.RawMessage{"spec": desired.Spec}); err != nil {
-		return fmt.Errorf("update %s %s: %w", desired.Kind, desired.Metadata.Name, err)
-	}
-	return nil
-}
-
-// containsJSON reports whether every value in want is present and equal in
-// have. Objects may carry extra keys in have; arrays must have the same
-// length with each element contained. Known limits: an empty value in want
-// that the server prunes would never be "contained" (keep desired specs
-// free of empty maps/arrays), and a key removed from want is not removed
-// from the live object (a merge patch can't delete it).
-func containsJSON(have, want any) bool {
-	switch w := want.(type) {
-	case map[string]any:
-		h, ok := have.(map[string]any)
-		if !ok {
-			return false
-		}
-		for k, wv := range w {
-			hv, ok := h[k]
-			if !ok || !containsJSON(hv, wv) {
-				return false
-			}
-		}
-		return true
-	case []any:
-		h, ok := have.([]any)
-		if !ok || len(h) != len(w) {
-			return false
-		}
-		for i := range w {
-			if !containsJSON(h[i], w[i]) {
-				return false
-			}
-		}
-		return true
-	default:
-		return have == want
-	}
-}
-
+// ensureNamespaceLabel stays a merge patch, not an apply: Helm created this
+// namespace, and Serendip owns exactly one label on it.
 func ensureNamespaceLabel(ctx context.Context, client *kubernetes.Client) error {
 	path := "/api/v1/namespaces/" + ControlPlaneNamespace
 	ns, err := client.Get(ctx, path)

@@ -12,6 +12,7 @@ standalone in under ~5 minutes and contain decisions, not exploration.
 | `capability-model.md` | Capability list, capability spec format, default providers per capability | Done |
 | `provider-model.md` | Provider interface contracts (Go), registration, lifecycle, replacement, "bring your own capability" | Done |
 | `deployment-profiles.md` | edge-1 / small-3 / standard-5 / private-cloud; what each enables; upgrade paths between them; topology planner behavior | Done |
+| `reconciliation.md` | Reconcile engine model: events, resync, failed-retry, early re-check (`RequeueAfter`), foundations re-ensure loop, degraded startup, readiness API | Done |
 | `storage.md` | Local → Longhorn(2 replicas) → external progression; primary vs backup storage separation; storage classes/policies; hardware-aware placement | Done |
 | `bootstrap-agent.md` | serendip-agent design: lives outside Kubernetes; hardware discovery, enrollment, bootstrap, emergency diagnostics | Done |
 | `operations.md` | Alert → Incident → Diagnosis → Recommendation → Approval → Action → Verification → Postmortem lifecycle; SLO/error budgets; change intelligence | Done |
