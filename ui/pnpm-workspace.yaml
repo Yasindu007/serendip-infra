@@ -1,0 +1,15 @@
+# pnpm settings for the console (specs/016-ui-mvp plan.md decision 10,
+# ADR 0012). Not a multi-package workspace: this file only carries settings.
+packages:
+  - "."
+
+# A version must have been public for 7 days before it can be installed, so
+# a hijacked release is usually caught and pulled before it reaches us.
+minimumReleaseAge: 10080
+
+# No dependency may run a build/install script. Empty on purpose: a new
+# entry here needs a reviewed reason in ADR 0012.
+onlyBuiltDependencies: []
+# Fail the install, rather than skip silently, if a dependency wants to run
+# a script that isn't approved above.
+strictDepBuilds: true

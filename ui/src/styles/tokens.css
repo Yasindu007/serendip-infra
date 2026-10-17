@@ -1,0 +1,132 @@
+/*
+ * Design tokens: the only place colours, type sizes, spacing and radii are
+ * defined (ui/DESIGN.md). Components use these variables; screens never use
+ * raw values. Contrast for every text/surface pair is checked by
+ * scripts/check-contrast.mjs in both themes.
+ */
+:root {
+  color-scheme: light;
+
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 15px;
+  --text-xl: 22px;
+  --leading: 1.45;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --content-max: 1040px;
+  --rail-width: 220px;
+
+  /* light theme */
+  --surface-page: #f4f6f8;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eceff3;
+  --text: #17202b;
+  --text-muted: #556273;
+  --border: #e1e5ea;
+  --border-strong: #848f9e;
+  --accent: #1f5fbf;
+  --accent-hover: #174a94;
+  --accent-text: #ffffff;
+  --focus: #1f5fbf;
+  --selection: #d3e2fb;
+
+  --rail-bg: #1d2733;
+  --rail-active: #2d3a4a;
+  --rail-text: #c3ccd7;
+  --rail-text-strong: #ffffff;
+  --rail-muted: #9aa6b4;
+
+  --ok: #1d6b3a;
+  --ok-mark: #2a8a55;
+  --progress: #1f5fbf;
+  --warn-text: #5f4300;
+  --warn-bg: #fbf1dc;
+  --warn-border: #ecd7a8;
+  --danger: #b3261e;
+  --danger-bg: #fbe9e7;
+  --danger-border: #f1c4bf;
+  --unknown: #556273;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-page: #12171d;
+    --surface-raised: #1a2129;
+    --surface-sunken: #0f1419;
+    --text: #e3e8ee;
+    --text-muted: #9aa7b5;
+    --border: #2a333d;
+    --border-strong: #6b7786;
+    --accent: #7aa9f7;
+    --accent-hover: #a3c4fa;
+    --accent-text: #0d1117;
+    --focus: #7aa9f7;
+    --selection: #27406b;
+
+    --rail-bg: #0d1218;
+    --rail-active: #1f2a36;
+    --rail-text: #b8c2ce;
+    --rail-text-strong: #ffffff;
+    --rail-muted: #8d99a8;
+
+    --ok: #5cc98a;
+    --ok-mark: #4cb87a;
+    --progress: #7aa9f7;
+    --warn-text: #f2c46d;
+    --warn-bg: #2b2414;
+    --warn-border: #5a4820;
+    --danger: #f28b82;
+    --danger-bg: #2c1716;
+    --danger-border: #5c2b27;
+    --unknown: #9aa7b5;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-page: #12171d;
+  --surface-raised: #1a2129;
+  --surface-sunken: #0f1419;
+  --text: #e3e8ee;
+  --text-muted: #9aa7b5;
+  --border: #2a333d;
+  --border-strong: #6b7786;
+  --accent: #7aa9f7;
+  --accent-hover: #a3c4fa;
+  --accent-text: #0d1117;
+  --focus: #7aa9f7;
+  --selection: #27406b;
+
+  --rail-bg: #0d1218;
+  --rail-active: #1f2a36;
+  --rail-text: #b8c2ce;
+  --rail-text-strong: #ffffff;
+  --rail-muted: #8d99a8;
+
+  --ok: #5cc98a;
+  --ok-mark: #4cb87a;
+  --progress: #7aa9f7;
+  --warn-text: #f2c46d;
+  --warn-bg: #2b2414;
+  --warn-border: #5a4820;
+  --danger: #f28b82;
+  --danger-bg: #2c1716;
+  --danger-border: #5c2b27;
+  --unknown: #9aa7b5;
+}
