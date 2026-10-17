@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Principal is an authenticated person.
@@ -27,6 +28,51 @@ type Authenticator interface {
 
 // ErrInvalidCredential is wrapped by every rejection of a credential.
 var ErrInvalidCredential = errors.New("identity: invalid credential")
+
+// ErrUnsupported is returned by a LoginClient operation the identity
+// provider doesn't offer (no revocation or end-session endpoint).
+var ErrUnsupported = errors.New("identity: not supported by the provider")
+
+// Tokens is what a successful code exchange or refresh yields. None of it
+// ever leaves the server: a browser session holds only an opaque ID that
+// refers to these.
+type Tokens struct {
+	AccessToken  string
+	RefreshToken string
+	IDToken      string
+	// Expiry is when AccessToken stops being accepted.
+	Expiry time.Time
+}
+
+// LoginClient runs a browser login against the identity provider on the
+// server's side: the authorization-code flow with PKCE, refresh, and
+// logout. Errors follow Authenticator's rule: a provider that rejects a
+// code or refresh token yields an error wrapping ErrInvalidCredential; a
+// provider that can't be reached yields reconcile.ErrProviderNotReady, so
+// callers can tell "this login is over" from "try again". Errors never
+// contain a token, code or verifier.
+type LoginClient interface {
+	// AuthCodeURL is where to send the browser to log in. codeChallenge is
+	// the S256 challenge of the verifier later passed to Exchange. state,
+	// nonce and codeChallenge are all required.
+	AuthCodeURL(ctx context.Context, state, nonce, codeChallenge string) (string, error)
+	// Exchange trades an authorization code for tokens.
+	Exchange(ctx context.Context, code, codeVerifier string) (Tokens, error)
+	// Refresh trades a refresh token for new tokens. A provider that
+	// rotates refresh tokens returns the replacement in Tokens.RefreshToken;
+	// otherwise that field is empty and the old one stays valid.
+	Refresh(ctx context.Context, refreshToken string) (Tokens, error)
+	// Revoke invalidates a refresh token, or returns ErrUnsupported.
+	// Callers treat it as best effort: logout proceeds whatever it returns.
+	Revoke(ctx context.Context, refreshToken string) error
+	// EndSessionURL is where to send the browser to end its session at
+	// the provider, or ErrUnsupported.
+	EndSessionURL(ctx context.Context, idTokenHint string) (string, error)
+	// VerifyIDToken checks an ID token's signature, issuer, audience,
+	// expiry and nonce, and returns its subject. An empty nonce is an
+	// error, never a skipped check.
+	VerifyIDToken(ctx context.Context, raw, nonce string) (subject string, err error)
+}
 
 // ActorPrefix starts every audit actor that names an authenticated person,
 // so it can't be confused with a static API-key actor (which may not use

@@ -110,6 +110,46 @@ func (v *Verifier) Authenticate(ctx context.Context, raw string) (identity.Princ
 	return v.checkClaims(t.payload)
 }
 
+// verifyIDToken verifies an ID token issued to the configured audience:
+// signature, iss, aud, exp/nbf/iat and, when nonce is non-empty, an exactly
+// matching "nonce" claim. Unlike Authenticate it doesn't require client_id,
+// which ID tokens don't carry. It returns the subject.
+func (v *Verifier) verifyIDToken(ctx context.Context, raw, nonce string) (string, error) {
+	t, err := parseToken(raw)
+	if err != nil {
+		return "", invalid(err.Error())
+	}
+	alg, ok := algorithms[t.header.Alg]
+	if !ok {
+		return "", invalid(fmt.Sprintf("algorithm %q not accepted", t.header.Alg))
+	}
+	if err := v.verify(ctx, t, alg); err != nil {
+		return "", err
+	}
+	dec := json.NewDecoder(bytes.NewReader(t.payload))
+	dec.UseNumber()
+	var c claims
+	if err := dec.Decode(&c); err != nil {
+		return "", invalid("claims: " + err.Error())
+	}
+	if err := v.checkTimes(c); err != nil {
+		return "", err
+	}
+	if c.Iss != v.cfg.Issuer {
+		return "", invalid(fmt.Sprintf("issuer %q", c.Iss))
+	}
+	if !audienceContains(c.Aud, v.cfg.Audience) {
+		return "", invalid("audience")
+	}
+	if c.Sub == "" {
+		return "", invalid("no sub")
+	}
+	if nonce != "" && c.Nonce != nonce {
+		return "", invalid("nonce mismatch")
+	}
+	return c.Sub, nil
+}
+
 // verify finds the key t names and checks its signature, fetching keys
 // once if the key isn't known yet (a rotation, or nothing cached).
 func (v *Verifier) verify(ctx context.Context, t token, alg algorithm) error {
@@ -264,6 +304,7 @@ type claims struct {
 	Username          string          `json:"username"`
 	PreferredUsername string          `json:"preferred_username"`
 	Email             string          `json:"email"`
+	Nonce             string          `json:"nonce"`
 }
 
 func (v *Verifier) checkClaims(payload []byte) (identity.Principal, error) {
@@ -288,13 +329,22 @@ func (v *Verifier) checkClaims(payload []byte) (identity.Principal, error) {
 	if c.Sub == "" || displayName(c) == "" {
 		return identity.Principal{}, invalid("no usable sub")
 	}
+	if err := v.checkTimes(c); err != nil {
+		return identity.Principal{}, err
+	}
+	return identity.Principal{Subject: c.Sub, Name: displayName(c)}, nil
+}
+
+// checkTimes checks exp (required) and nbf/iat (optional) against the clock
+// with the configured leeway.
+func (v *Verifier) checkTimes(c claims) error {
 	now := v.cfg.Now()
 	exp, ok := unixTime(c.Exp)
 	if !ok {
-		return identity.Principal{}, invalid("missing or malformed exp")
+		return invalid("missing or malformed exp")
 	}
 	if !now.Before(exp.Add(v.cfg.Leeway)) {
-		return identity.Principal{}, invalid("expired")
+		return invalid("expired")
 	}
 	for name, n := range map[string]*json.Number{"nbf": c.Nbf, "iat": c.Iat} {
 		if n == nil {
@@ -302,13 +352,13 @@ func (v *Verifier) checkClaims(payload []byte) (identity.Principal, error) {
 		}
 		at, ok := unixTime(n)
 		if !ok {
-			return identity.Principal{}, invalid("malformed " + name)
+			return invalid("malformed " + name)
 		}
 		if at.After(now.Add(v.cfg.Leeway)) {
-			return identity.Principal{}, invalid(name + " is in the future")
+			return invalid(name + " is in the future")
 		}
 	}
-	return identity.Principal{Subject: c.Sub, Name: displayName(c)}, nil
+	return nil
 }
 
 // maxNameRunes bounds the display name recorded as the audit actor.

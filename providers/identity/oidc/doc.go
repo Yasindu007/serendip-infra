@@ -1,6 +1,9 @@
 // Package oidc verifies OIDC/OAuth2 JWT access tokens against any issuer
 // that publishes a JWKS -- the provider-neutral half of the Identity
-// capability (specs/015-identity-foundation plan.md decisions 7 and 9).
+// capability (specs/015-identity-foundation plan.md decisions 7 and 9) --
+// and, as RelyingParty, runs the server-side browser login the console
+// uses: authorization code + PKCE, refresh, revocation and RP-initiated
+// logout (specs/016-ui-mvp plan.md decisions 3-5).
 // Nothing here knows which identity provider issued a token: pointing a
 // Verifier at a different issuer is configuration only, which is what the
 // planned external-OIDC provider will rely on.
