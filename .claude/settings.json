@@ -36,7 +36,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/scripts/kube-context-guard.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/scripts/kube-context-guard.sh\"",
+            "timeout": 15
           }
         ]
       }
@@ -47,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/scripts/post-edit-check.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-edit-check.sh\""
           }
         ]
       }
