@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -166,7 +167,7 @@ func (v *Verifier) refresh(ctx context.Context) error {
 		return nil // keys are fresh; the kid is simply unknown
 	}
 	if err := v.fetch(ctx); err != nil {
-		return fmt.Errorf("%w: %v", reconcile.ErrProviderNotReady, err)
+		return fmt.Errorf("%w: %w", reconcile.ErrProviderNotReady, err)
 	}
 	return nil
 }
@@ -175,6 +176,10 @@ func (v *Verifier) refresh(ctx context.Context) error {
 // fetch keeps the old keys, so verification survives a provider outage.
 // Callers hold fetchMu.
 func (v *Verifier) fetch(ctx context.Context) error {
+	// The fetch serves every waiting request, not just the caller, so the
+	// caller going away must not abort it (and start the refresh lockout);
+	// the HTTP client's own timeout still bounds it.
+	ctx = context.WithoutCancel(ctx)
 	v.mu.Lock()
 	v.lastAttempt = v.cfg.Now()
 	v.mu.Unlock()
@@ -347,12 +352,17 @@ func audienceContains(raw json.RawMessage, want string) bool {
 	return json.Unmarshal(raw, &many) == nil && slices.Contains(many, want)
 }
 
+// maxUnixSeconds bounds claim dates (about year 36812): anything larger, or
+// negative, is malformed rather than converted, since float-to-int64
+// conversion of out-of-range values is implementation-defined.
+const maxUnixSeconds = 1 << 40
+
 func unixTime(n *json.Number) (time.Time, bool) {
 	if n == nil {
 		return time.Time{}, false
 	}
 	f, err := n.Float64()
-	if err != nil {
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 || f > maxUnixSeconds {
 		return time.Time{}, false
 	}
 	sec := int64(f)

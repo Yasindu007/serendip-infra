@@ -271,7 +271,7 @@ and the foundations loop re-ensuring the route and Secret.
 
 New:
 - `core/identity/{doc.go,identity.go,identity_test.go}`
-- `providers/identity/oidc/{doc.go,verifier.go,jwk.go,jws.go,verifier_test.go}` (JWK/JWS parsing is covered through `verifier_test.go`)
+- `providers/identity/oidc/{doc.go,verifier.go,jwk.go,jws.go,verifier_test.go,jwk_test.go}`
 - `providers/identity/thunderid/{doc.go,deploy.go,values.go,route.go,ready.go,*_test.go}`
 - `docs/architecture/identity.md` section "What's built (spec 015)"
 

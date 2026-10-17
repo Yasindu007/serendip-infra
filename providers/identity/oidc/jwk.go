@@ -34,8 +34,14 @@ type rawJWK struct {
 	Y   string `json:"y"`
 }
 
-// minRSABits rejects keys too weak to trust.
-const minRSABits = 2048
+// minRSABits rejects keys too weak to trust; maxRSABits and maxKeys bound
+// the work one token can cause (a token with no kid is tried against every
+// key of the right type).
+const (
+	minRSABits = 2048
+	maxRSABits = 8192
+	maxKeys    = 32
+)
 
 // parseJWKS returns the usable signing keys in a JWKS document, and an
 // error only when the document itself is unreadable. Individual keys that
@@ -58,6 +64,9 @@ func parseJWKS(data []byte) ([]jwk, error) {
 			continue
 		}
 		keys = append(keys, k)
+		if len(keys) == maxKeys {
+			break
+		}
 	}
 	return keys, nil
 }
@@ -75,7 +84,7 @@ func parseJWK(rk rawJWK) (jwk, error) {
 			return jwk{}, errors.New("rsa: bad e")
 		}
 		pub := &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(new(big.Int).SetBytes(e).Int64())}
-		if pub.N.BitLen() < minRSABits || pub.E < 3 || pub.E%2 == 0 {
+		if bits := pub.N.BitLen(); bits < minRSABits || bits > maxRSABits || pub.E < 3 || pub.E%2 == 0 {
 			return jwk{}, errors.New("rsa: weak or invalid key")
 		}
 		k.key = pub

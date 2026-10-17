@@ -135,10 +135,11 @@ func EnsureAdminSecret(ctx context.Context, client *kubernetes.Client) error {
 	if err != nil {
 		// Lost a race with another creator: the Secret exists, which is all
 		// this function promises.
-		if _, getErr := client.Get(ctx, adminSecretPath); getErr == nil {
+		_, getErr := client.Get(ctx, adminSecretPath)
+		if getErr == nil {
 			return nil
 		}
-		return fmt.Errorf("admin secret: create: %w", err)
+		return fmt.Errorf("admin secret: create: %w", errors.Join(err, getErr))
 	}
 	return nil
 }
