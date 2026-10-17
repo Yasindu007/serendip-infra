@@ -31,7 +31,6 @@ costs nothing.
 
 ## Stack
 
-- Go 1.22+ for `core/`, `api/`, `agent/`, `providers/`
 - Standard library first. Any new dependency requires an ADR in `docs/decisions/`
 - SQLite (embedded) default persistence for control plane; PostgreSQL optional provider
 - React + Vite for `ui/` (do not start UI work unless the task says so)
@@ -42,16 +41,7 @@ costs nothing.
 - `docs/decisions/` — ADRs. Decisions already made live here; do not relitigate them silently.
 - `specs/NNN-name/` — per-feature spec.md / plan.md / tasks.md. No implementation without a spec.
 - `core/` — domain model, capability registry, provider registry, resource graph, reconciliation. Imports NO provider packages.
-- `api/` — HTTP API over core.
 - `agent/` — serendip-agent: node bootstrap/enrollment binary that lives OUTSIDE Kubernetes.
-- `providers/` — implementations of core interfaces (kubernetes, storage, identity, observability...).
-- `profiles/` — deployment profiles (edge-1, small-3, standard-5).
-
-## Commands
-
-- Build all: `go build ./...`
-- Test: `go test ./...`
-- Lint: `go vet ./...` and `gofmt -l .` (must be clean)
 
 ## Workflow rules
 
