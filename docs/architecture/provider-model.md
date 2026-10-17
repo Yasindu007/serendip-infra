@@ -11,7 +11,7 @@ doc explains the *design intent* behind those rules.
 
 - Interfaces are defined in `core/` — one Go interface per capability.
 - Implementations live in `providers/<capability>/<product>/` (e.g.
-  `providers/identity/thunder/`, `providers/storage/longhorn/`).
+  `providers/identity/thunderid/`, `providers/storage/longhorn/`).
 - `core/` imports no provider package, ever. Providers import `core/`.
   Deleting a provider directory must not break `go build ./core/... ./api/...`
   (constitution 2).

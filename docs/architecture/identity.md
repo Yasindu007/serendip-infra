@@ -114,9 +114,121 @@ Serendip
 └── Operations
 ```
 
+## What's built (spec 015)
+
+Human identity (section 1) is real; platform and workload identity are not
+built yet. Detail and evidence: `specs/015-identity-foundation/`.
+
+### Two ways into the API
+
+`api.AuthMiddleware` resolves every `/v1/` request's caller:
+
+1. **Static API keys** (`SERENDIP_API_KEYS`, spec 002) are checked first,
+   unchanged. Scripts, the agent and the bench harness keep using them.
+2. **Otherwise the bearer token goes to the Identity capability's
+   `identity.Authenticator`.** A valid OIDC **access token** from the
+   configured issuer becomes the audit actor `person:<username>`
+   (`identity.Actor`).
+
+Outcomes:
+- A rejected token gets a **401** problem+json that never says which
+  check failed. The reason is logged, with the request ID.
+- A token that can't be checked yet (the identity provider is still being
+  set up, or its keys are unreachable and none are cached) gets a **503**.
+  It may well be valid.
+- API keys may not use the `person:` prefix for their actor names, so a
+  key can't pose as a person.
+
+Without a cluster (`SERENDIP_KUBECONFIG` unset), no identity provider is
+wired, and API keys are the only way in, exactly as before.
+
+### The verifier: provider-neutral
+
+`providers/identity/oidc` is a standard-library JWT verifier with no
+dependency (ADR 0009's reasoning).
+
+What it checks:
+- the signature, with an algorithm allow-list (RS/PS/ES/EdDSA; `none`
+  and HMAC are rejected), and the key's type, curve and `alg` must match
+  the token's algorithm;
+- `iss`, `aud` (the client ID `serendip`), and `exp`/`nbf`/`iat`, with
+  30 s leeway;
+- a required `client_id`, which rejects ID tokens: they share the
+  audience but are meant for the client, not the API.
+
+Key handling:
+- Keys come from discovery, or from an override URL.
+- An unknown `kid` refetches at most once per 30 s.
+- Cached keys keep working while the provider is down.
+
+Pointing it at any other OIDC issuer is configuration only. That's the
+planned `external-oidc` escape hatch, not registered yet.
+
+### The default provider: ThunderID
+
+`serendipd` installs it (`providers/identity/thunderid`, chart and image
+1.0.1, `VERSIONS.md`) after the gateway, in parallel with the application
+platform, under spec 014's background setup. It reports as `identity` in
+`GET /v1/readiness`.
+
+The install:
+- **One instance, no node-failure protection** (constitution rule 6). It
+  runs one replica with SQLite on three PVCs: database, certs (signing
+  and encryption keys), secrets.
+- **Signing keys** are generated once per install onto the certs PVC.
+  They survive pod and `serendipd` restarts, so a token issued before a
+  restart still verifies.
+- **Issuer**: `http://identity.<SERENDIP_GATEWAY_HOST>:<gateway NodePort>`,
+  by default `http://identity.localhost:30080`; override with
+  `SERENDIP_IDENTITY_ISSUER`.
+  - It must equal what tokens carry, so changing it (including the
+    gateway NodePort) invalidates tokens issued under the old one.
+  - `serendipd` fetches keys through the Kubernetes Service proxy, so the
+    host doesn't need to resolve `*.localhost`. Browsers do.
+- **Exposed through the shared gateway**: only the login paths (`/oauth2`,
+  `/.well-known`, `/gate`, `/flow/execute`, `/flow/meta`,
+  `/design/resolve`). The admin console, the management APIs, MCP and
+  health are not routed.
+  - The foundations loop re-creates the route if it's deleted.
+
+### Logging in
+
+The OIDC client is `serendip`: public, authorization code + PKCE. Its only
+redirect URI is the fixed loopback `http://127.0.0.1:8250/callback`.
+ThunderID matches redirect URIs exactly and imports its client definition
+on first install only. Adding a redirect URI later (the UI will need one)
+goes through ThunderID's management API; spec 015's plan.md records how.
+
+The bootstrap administrator:
+- The username is `admin`. The password is in the Kubernetes Secret
+  `serendip-identity/serendip-identity-admin`, key `password`: readable by
+  a cluster admin, never logged, never in the API. That's the same custody
+  tier as OpenBao's init file.
+- The Secret is created once, on a fresh install. If it's deleted later,
+  it is **not** recreated: a new random password wouldn't be the stored
+  admin's. `serendipd` logs that instead.
+- Add more people in ThunderID's own console for now. There's no
+  Serendip-level user management yet.
+
+### Limits
+
+- **No authorization.** Anyone who logs in has the same full API access as
+  an API key. There's no RBAC or policy engine yet.
+- **Plain HTTP.** Fine for a browser on `localhost`; anywhere else needs
+  TLS first (a later spec). Browsers won't do OIDC over plain HTTP on other
+  hosts anyway.
+- **No revocation before expiry.** Tokens are verified offline, so a
+  token stays valid until it expires (1 h by default), even after logout.
+- **The audit actor is the username.** The stable `sub` isn't recorded,
+  so a renamed or reused username is ambiguous in old audit rows. Names
+  are cleaned of control characters and capped at 128 characters.
+- **ThunderID's RSA signing certificate is valid for 365 days.** What
+  happens at expiry is untested upstream; it's a follow-up.
+
 ## Open questions
 
-- None outstanding. Thunder-as-default is now covered by ADR 0006, which
-  notes Thunder (renamed ThunderID, repo moved to `asgardeo/thunder`) hit
-  v1.0.0 same-day as the ADR and documents explicit fallback triggers to
-  Keycloak rather than treating the default as permanent by inertia.
+- None outstanding. Thunder-as-default is covered by ADR 0006, which
+  documents explicit fallback triggers to Keycloak rather than treating the
+  default as permanent by inertia. Its first re-check (2026-10-17) kept the
+  default. The project is now ThunderID at `github.com/thunder-id/thunderid`
+  (it was `asgardeo/thunder` at 1.0.0).

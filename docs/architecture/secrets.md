@@ -379,9 +379,9 @@ spec 009's own Scope-OUT:
   multiple versions server-side regardless; this capability only ever
   reads/writes the latest version.
 - **A policy engine gating who may read/write which secret** —
-  `core/policy` doesn't exist yet; `ActorMiddleware`'s existing
-  (intentionally weak) actor resolution is the only access control,
-  same as every other resource kind today.
+  `core/policy` doesn't exist yet. Authentication (`AuthMiddleware`: API
+  keys, or an OIDC login since spec 015) is the only access control, the
+  same as for every other resource kind today.
 - **Kubernetes auth method / workload-identity integration** —
   relevant to a future Identity/Thunder story.
 - **PKI secrets engine, dynamic database credentials, or any OpenBao

@@ -36,7 +36,7 @@ escape hatch").
 
 | Capability | Required | Default provider | Alternative / optional providers |
 |---|---|---|---|
-| Identity | Yes | Thunder (ADR 0006) | Keycloak, external OIDC/Entra ID |
+| Identity | Yes | ThunderID (ADR 0006; `identity.md`, built in spec 015) | Keycloak, external OIDC/Entra ID (the OIDC verifier is provider-neutral; no external-oidc registration yet) |
 | Secrets & PKI | Yes | OpenBao | External Secrets Operator + external vault |
 | Certificates | Yes | cert-manager | — |
 | Networking (CNI) | Yes | Cilium | — |

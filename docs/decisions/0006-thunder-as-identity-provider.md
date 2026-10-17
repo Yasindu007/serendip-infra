@@ -72,3 +72,39 @@ explicit fallback triggers rather than being treated as settled-forever:
 - This ADR should be revisited explicitly once Thunder has a few months of
   post-1.0 field history, rather than left to silently age into
   "permanent default by inertia."
+
+## Re-check 2026-10-17 (spec 015)
+
+The first scheduled re-check, two months after 1.0.0, done before deploying
+ThunderID in spec 015. Evidence comes from oss-researcher on 2026-10-17,
+plus a real install (spec 015 T001; `specs/015-identity-foundation/plan.md`
+"Spike findings").
+
+**Where it lives now:**
+- **Repo moved again**: `github.com/thunder-id/thunderid` (Apache-2.0).
+  `asgardeo/thunder` is the old home.
+- **Pinned for Serendip**: chart `oci://ghcr.io/thunder-id/helm-charts/thunderid`
+  **1.0.1**, image `ghcr.io/thunder-id/thunderid:1.0.1`
+  (`providers/identity/thunderid/VERSIONS.md`).
+
+**Verdict per fallback trigger:**
+
+| Trigger | Verdict |
+|---|---|
+| No security patch or release activity within 2–3 months of 1.0.0 | **Not fired, watch it.** v1.0.1 shipped 2026-08-25: bug fixes, including a JWKS kid/alg mismatch fix and backported OAuth fixes. `main` is very active (daily commits on 2026-10-16, including dependency and base-image bumps). But **no release tag has landed since 2026-08-25**. If none lands by about **2026-11-15**, the end of the window, re-evaluate. |
+| A repeated pattern of breaking changes post-1.0 | **Not fired.** One point release, not breaking. (Heavy churn before 1.0 is noted.) |
+| The OpenWallet Foundation transfer stalling the repo | **Not fired.** The repo is active under its own org, with a technical charter dated 2026-06-23 at the root. The OWF transfer itself is **unconfirmed** from foundation records; only announcements were found. |
+
+**Decision: unchanged.** ThunderID stays the default and is deployed by spec
+015. Keycloak remains the fallback under the same triggers, which this
+re-check leaves as they were. The next re-check is due when the
+release-tag window closes (about 2026-11-15), or at the next ThunderID
+release, whichever comes first.
+
+**Footprint:**
+- The T001 spike measured about **11.5 MiB** idle on an unthrottled kind
+  node. The simulated-T470 figure is in
+  `profiles/edge-1/bench/002-edge1-footprint.md` (spec 015 T008).
+- Both are simulations. This ADR's own rule still applies: no
+  reference-hardware number exists yet, and Keycloak wasn't measured, so
+  "lighter than Keycloak" is **not** claimed.
