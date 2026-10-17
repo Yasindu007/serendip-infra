@@ -75,6 +75,11 @@ and the foundations loop re-ensuring the route and Secret.
    - Why not the chart's generated Secret: chart-rendered random values
      can change on `helm upgrade` while setup doesn't re-run, leaving a
      Secret that no longer matches.
+   - Spike note: the chart's own generated Secret reuses an existing
+     password on re-render (a Helm `lookup`), so the rotation worry above
+     is overcautious for 1.0.1. The decision stands anyway: a Secret
+     Serendip owns doesn't depend on that chart detail, and it's simpler to
+     document.
    - Same custody tier as OpenBao's init file (spec 008): readable by a
      cluster admin (`kubectl get secret`), never logged, never in the API.
    - No forced password change on first login: ThunderID's support for it
@@ -82,13 +87,19 @@ and the foundations loop re-ensuring the route and Secret.
      follow-up.
 
 4. **The OIDC client is declared, with a fixed client ID.**
-   - `70-serendip-client.yaml` declares an application `serendip`
-     (clientId `serendip`, OU handle `default`, auth flow `default-flow`):
+   - `70-serendip-client.yaml` declares an application `Serendip` with a
+     fixed application ID `01900000-0000-7000-8000-0000000005e1`, type
+     `browser`, `ouId` of the default OU
+     (`01900000-0000-7000-8000-000000000001`), `authFlowId` of
+     `default-flow` (`01900000-0000-7000-8000-000000000061`), and
+     registration off. Its oauth2 config has clientId `serendip`, a
      public client, `pkceRequired: true`, `tokenEndpointAuthMethod: none`,
-     grants `authorization_code` + `refresh_token`, access-token user
-     attributes including `username` and `email`.
-   - Field nesting is copied from the shipped `Console` app in
-     `01-default-resources.yaml` (spike).
+     and grants `authorization_code` + `refresh_token`. Access-token claims
+     come from `token.accessToken.userConfig.attributes`: `username`,
+     `email`, `name`.
+   - **Confirmed by the T001 spike**: this exact file, copied from the
+     shipped `Console` app's shape, was imported, and a login against it
+     worked.
    - Because the ID is fixed, `serendipd` stores nothing to recognise its
      client: issuer (config) plus `serendip` is the whole identity. That
      answers spec.md's "where does the client ID live".
@@ -96,9 +107,13 @@ and the foundations loop re-ensuring the route and Secret.
      bootstrap files are only imported on first install. So this spec
      registers a fixed loopback `http://127.0.0.1:8250/callback`, for the
      verification flow now and a future CLI later.
-   - The UI spec adds its own redirect URI. How (management API with a
-     system token, or re-import) is a T001 spike question, recorded for
-     that spec, not built here.
+   - The UI spec adds its own redirect URI. The T001 spike found a working
+     route: an admin token for the built-in `CONSOLE` client, with scope
+     `system` and the RFC 8707 `resource` parameter
+     `https://localhost:8090/mcp` (the System resource server's
+     identifier), can call the management API
+     (`GET /applications` returned both apps). That's recorded for the UI
+     spec, not built here.
 
 5. **Issuer URL**:
    - Default `http://identity.<SERENDIP_GATEWAY_HOST>:<gateway NodePort>`,
@@ -116,11 +131,15 @@ and the foundations loop re-ensuring the route and Secret.
    - It's attached to the shared gateway's `GatewayEndpoint`, hostname
      `identity.<host>`, backend `thunderid-service:8090`.
    - `PathPrefix` rules for **only** `/oauth2`, `/.well-known`, `/gate`,
-     `/flow/execute` and `/auth`, the login-facing set.
+     `/flow/execute`, `/flow/meta` and `/design/resolve`, the login-facing
+     set.
+   - **Amended by the T001 spike**: `/auth` dropped. The login page never
+     calls it, and the scripted flow didn't need it. `/flow/meta` and
+     `/design/resolve` added: the login page fetches app metadata and
+     branding from them, and both are unauthenticated.
    - `/console`, `/mcp`, `/health` and every management API are **not**
-     routed (spec scope).
-   - Whether `/auth` is needed for the default password flow is a spike
-     question; drop it if not.
+     routed (spec scope). The spike confirmed `/console`, `/applications`,
+     `/users`, `/health/readiness` and `/` return 404 through the gateway.
 
 7. **The bearer is the access token; audience `serendip`.** ThunderID access
    tokens are JWTs (RS256 by default; ES256/EdDSA possible) with `iss`,
@@ -133,9 +152,12 @@ and the foundations loop re-ensuring the route and Secret.
      HMAC, and unknown algs are rejected.
 
    ID tokens are not accepted: they're for the client, and their audience
-   is the same client ID, so audience alone can't tell them apart. They
-   carry no `scope`/`client_id`, and the verifier requires `client_id`
-   (spike: confirm present in access tokens).
+   is the same client ID, so audience alone can't tell them apart. The
+   verifier requires `client_id`. **Confirmed by the T001 spike**: the
+   access token carries `client_id: serendip` and `typ: at+jwt`, and the ID
+   token has neither (`typ: JWT`). `typ` isn't checked, because not every
+   OIDC provider sets `at+jwt` (RFC 9068 is optional), and this stays
+   provider-neutral.
 
 8. **Audit actor: `person:<username>`**:
    - `username` comes from the token's user attributes, falling back to
@@ -257,18 +279,12 @@ Changed:
 
 ## Risks
 
-- **Unconfirmed upstream details** (bootstrap app nesting, `client_id` and
-  `username` in access tokens, `sub` format, DB mount path, `/auth`
-  necessity, scripted login flow). Mitigation: T001 spike on a real
-  install before T003–T005 depend on them. If a detail differs, plan.md is
-  amended there, not silently.
-- **Scripted login for acceptance 3.** The login UI (`/gate`) is an SPA
-  driving `POST /flow/execute`. Verification needs a non-browser driver:
-  authorize → read `executionId` → POST the username/password step → follow
-  the redirect to the loopback → exchange the code with the PKCE verifier.
-  If the flow API proves impractical to script, the fallback is a real
-  browser login (the user, or a browser tool) with the code captured at the
-  loopback. Either way the token is real.
+- ~~**Unconfirmed upstream details**~~: settled by the T001 spike (see
+  "Spike findings"); decisions 3, 4, 6 and 7 amended in place.
+- **Scripted login for acceptance 3**: settled, it works (Spike finding
+  4). It does depend on ThunderID's flow API, which is not a standard. A
+  future ThunderID release could change it, which would break only the
+  verification script, not Serendip.
 - **Footprint.** ThunderID publishes no idle RSS; the chart's 100Mi limit
   hints it's small, but four SQLite DBs with `max_open_conns: 500` are
   unknown. T008 measures; if it threatens the 16 GB verdict, that's
@@ -298,3 +314,68 @@ decisions above:
   offline until expiry (1 h default). Documented.
 - No refresh-token handling on the server side (that's a client concern).
 - No Helm-release repair in the foundations loop.
+
+## Spike findings (T001, 2026-10-17)
+
+Fresh kind cluster (`kindest/node:v1.34.0`); `serendipd` set up the stack
+(gateway, platform); ThunderID chart 1.0.1 (`appVersion` 1.0.1, chart
+digest `sha256:f54599dc…`) installed by hand with this plan's values.
+
+1. **Install**: `helm upgrade --install … --wait` finished in **44 s** (image
+   cached). The image `ghcr.io/thunder-id/thunderid:1.0.1` starts. Three PVCs
+   are Bound: database 1Gi, certs 16Mi, secrets 16Mi. Mount paths:
+   - `/opt/thunderid/database`;
+   - `/opt/thunderid/config/certs`;
+   - `/opt/thunderid/config/secrets`.
+
+   The setup job succeeds and deletes itself.
+2. **Client**: authorize with `client_id=serendip` redirected to
+   `/gate/signin?applicationId=01900000-0000-7000-8000-0000000005e1&…`, so
+   the bootstrap file was imported with our fixed IDs.
+3. **Issuer and keys**: discovery through the gateway reports
+   `"issuer":"http://identity.localhost:30080"` exactly. Every endpoint
+   comes from `publicUrl`. The JWKS through the Kubernetes Service proxy
+   has two keys: EC P-256 (`ES256`) and RSA (`RS256`).
+   `/health/readiness` through the proxy returns `{"status":"UP",…}`.
+4. **Scripted login works** (scratch `oidc-login.sh`, reused by T007):
+   1. `GET /oauth2/authorize` → 302 to `/gate/signin?…&authId=…&executionId=…`;
+   2. `POST /flow/execute {executionId}` → a `VIEW` step with `username`
+      and `password` inputs, action `action_001`, and a `challengeToken`;
+   3. `POST /flow/execute {executionId, challengeToken, action, inputs}` →
+      `COMPLETE` with an `assertion` JWT;
+   4. `POST /oauth2/auth/callback {assertion, authId}` →
+      `{redirect_uri: <loopback>?code=…}`;
+   5. `POST /oauth2/token` (code + PKCE verifier) → `access_token`,
+      `id_token`, `refresh_token`, `expires_in: 3600`.
+5. **Tokens**:
+   - Access token: header `{alg: RS256, kid: <RSA kid>, typ: at+jwt}`.
+     Claims `iss`, `aud: "serendip"` (a string), `client_id: "serendip"`,
+     `sub: "01900000-0000-7000-8000-000000000030"` (the user's UUID,
+     opaque), `username: "admin"`, `email`, `name`, `scope`, `exp`/`iat`/
+     `nbf`, `jti`, plus `aci`/`tfid`/`grant_type`.
+   - ID token: `typ: JWT`, the same `aud`, and **no** `client_id` or
+     `scope`.
+6. **Routes the flow needs**:
+   - The scripted flow used `/oauth2/*` and `/flow/execute`.
+   - The login page's JavaScript also calls `/flow/meta` and
+     `/design/resolve` (both unauthenticated through the Service proxy),
+     and `/users/me` for account pages (authenticated; not needed for
+     login).
+   - Nothing calls `/auth`.
+   - Through the gateway, `/console`, `/applications`, `/users`,
+     `/health/readiness` and `/` return 404. Decision 6 amended.
+7. **Keys survive a pod restart**: the JWKS is byte-identical before and
+   after `kubectl delete pod`, and the pod was Ready again in 4 s.
+8. **Re-run is safe**: `helm upgrade --install` with a changed memory limit
+   gave revision 2. The new limit applied, no Job ran (the Job event count
+   was unchanged), and login with the same password and client still
+   worked.
+9. **Rough idle memory**: **11.5 MiB** working set and ~0.2 mcores, on an
+   unthrottled node (OpenBao 18.7 MiB, kgateway 37 MiB on the same node).
+   It's not the T008 measurement. Decision 1's 64Mi request / 256Mi limit
+   is generous; kept until T008 measures under load.
+10. **Redirect URIs after install** (for the UI spec): see decision 4. The
+    `CONSOLE` client with `scope=system` and
+    `resource=https://localhost:8090/mcp` gets an admin token the
+    management API accepts. Without `resource`, authorize fails with
+    `invalid_target`.

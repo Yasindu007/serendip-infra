@@ -141,7 +141,7 @@ except plan.md amendments.
     passwordRef, the bootstrap file content;
   - Helm args via a fake `helm.Runner`;
   - a fake API server for: the Secret not overwritten when present; the
-    HTTPRoute body with exactly the five prefixes, the hostname, the
+    HTTPRoute body with exactly the six prefixes (plan.md decision 6, as amended by T001), the hostname, the
     parentRef from `GatewayEndpoint`, and no `/` rule; `CheckReady` on
     200/503;
   - issuer derivation cases.
