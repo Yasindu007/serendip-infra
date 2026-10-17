@@ -18,6 +18,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/graph"
+	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -84,11 +85,15 @@ func run() error {
 		return fmt.Errorf("kubernetes: %w", err)
 	}
 	var secretReconciler *reconcile.SecretReconciler
+	// authn stays a nil interface (not a typed nil) without a cluster, so
+	// the API falls back to API keys alone.
+	var authn identity.Authenticator
 	if kube != nil {
 		secretReconciler = kube.secretReconciler
+		authn = kube.authn
 	}
 
-	srv := api.NewServer(db, bus, apiKeys, secretReconciler, registry)
+	srv := api.NewServer(db, bus, apiKeys, authn, secretReconciler, registry)
 	srv.Addr = addr
 
 	errCh := make(chan error, 1)
@@ -124,7 +129,7 @@ func run() error {
 	if kube != nil {
 		// Setup goroutines touch only the cluster API and the registry,
 		// never the store, so shutdown doesn't wait for them.
-		kube.plan.start(ctx, newTracker(registry, setupBackoff, capStorage, capSecrets, capGateway, capAppPlatform))
+		kube.plan.start(ctx, newTracker(registry, setupBackoff, capStorage, capSecrets, capGateway, capAppPlatform, capIdentity))
 	} else {
 		log.Print("serendipd: all capabilities ready")
 	}
@@ -182,8 +187,8 @@ func envOr(key, fallback string) string {
 }
 
 // parseAPIKeys parses SERENDIP_API_KEYS, format "token1:actor1,token2:actor2"
-// (see api.ActorMiddleware's doc comment -- this whole mechanism is
-// explicitly temporary until a real identity provider exists). Malformed
+// (see api.AuthMiddleware's doc comment; logged-in people come from the
+// identity provider instead). Malformed
 // entries are skipped with a warning rather than failing startup; an
 // empty/unset env var means every request gets 401, which is a safe
 // default, not a silent open door.
@@ -196,6 +201,12 @@ func parseAPIKeys(raw string) map[string]string {
 		token, actor, ok := strings.Cut(pair, ":")
 		if !ok || token == "" || actor == "" {
 			log.Printf("serendipd: skipping malformed SERENDIP_API_KEYS entry %q", pair)
+			continue
+		}
+		// "person:" actors name people the identity provider authenticated
+		// (core/identity.Actor); an API key may not claim to be one.
+		if strings.HasPrefix(actor, identity.ActorPrefix) {
+			log.Printf("serendipd: skipping SERENDIP_API_KEYS entry for actor %q: the %q prefix is reserved for logged-in people", actor, identity.ActorPrefix)
 			continue
 		}
 		keys[token] = actor

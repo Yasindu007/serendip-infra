@@ -19,6 +19,7 @@ const (
 	capSecrets     = "secrets"
 	capGateway     = "gateway"
 	capAppPlatform = "application-platform"
+	capIdentity    = "identity"
 )
 
 // Provider-neutral readiness reasons.
@@ -116,18 +117,24 @@ func (t *tracker) ready(name string) {
 // setupPlan is the background work for the Kubernetes-facing capabilities:
 // the setup step of each, plus the foundations re-ensure run on an interval
 // once the gateway and application platform are up. Storage, secrets, and
-// the gateway set up independently; the application platform needs the
-// gateway's endpoint, so it starts only after the gateway succeeds.
+// the gateway set up independently; the application platform and identity
+// both need the gateway's endpoint, so they start only after the gateway
+// succeeds, in parallel with each other (specs/015-identity-foundation
+// plan.md decision 12). identity and identityFoundations are optional (nil
+// skips them).
 type setupPlan struct {
 	storage  func(context.Context) error
 	secrets  func(context.Context) error
 	gateway  func(context.Context) (reconcile.GatewayEndpoint, error)
 	platform func(context.Context, reconcile.GatewayEndpoint) error
+	identity func(context.Context, reconcile.GatewayEndpoint) error
 
-	// gatewayFoundations and platformFoundations re-ensure what setup
-	// ensured once (plan.md decision 2); each returns the pass's error.
+	// gatewayFoundations, platformFoundations and identityFoundations
+	// re-ensure what setup ensured once (spec 014 plan.md decision 2); each
+	// returns the pass's error.
 	gatewayFoundations  func(context.Context) error
 	platformFoundations func(context.Context, reconcile.GatewayEndpoint) error
+	identityFoundations func(context.Context, reconcile.GatewayEndpoint) error
 	reensureEvery       time.Duration
 }
 
@@ -138,6 +145,9 @@ func (p setupPlan) start(ctx context.Context, t *tracker) {
 	go t.run(ctx, capSecrets, p.secrets)
 	go func() {
 		t.waiting(capAppPlatform, "waiting for the gateway capability")
+		if p.identity != nil {
+			t.waiting(capIdentity, "waiting for the gateway capability")
+		}
 		var ep reconcile.GatewayEndpoint
 		if !t.run(ctx, capGateway, func(ctx context.Context) (err error) {
 			ep, err = p.gateway(ctx)
@@ -146,20 +156,34 @@ func (p setupPlan) start(ctx context.Context, t *tracker) {
 			return
 		}
 		// The gateway is repaired from here on, even while the platform's
-		// setup is still retrying.
-		var platformUp atomic.Bool
-		go p.foundations(ctx, t, ep, &platformUp)
+		// and identity's setup are still retrying.
+		var up dependentsUp
+		go p.foundations(ctx, t, ep, &up)
+		if p.identity != nil {
+			go func() {
+				if t.run(ctx, capIdentity, func(ctx context.Context) error { return p.identity(ctx, ep) }) {
+					up.identity.Store(true)
+				}
+			}()
+		}
 		if t.run(ctx, capAppPlatform, func(ctx context.Context) error { return p.platform(ctx, ep) }) {
-			platformUp.Store(true)
+			up.platform.Store(true)
 		}
 	}()
 }
 
+// dependentsUp records which gateway-dependent capabilities have finished
+// setup, so the foundations loop re-ensures only those.
+type dependentsUp struct {
+	platform, identity atomic.Bool
+}
+
 // foundations re-ensures the gateway foundations every reensureEvery until
-// ctx ends, and the application platform's too once platformUp is set. A
-// failed pass is logged and reported as not ready, never fatal; the next
-// pass retries. Gateway first, since the platform's routes attach to it.
-func (p setupPlan) foundations(ctx context.Context, t *tracker, ep reconcile.GatewayEndpoint, platformUp *atomic.Bool) {
+// ctx ends, and the application platform's and identity's too once each has
+// finished setup. A failed pass is logged and reported as not ready, never
+// fatal; the next pass retries. Gateway first, since the other
+// capabilities' routes attach to it.
+func (p setupPlan) foundations(ctx context.Context, t *tracker, ep reconcile.GatewayEndpoint, up *dependentsUp) {
 	ticker := time.NewTicker(p.reensureEvery)
 	defer ticker.Stop()
 	for {
@@ -173,13 +197,19 @@ func (p setupPlan) foundations(ctx context.Context, t *tracker, ep reconcile.Gat
 			return // shutting down: not a failed repair
 		}
 		t.repaired(capGateway, err)
-		if !platformUp.Load() {
-			continue
+		if up.platform.Load() {
+			err = p.platformFoundations(ctx, ep)
+			if ctx.Err() != nil {
+				return
+			}
+			t.repaired(capAppPlatform, err)
 		}
-		err = p.platformFoundations(ctx, ep)
-		if ctx.Err() != nil {
-			return
+		if up.identity.Load() && p.identityFoundations != nil {
+			err = p.identityFoundations(ctx, ep)
+			if ctx.Err() != nil {
+				return
+			}
+			t.repaired(capIdentity, err)
 		}
-		t.repaired(capAppPlatform, err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 )
@@ -28,6 +29,24 @@ func (l *lazy[T]) get() (T, error) {
 		return zero, reconcile.ErrProviderNotReady
 	}
 	return *p, nil
+}
+
+// lazyAuthenticator answers reconcile.ErrProviderNotReady until identity
+// setup has handed it a verifier, which the API reports as 503 for bearer
+// tokens it can't check yet (specs/015-identity-foundation plan.md
+// decision 11). API keys never reach it.
+type lazyAuthenticator struct {
+	lazy[identity.Authenticator]
+}
+
+var _ identity.Authenticator = (*lazyAuthenticator)(nil)
+
+func (l *lazyAuthenticator) Authenticate(ctx context.Context, token string) (identity.Principal, error) {
+	a, err := l.get()
+	if err != nil {
+		return identity.Principal{}, err
+	}
+	return a.Authenticate(ctx, token)
 }
 
 type lazyStorage struct {

@@ -7,6 +7,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/graph"
+	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/registry"
@@ -26,11 +27,12 @@ import (
 // (RegistryHandler -- specs/002-http-api/spec.md Scope-IN item 2, closed
 // as a T019 final-review gap fix; no task on paper ever built it and the
 // drop went undisclosed until contract-guardian's holistic pass caught
-// it), the middleware chain (request ID -> actor -> mux,
+// it), the middleware chain (request ID -> auth -> mux,
 // specs/002-http-api/plan.md), and a GET /healthz that needs no token.
 //
-// apiKeys is the static token-to-actor map for ActorMiddleware -- see its
-// doc comment for why this is intentionally temporary.
+// apiKeys and authn are AuthMiddleware's two ways to resolve a caller: the
+// static token-to-actor map, and the Identity capability's Authenticator
+// (nil when no identity provider is wired) -- see its doc comment.
 //
 // secretReconciler is nil when SERENDIP_KUBECONFIG is unset
 // (cmd/serendipd's wireKubernetes never ran) -- in that case the
@@ -45,7 +47,7 @@ import (
 // providers is the live capability registry whose readiness GET
 // /v1/readiness reports (specs/014-reconciliation-hardening plan.md
 // decision 4); nil reports no capabilities.
-func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, secretReconciler *reconcile.SecretReconciler, providers *provider.Registry) *http.Server {
+func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn identity.Authenticator, secretReconciler *reconcile.SecretReconciler, providers *provider.Registry) *http.Server {
 	apiMux := http.NewServeMux()
 
 	// 14 explicit instantiations, deliberately not abstracted further
@@ -96,10 +98,10 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, secretRecon
 	topMux := http.NewServeMux()
 	topMux.HandleFunc("GET /healthz", healthzHandler)
 	// Everything under /v1/ requires a resolved actor; /healthz doesn't
-	// go through ActorMiddleware at all -- it's mounted directly on
+	// go through AuthMiddleware at all -- it's mounted directly on
 	// topMux, not apiMux, so there's no bypass logic to get wrong inside
 	// a shared handler.
-	topMux.Handle("/v1/", ActorMiddleware(apiKeys)(apiMux))
+	topMux.Handle("/v1/", AuthMiddleware(apiKeys, authn)(apiMux))
 	// Same reasoning as apiMux's catch-all, for paths outside /v1/ and
 	// /healthz entirely (e.g. a bare "/" or a typo'd top-level path).
 	topMux.HandleFunc("/", notFoundHandler)

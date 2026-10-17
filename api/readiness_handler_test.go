@@ -12,7 +12,7 @@ import (
 )
 
 func TestReadiness_RequiresAuth(t *testing.T) {
-	srv := api.NewServer(newTestDB(t), event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil, provider.NewRegistry())
+	srv := api.NewServer(newTestDB(t), event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil, nil, provider.NewRegistry())
 	w := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/readiness", nil))
 	if w.Code != http.StatusUnauthorized {
@@ -24,7 +24,7 @@ func TestReadiness_ReportsEachCapability(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.SetReadiness("storage", provider.Readiness{Ready: true, Reason: "Ready"})
 	reg.SetReadiness("secrets", provider.Readiness{Reason: "SetupFailed", Message: "not ready within 90s"})
-	srv := api.NewServer(newTestDB(t), event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil, reg)
+	srv := api.NewServer(newTestDB(t), event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil, nil, reg)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/readiness", nil)
@@ -52,7 +52,7 @@ func TestReadiness_ReportsEachCapability(t *testing.T) {
 }
 
 func TestReadiness_NilRegistryIsEmptyObject(t *testing.T) {
-	srv := api.NewServer(newTestDB(t), event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil, nil)
+	srv := api.NewServer(newTestDB(t), event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, nil, nil, nil)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/readiness", nil)
 	req.Header.Set("Authorization", "Bearer key-alice")

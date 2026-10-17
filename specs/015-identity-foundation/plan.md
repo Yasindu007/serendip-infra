@@ -71,6 +71,14 @@ and the foundations loop re-ensuring the route and Secret.
    - Created **if absent, never updated** (Create, not server-side apply).
      A rotated value would desync from the password the one-time setup job
      already stored.
+   - **Amended in T005**: created **only on a fresh install**, meaning the
+     chart's certs PVC (a pre-install hook that outlives the release)
+     doesn't exist yet. If the Secret goes missing on a cluster that
+     already holds an install, it is **not** recreated. A fresh random
+     password would not be the admin's, so the Secret would lie. Instead
+     it's logged, and login keeps working for anyone who knows the
+     password. For the same reason the foundations loop does not
+     re-ensure the Secret (decision 12).
    - Referenced by `setup.admin.passwordRef`; username `admin`.
    - Why not the chart's generated Secret: chart-rendered random values
      can change on `helm upgrade` while setup doesn't re-run, leaving a
@@ -231,8 +239,9 @@ and the foundations loop re-ensuring the route and Secret.
       wait for `/health/readiness` via the Service proxy → apply the
       HTTPRoute → fetch JWKS once (proves keys are reachable) → hand the
       verifier to `lazyAuthenticator`.
-    - The foundations loop re-ensures the HTTPRoute and the admin Secret's
-      existence each pass (`RepairFailed` on error), not Helm. That keeps
+    - The foundations loop re-ensures the HTTPRoute each pass
+      (`RepairFailed` on error), not Helm and not the admin Secret
+      (amended in T005; see decision 3). That keeps
       spec 014's "a no-drift pass is reads only" property.
     - A deleted Helm release is not repaired in-loop; it's repaired on the
       next start, documented like OpenChoreo's release.
@@ -262,7 +271,7 @@ and the foundations loop re-ensuring the route and Secret.
 
 New:
 - `core/identity/{doc.go,identity.go,identity_test.go}`
-- `providers/identity/oidc/{doc.go,verifier.go,jwk.go,jws.go,verifier_test.go,jwk_test.go}`
+- `providers/identity/oidc/{doc.go,verifier.go,jwk.go,jws.go,verifier_test.go}` (JWK/JWS parsing is covered through `verifier_test.go`)
 - `providers/identity/thunderid/{doc.go,deploy.go,values.go,route.go,ready.go,*_test.go}`
 - `docs/architecture/identity.md` section "What's built (spec 015)"
 

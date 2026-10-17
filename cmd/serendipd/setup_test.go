@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -262,5 +263,107 @@ func TestSetupPlan_GatewayRepairedWhilePlatformSetupRetries(t *testing.T) {
 	}
 	if rd := reg.Readiness()[capAppPlatform]; rd.Ready || rd.Reason != readinessSetupFailed {
 		t.Errorf("platform readiness = %+v, want SetupFailed", rd)
+	}
+}
+
+type fakeAuthenticator struct{}
+
+func (fakeAuthenticator) Authenticate(context.Context, string) (identity.Principal, error) {
+	return identity.Principal{Subject: "s", Name: "admin"}, nil
+}
+
+func TestLazyAuthenticator_NotReadyUntilSet(t *testing.T) {
+	l := &lazyAuthenticator{}
+	if _, err := l.Authenticate(context.Background(), "tok"); !errors.Is(err, reconcile.ErrProviderNotReady) {
+		t.Fatalf("before set = %v, want ErrProviderNotReady", err)
+	}
+	l.set(fakeAuthenticator{})
+	if p, err := l.Authenticate(context.Background(), "tok"); err != nil || p.Name != "admin" {
+		t.Errorf("after set = (%+v, %v), want delegated", p, err)
+	}
+}
+
+// Identity waits for the gateway, then sets up alongside the application
+// platform (neither blocks the other); a failed identity setup is retried
+// and reported SetupFailed; once up, the foundations loop re-ensures it and
+// reports RepairFailed on a bad pass.
+func TestSetupPlan_IdentityAfterGatewayAlongsidePlatform(t *testing.T) {
+	reg := provider.NewRegistry()
+	tr := newTracker(reg, backoff{initial: 5 * time.Millisecond, max: 5 * time.Millisecond},
+		capGateway, capAppPlatform, capIdentity)
+	ep := reconcile.GatewayEndpoint{Name: "gw", Namespace: "ns", Host: "localhost", Port: 30080}
+
+	gatewayGate := make(chan struct{})
+	platformGate := make(chan struct{}) // holds platform setup until identity is up
+	var identityAttempts, identityRepairs atomic.Int32
+	var identityEP atomic.Value
+	failIdentityRepair := atomic.Bool{}
+	failIdentityRepair.Store(true)
+
+	plan := setupPlan{
+		storage: func(context.Context) error { return nil },
+		secrets: func(context.Context) error { return nil },
+		gateway: func(ctx context.Context) (reconcile.GatewayEndpoint, error) {
+			<-gatewayGate
+			return ep, nil
+		},
+		platform: func(ctx context.Context, _ reconcile.GatewayEndpoint) error {
+			select {
+			case <-platformGate:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+		identity: func(_ context.Context, got reconcile.GatewayEndpoint) error {
+			identityEP.Store(got)
+			if identityAttempts.Add(1) < 3 {
+				return errors.New("chart not installable yet")
+			}
+			return nil
+		},
+		gatewayFoundations:  func(context.Context) error { return nil },
+		platformFoundations: func(context.Context, reconcile.GatewayEndpoint) error { return nil },
+		identityFoundations: func(context.Context, reconcile.GatewayEndpoint) error {
+			identityRepairs.Add(1)
+			if failIdentityRepair.Load() {
+				return errors.New("route deleted and could not be recreated")
+			}
+			return nil
+		},
+		reensureEvery: 10 * time.Millisecond,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	plan.start(ctx, tr)
+
+	time.Sleep(20 * time.Millisecond)
+	if n := identityAttempts.Load(); n != 0 {
+		t.Fatalf("identity setup ran %d times before the gateway was up", n)
+	}
+	if rd := reg.Readiness()[capIdentity]; rd.Ready || rd.Reason != readinessSettingUp {
+		t.Errorf("identity readiness before gateway = %+v, want SettingUp", rd)
+	}
+	close(gatewayGate)
+
+	// Identity becomes ready while the platform's setup is still blocked.
+	waitFor(t, func() bool { return identityAttempts.Load() >= 3 })
+	waitFor(t, func() bool {
+		return reg.Readiness()[capIdentity].Ready || reg.Readiness()[capIdentity].Reason == readinessRepairFailed
+	})
+	if got := identityEP.Load(); got != ep {
+		t.Errorf("identity endpoint = %+v, want %+v", got, ep)
+	}
+	if reg.Readiness()[capAppPlatform].Ready {
+		t.Error("platform ready although its setup is still blocked")
+	}
+
+	waitFor(t, func() bool { return reg.Readiness()[capIdentity].Reason == readinessRepairFailed })
+	failIdentityRepair.Store(false)
+	waitFor(t, func() bool { return reg.Readiness()[capIdentity].Ready })
+	close(platformGate)
+	waitFor(t, func() bool { return reg.Readiness()[capAppPlatform].Ready })
+	if identityRepairs.Load() < 2 {
+		t.Errorf("identity foundations passes = %d, want repeated passes", identityRepairs.Load())
 	}
 }

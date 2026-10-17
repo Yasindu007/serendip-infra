@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParseNodePort(t *testing.T) {
 	tests := []struct {
@@ -21,6 +24,24 @@ func TestParseNodePort(t *testing.T) {
 		got, err := parseNodePort(tt.raw)
 		if (err != nil) != tt.wantErr || got != tt.want {
 			t.Errorf("parseNodePort(%q) = (%d, %v), want (%d, err=%v)", tt.raw, got, err, tt.want, tt.wantErr)
+		}
+	}
+}
+
+func TestParseAPIKeys(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want map[string]string
+	}{
+		{"", map[string]string{}},
+		{"k1:alice,k2:bench", map[string]string{"k1": "alice", "k2": "bench"}},
+		{"k1:alice,bad,:x,k3:", map[string]string{"k1": "alice"}},
+		// An API key may not pose as a person the identity provider logged in.
+		{"k1:person:admin,k2:alice", map[string]string{"k2": "alice"}},
+	}
+	for _, tt := range tests {
+		if got := parseAPIKeys(tt.raw); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("parseAPIKeys(%q) = %v, want %v", tt.raw, got, tt.want)
 		}
 	}
 }

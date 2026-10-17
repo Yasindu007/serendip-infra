@@ -25,7 +25,7 @@ func newAcceptanceServer(t *testing.T) (http.Handler, *sql.DB, *event.InProcessB
 	t.Helper()
 	db := newTestDB(t)
 	bus := event.NewInProcessBus()
-	srv := api.NewServer(db, bus, map[string]string{"key-alice": "alice"}, nil, nil)
+	srv := api.NewServer(db, bus, map[string]string{"key-alice": "alice"}, nil, nil, nil)
 	return srv.Handler, db, bus
 }
 

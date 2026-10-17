@@ -3,13 +3,17 @@ package api_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/audit"
+	"github.com/serendip-infra/serendip-infra/core/identity"
+	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
@@ -86,59 +90,68 @@ func TestRequestIDFromContext_EmptyWhenNotSet(t *testing.T) {
 	}
 }
 
-func TestActorMiddleware_ValidToken_ResolvesActor(t *testing.T) {
-	apiKeys := map[string]string{"key-alice": "alice"}
-
-	var gotActor string
-	var nextCalled bool
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		nextCalled = true
-		gotActor = audit.ActorFrom(r.Context())
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := api.ActorMiddleware(apiKeys)(next)
-	req := httptest.NewRequest(http.MethodPost, "/v1/organizations", nil)
-	req.Header.Set("Authorization", "Bearer key-alice")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if !nextCalled {
-		t.Fatal("next handler was not called for a valid token")
-	}
-	if gotActor != "alice" {
-		t.Errorf("actor in context = %q, want %q", gotActor, "alice")
-	}
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
-	}
+// fakeAuthn is a scripted identity.Authenticator: tokens maps a credential
+// to its Principal; notReady makes every call answer "not ready yet".
+type fakeAuthn struct {
+	tokens   map[string]identity.Principal
+	notReady bool
+	calls    int
 }
 
-// TestActorMiddleware_RejectsWithoutReachingNext is spec.md's acceptance
-// criterion 3, literally: a rejected request must never reach the
-// handler chain that would call core/store -- proven here by asserting
-// next is never invoked (if it were, any core/store call inside it could
-// not happen either, since the whole point is the handler never runs).
-func TestActorMiddleware_RejectsWithoutReachingNext(t *testing.T) {
+func (f *fakeAuthn) Authenticate(_ context.Context, token string) (identity.Principal, error) {
+	f.calls++
+	if f.notReady {
+		return identity.Principal{}, reconcile.ErrProviderNotReady
+	}
+	if p, ok := f.tokens[token]; ok {
+		return p, nil
+	}
+	return identity.Principal{}, fmt.Errorf("%w: unknown test token", identity.ErrInvalidCredential)
+}
+
+// TestAuthMiddleware covers both ways in -- the static API keys and the
+// identity provider -- and every way out (specs/015-identity-foundation
+// plan.md decision 11). Rejected requests must never reach next: that's
+// specs/002-http-api/spec.md acceptance criterion 3, literally (if next
+// never runs, no core/store call inside it can happen either).
+func TestAuthMiddleware(t *testing.T) {
 	apiKeys := map[string]string{"key-alice": "alice"}
+	valid := map[string]identity.Principal{"jwt-admin": {Subject: "0190-0030", Name: "admin"}}
 
 	tests := []struct {
-		name   string
-		header string
+		name      string
+		header    string
+		authn     *fakeAuthn // nil: no identity provider wired
+		wantCode  int
+		wantActor string // checked when wantCode is 200
+		wantAuthn int    // expected Authenticate calls (-1: don't care)
 	}{
-		{"no Authorization header", ""},
-		{"malformed (no Bearer prefix)", "key-alice"},
-		{"unknown token", "Bearer key-does-not-exist"},
-		{"empty bearer token", "Bearer "},
+		{"API key", "Bearer key-alice", &fakeAuthn{tokens: valid}, http.StatusOK, "alice", 0},
+		{"API key, no identity provider", "Bearer key-alice", nil, http.StatusOK, "alice", -1},
+		{"valid identity token", "Bearer jwt-admin", &fakeAuthn{tokens: valid}, http.StatusOK, "person:admin", 1},
+		{"invalid identity token", "Bearer jwt-forged", &fakeAuthn{tokens: valid}, http.StatusUnauthorized, "", 1},
+		{"identity provider not ready", "Bearer jwt-admin", &fakeAuthn{tokens: valid, notReady: true}, http.StatusServiceUnavailable, "", 1},
+		{"API key while identity not ready", "Bearer key-alice", &fakeAuthn{notReady: true}, http.StatusOK, "alice", 0},
+		{"unknown token, no identity provider", "Bearer jwt-admin", nil, http.StatusUnauthorized, "", -1},
+		{"no Authorization header", "", &fakeAuthn{tokens: valid}, http.StatusUnauthorized, "", 0},
+		{"malformed (no Bearer prefix)", "key-alice", &fakeAuthn{tokens: valid}, http.StatusUnauthorized, "", 0},
+		{"empty bearer token", "Bearer ", &fakeAuthn{tokens: valid}, http.StatusUnauthorized, "", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var nextCalled bool
+			var gotActor string
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				nextCalled = true
+				gotActor = audit.ActorFrom(r.Context())
+				w.WriteHeader(http.StatusOK)
 			})
 
-			handler := api.ActorMiddleware(apiKeys)(next)
+			var authn identity.Authenticator
+			if tt.authn != nil {
+				authn = tt.authn
+			}
+			handler := api.AuthMiddleware(apiKeys, authn)(next)
 			req := httptest.NewRequest(http.MethodPost, "/v1/organizations", nil)
 			if tt.header != "" {
 				req.Header.Set("Authorization", tt.header)
@@ -146,14 +159,26 @@ func TestActorMiddleware_RejectsWithoutReachingNext(t *testing.T) {
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
 
-			if nextCalled {
-				t.Error("next handler was called for a rejected request, want it never reached")
+			if w.Code != tt.wantCode {
+				t.Fatalf("status = %d, want %d (body %s)", w.Code, tt.wantCode, w.Body.String())
 			}
-			if w.Code != http.StatusUnauthorized {
-				t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+			if tt.wantCode == http.StatusOK {
+				if !nextCalled || gotActor != tt.wantActor {
+					t.Errorf("next called = %v with actor %q, want called with %q", nextCalled, gotActor, tt.wantActor)
+				}
+			} else {
+				if nextCalled {
+					t.Error("next handler was called for a rejected request, want it never reached")
+				}
+				if ct := w.Header().Get("Content-Type"); ct != "application/problem+json" {
+					t.Errorf("Content-Type = %q, want application/problem+json", ct)
+				}
+				if strings.Contains(w.Body.String(), "unknown test token") {
+					t.Errorf("problem body leaks the verifier's reason: %s", w.Body.String())
+				}
 			}
-			if ct := w.Header().Get("Content-Type"); ct != "application/problem+json" {
-				t.Errorf("Content-Type = %q, want application/problem+json", ct)
+			if tt.wantAuthn >= 0 && tt.authn != nil && tt.authn.calls != tt.wantAuthn {
+				t.Errorf("Authenticate calls = %d, want %d", tt.authn.calls, tt.wantAuthn)
 			}
 		})
 	}

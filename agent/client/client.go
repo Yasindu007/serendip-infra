@@ -84,7 +84,7 @@ type NodeWire struct {
 
 // Client is a minimal net/http client for one Serendip control plane's
 // /v1/nodes routes (spec 002), authenticated via the same static bearer
-// token scheme api.ActorMiddleware already implements.
+// token scheme api.AuthMiddleware already implements.
 type Client struct {
 	baseURL string
 	token   string

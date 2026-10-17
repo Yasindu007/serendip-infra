@@ -66,6 +66,7 @@ func TestGroupFor(t *testing.T) {
 		"openchoreo-control-plane": GroupPlatformCtrl,
 		"openchoreo-data-plane":    GroupPlatformData,
 		"kgateway-system":          GroupGateway,
+		"serendip-identity":        GroupIdentity,
 		"dp-anything":              GroupWorkloads,
 		"default":                  "Other: default",
 	}

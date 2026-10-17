@@ -18,6 +18,8 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 	"github.com/serendip-infra/serendip-infra/providers/application/openchoreo"
 	"github.com/serendip-infra/serendip-infra/providers/gateway/kgateway"
+	"github.com/serendip-infra/serendip-infra/providers/identity/oidc"
+	"github.com/serendip-infra/serendip-infra/providers/identity/thunderid"
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 	"github.com/serendip-infra/serendip-infra/providers/secrets/openbao"
 	"github.com/serendip-infra/serendip-infra/providers/storage/localpath"
@@ -33,6 +35,7 @@ const defaultReensureInterval = 5 * time.Minute
 // providers up.
 type kubeWiring struct {
 	secretReconciler *reconcile.SecretReconciler
+	authn            *lazyAuthenticator
 	plan             setupPlan
 }
 
@@ -83,10 +86,22 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 	if err != nil {
 		return nil, fmt.Errorf("openchoreo: %w", err)
 	}
+	identityDeployer, err := thunderid.NewDeployer(client, kubeconfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("identity: %w", err)
+	}
+	// The issuer depends on the gateway's endpoint, known only once the
+	// gateway is up, but a malformed override is a config error: fail now.
+	issuerOverride := os.Getenv("SERENDIP_IDENTITY_ISSUER")
+	if issuerOverride != "" {
+		if _, err := thunderid.Issuer(reconcile.GatewayEndpoint{}, issuerOverride); err != nil {
+			return nil, fmt.Errorf("SERENDIP_IDENTITY_ISSUER: %w", err)
+		}
+	}
 	gateway := kgateway.NewProvider(client, envOr("SERENDIP_GATEWAY_HOST", "localhost"), nodePort, openchoreo.GatewayProxyLabels())
 	credentialsPath := envOr("SERENDIP_OPENBAO_CREDENTIALS_PATH", defaultOpenBaoCredentialsPath)
 
-	storage, secrets, platform := &lazyStorage{}, &lazySecrets{}, &lazyPlatform{}
+	storage, secrets, platform, authn := &lazyStorage{}, &lazySecrets{}, &lazyPlatform{}, &lazyAuthenticator{}
 	secretReconciler := registerKubernetesReconcilers(db, bus, engine, storage, secrets, platform)
 
 	plan := setupPlan{
@@ -142,6 +157,47 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 			log.Print("serendipd: kubernetes: application platform provider (openchoreo) active")
 			return nil
 		},
+		identity: func(ctx context.Context, ep reconcile.GatewayEndpoint) error {
+			issuer, err := thunderid.Issuer(ep, issuerOverride)
+			if err != nil {
+				return err
+			}
+			if err := identityDeployer.Ensure(ctx, issuer); err != nil {
+				return fmt.Errorf("deploy: %w", err)
+			}
+			if err := thunderid.CheckReady(ctx, client); err != nil {
+				return err
+			}
+			if err := thunderid.EnsureRoute(ctx, client, ep, issuer); err != nil {
+				return err
+			}
+			// Keys come through the Service proxy; the issuer check is still
+			// against the public issuer URL tokens carry (plan.md decision 9).
+			v, err := oidc.NewVerifier(oidc.Config{
+				Issuer:     issuer,
+				Audience:   thunderid.ClientID,
+				JWKSURL:    thunderid.JWKSProxyURL(client),
+				HTTPClient: client.HTTPClient(),
+			})
+			if err != nil {
+				return err
+			}
+			if err := v.Warm(ctx); err != nil {
+				return fmt.Errorf("signing keys: %w", err)
+			}
+			registry.Register(capIdentity, v)
+			authn.set(v)
+			log.Printf("serendipd: kubernetes: identity provider (thunderid) active, issuer %s, client %q; admin user %q, password in Secret %s/%s",
+				issuer, thunderid.ClientID, thunderid.AdminUsername, thunderid.Namespace, thunderid.AdminSecretName)
+			return nil
+		},
+		identityFoundations: func(ctx context.Context, ep reconcile.GatewayEndpoint) error {
+			issuer, err := thunderid.Issuer(ep, issuerOverride)
+			if err != nil {
+				return err
+			}
+			return thunderid.EnsureRoute(ctx, client, ep, issuer)
+		},
 		gatewayFoundations: func(ctx context.Context) error {
 			// The CRDs are the gateway's foundation; ensuring them here
 			// (not via the Helm deployer) keeps a no-drift pass to reads.
@@ -156,7 +212,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		},
 		reensureEvery: reensureEvery,
 	}
-	return &kubeWiring{secretReconciler: secretReconciler, plan: plan}, nil
+	return &kubeWiring{secretReconciler: secretReconciler, authn: authn, plan: plan}, nil
 }
 
 // ensureGatewayReady ensures the shared gateway and treats "not programmed

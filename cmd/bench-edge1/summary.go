@@ -8,6 +8,7 @@ import (
 
 	"github.com/serendip-infra/serendip-infra/providers/application/openchoreo"
 	"github.com/serendip-infra/serendip-infra/providers/gateway/kgateway"
+	"github.com/serendip-infra/serendip-infra/providers/identity/thunderid"
 	"github.com/serendip-infra/serendip-infra/providers/secrets/openbao"
 )
 
@@ -75,6 +76,7 @@ const (
 	GroupPlatformCtrl   = "Application platform: control plane"
 	GroupPlatformData   = "Application platform: data plane"
 	GroupGateway        = "Gateway (kgateway)"
+	GroupIdentity       = "Identity (ThunderID)"
 	GroupWorkloads      = "Workloads"
 	groupOtherPrefix    = "Other: "
 	cellNamespacePrefix = "dp-"
@@ -90,6 +92,7 @@ var namespaceGroups = map[string]string{
 	openchoreo.ControlPlaneNamespace: GroupPlatformCtrl,
 	openchoreo.DataPlaneNamespace:    GroupPlatformData,
 	kgateway.Namespace:               GroupGateway,
+	thunderid.Namespace:              GroupIdentity,
 }
 
 // groupFor attributes a namespace to a group. Unknown namespaces are
@@ -304,7 +307,7 @@ func aggregate(samples []Sample) Aggregate {
 // sortedGroups returns group names in a stable reporting order: known
 // groups first in a fixed order, then "Other: ..." alphabetically.
 func sortedGroups(groups map[string]GroupAggregate) []string {
-	order := []string{GroupKubernetes, GroupSecrets, GroupCertificates, GroupPlatformCtrl, GroupPlatformData, GroupGateway, GroupWorkloads}
+	order := []string{GroupKubernetes, GroupSecrets, GroupCertificates, GroupPlatformCtrl, GroupPlatformData, GroupGateway, GroupIdentity, GroupWorkloads}
 	var out []string
 	seen := map[string]bool{}
 	for _, g := range order {
