@@ -1008,8 +1008,48 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 - **The real T470 run is still the open gate.** It's one command once the
   hardware exists (README).
 
-1. **Spec 016: UI MVP (agreed direction, user 2026-10-17).** It's next; no
-   spec.md yet. A React + Vite console (`ui/`, rules in `ui/CLAUDE.md`):
+1. **Spec 016: UI MVP — in progress.** `spec.md` was approved 2026-10-17;
+   the user confirmed shipping without RBAC for now. `plan.md` and
+   `tasks.md` were **approved 2026-10-17**, and implementation has started.
+   **State at last update (nothing committed yet):**
+   - Done: T001–T008. The Go side has been reviewed (contract-guardian
+     PASS ×2, go-reviewer findings fixed). The UI is built: design
+     system, screens, 55 tests, 75 KiB gz JS.
+   - **T010 in progress (2026-10-18).** It found two real bugs, both
+     fixed in code with tests but not yet re-verified on a cluster:
+     (1) the kube Service proxy strips `Authorization`, so management-API
+     calls fail (see plan.md "T010 finding"): fresh installs now get the
+     console URIs through the bootstrap file, and every pass first checks
+     read-only; (2) the bootstrap client lacked `signOutFlowId`, so
+     logout returned 500. **Open decision for the user:** how to change
+     URIs on an existing install (an in-process port-forward, or a
+     documented manual step). Resume by recreating the kind cluster
+     `serendip-t010` (scripts in the session scratchpad: `bff_login.py`,
+     `shots.mjs`), then run the user's browser check plus the headless
+     checks.
+   - Next: T009 (perf on the simulated T470), T010 (real-browser
+     verification on kind: login, create, expose, CSP, screenshots,
+     keyboard), T011 (final reviews + /security-review), T012 (docs).
+   - Built so far: `core/identity.LoginClient`; `oidc.RelyingParty`;
+     `api` sessions, `/auth/*`, cookie auth, CSRF checks, hardening;
+     `cmd/serendipd/console` (embed); `thunderid.EnsureClientRedirects`;
+     serendipd wiring (`SERENDIP_PUBLIC_URL`,
+     `SERENDIP_ALLOW_INSECURE_ORIGIN`); ADRs 0012 and 0013; the `ui/`
+     scaffold under pnpm 10.34.6 with supply-chain controls. Key choices:
+   - an in-process BFF with an HttpOnly session cookie and in-memory
+     sessions;
+   - the UI embedded in `serendipd`;
+   - pnpm with install scripts off and a minimum release age.
+
+   T001 (the spike) is done: the bootstrap client is editable, refresh
+   tokens rotate and reuse revokes the token family (so serialised refresh
+   is mandatory), revocation and logout work, ThunderID has no
+   disabled-user state (delete the user instead), and the Strict cookie
+   is confirmed in Chrome (plan.md "Spike findings"). The visual direction is
+   "Combined" (canvas https://claude.ai/artifact/DjRkfV2nLaoBn6sK3UtK57,
+   plan.md decision 11). The user wants it kept consistent across every
+   screen. The original agenda for this
+   item is kept below for reference. A React + Vite console (`ui/`, rules in `ui/CLAUDE.md`):
    - log in through the `serendip` OIDC client (auth code + PKCE);
    - show `/v1/readiness`;
    - create and list Applications and Components, expose them, and watch
