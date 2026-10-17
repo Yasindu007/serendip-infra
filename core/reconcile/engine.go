@@ -48,19 +48,32 @@ type Engine struct {
 	// orphan the external state forever. Only touched from Run's goroutine.
 	failed map[graph.ResourceRef]struct{}
 
-	// due and backoff schedule early re-checks requested via RequeueAfter:
-	// due is when ref is next reconciled, backoff the delay last applied
-	// (requeueBase, doubling, capped at resyncEvery -- past that the ref
-	// just rides the normal resync). Both are cleared when a Reconcile
+	// due, backoff and converging schedule early re-checks requested via
+	// RequeueAfter: due is when ref is next reconciled, backoff the last
+	// wait (requeueBase, doubling, capped at requeueStep), converging when
+	// the current run of early re-checks started. Early re-checks stop once
+	// a resync interval has passed since converging -- from then on the ref
+	// just rides the normal resync. All three are cleared when a Reconcile
 	// returns nil. Only touched from Run's goroutine.
 	due         map[graph.ResourceRef]time.Time
 	backoff     map[graph.ResourceRef]time.Duration
+	converging  map[graph.ResourceRef]time.Time
 	requeueBase time.Duration
+	requeueStep time.Duration
 }
 
 // defaultRequeueBase is the first early re-check delay after a Reconciler
 // returns RequeueAfter.
 const defaultRequeueBase = 2 * time.Second
+
+// defaultRequeueStep is the longest wait between two early re-checks. With
+// the 2 s base and a 30 s resync, re-checks land about 2, 6, 14, 22 and
+// 30 s after the first reconcile, then normal resync takes over. Without
+// the step the last wait would be 16 s (re-checks at 2, 6, 14, 30 s), so
+// anything ready between 14 s and 30 s, such as a workload whose image
+// isn't cached yet, would be reported at 30 s (spec 014's benchmark
+// re-run).
+const defaultRequeueStep = 8 * time.Second
 
 // NewEngine returns an Engine that bounds each Reconcile call to
 // reconcileTimeout and resyncs every registered kind at least once per
@@ -76,7 +89,9 @@ func NewEngine(bus event.Bus, resyncEvery, reconcileTimeout time.Duration) *Engi
 		failed:           make(map[graph.ResourceRef]struct{}),
 		due:              make(map[graph.ResourceRef]time.Time),
 		backoff:          make(map[graph.ResourceRef]time.Duration),
+		converging:       make(map[graph.ResourceRef]time.Time),
 		requeueBase:      defaultRequeueBase,
+		requeueStep:      defaultRequeueStep,
 	}
 }
 
@@ -222,12 +237,14 @@ func (e *Engine) reconcileOne(ctx context.Context, ref graph.ResourceRef, trigge
 		delete(e.failed, ref)
 		delete(e.due, ref)
 		delete(e.backoff, ref)
+		delete(e.converging, ref)
 	case errors.As(err, &requeue):
 		delete(e.failed, ref)
 		e.scheduleEarly(ref, requeue.Delay, trigger)
 	default:
 		delete(e.due, ref)
 		delete(e.backoff, ref)
+		delete(e.converging, ref)
 		e.failed[ref] = struct{}{}
 		log.Printf("reconcile: %s/%s: %v (will retry on next resync)", ref.Kind, ref.ID, err)
 	}
@@ -236,38 +253,43 @@ func (e *Engine) reconcileOne(ctx context.Context, ref graph.ResourceRef, trigge
 // scheduleEarly arms ref's next early re-check at max(hint, backoff), with
 // the backoff moved according to what triggered the reconcile:
 //
-//   - an early re-check doubles it, capped at the resync interval: a
-//     resource that keeps converging without change backs off;
-//   - an event resets it to the base: events come only from store writes,
-//     which reconcilers make only when state changed (or a user edited the
-//     resource), so the resource is moving and fast re-checks start over --
-//     e.g. after a long outage pushed it to the cap, the first sign of
-//     progress brings early re-checks back;
-//   - resync leaves it alone.
+//   - an early re-check doubles it, capped at requeueStep: a resource that
+//     keeps converging without change is re-checked less often, but never
+//     less than once per step;
+//   - an event resets it to the base and restarts the converging window:
+//     events come only from store writes, which reconcilers make only when
+//     state changed (or a user edited the resource), so the resource is
+//     moving and fast re-checks start over -- e.g. after a long outage left
+//     it riding resync, the first sign of progress brings early re-checks
+//     back. This relies on reconcilers not writing when nothing changed
+//     (core/reconcile/CLAUDE.md): one that wrote on every pass would keep
+//     restarting the window;
+//   - resync leaves both alone.
 //
 // Event and resync reconciles only ever pull an existing schedule earlier,
-// never push it later. Once the backoff reaches the resync interval the ref
-// stops being scheduled early: normal resync covers it, so a resource that
-// never converges (and so never writes) costs nothing extra beyond the
-// first few re-checks.
+// never push it later. Once a resync interval has passed since the ref
+// started converging (or the hint alone reaches it) the ref stops being
+// scheduled early: normal resync covers it, so a resource that never
+// converges (and so never writes) costs only the re-checks of its first
+// resync interval.
 func (e *Engine) scheduleEarly(ref graph.ResourceRef, hint time.Duration, t trigger) {
+	now := time.Now()
 	b, ok := e.backoff[ref]
 	switch {
 	case !ok || t == triggerEvent:
 		b = e.requeueBase
+		e.converging[ref] = now
 	case t == triggerEarly:
-		b *= 2
+		b = min(b*2, e.requeueStep)
 	}
-	b = min(b, e.resyncEvery)
 	e.backoff[ref] = b
-	delay := max(b, hint)
-	if delay >= e.resyncEvery {
+	if hint >= e.resyncEvery || now.Sub(e.converging[ref]) >= e.resyncEvery {
 		if t == triggerEarly {
 			delete(e.due, ref)
 		}
 		return
 	}
-	at := time.Now().Add(delay)
+	at := now.Add(max(b, hint))
 	// An event during a long early backoff therefore brings the next
 	// re-check forward to the base delay, by design.
 	if existing, ok := e.due[ref]; ok && t != triggerEarly && existing.Before(at) {

@@ -12,8 +12,9 @@ import (
 // not added to the failed-retry set and nothing is logged as an error.
 //
 // Delay is a minimum hint. The Engine applies whichever is larger, the
-// hint or its own per-ref backoff (requeueBase doubling up to the resync
-// interval), so a resource that never converges can't hammer anything.
+// hint or its own per-ref backoff (requeueBase doubling up to requeueStep,
+// for at most one resync interval), so a resource that never converges
+// gets a few early re-checks and then only normal resync.
 type RequeueAfter struct {
 	Delay time.Duration
 }

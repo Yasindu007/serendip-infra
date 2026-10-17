@@ -184,14 +184,31 @@ Idle memory, MiB. Timings: cold start 182 s / 169 s, warm restart 36 s /
 
 ## Findings carried forward
 
-1. **Time-to-`Serving` has a cliff between 14 s and 30 s.** Spec 014
-   replaced the flat 30 s resync lag with early re-checks backing off
-   2 → 4 → 8 → 16 s. Anything that becomes ready between about 14 s and
-   30 s after create (here, any workload whose image isn't cached yet) is
-   still reported at 30 s. A lower backoff cap while a resource is
-   converging (for example 8 s, giving checks at 2, 6, 14, 22, 30 s) would
-   halve the worst case for a few extra provider reads. That's a follow-up
-   decision, not part of spec 014.
+1. **Time-to-`Serving` had a cliff between 14 s and 30 s. Fixed
+   (2026-10-17, after this re-run).** With waits doubling 2 → 4 → 8 → 16 s,
+   anything ready between about 14 s and 30 s after create was reported at
+   30 s. The engine now caps the wait at 8 s and keeps re-checking until one
+   resync interval has passed since the resource started converging, so
+   re-checks land at about 2, 6, 14, 22 and 30 s and the detection lag
+   inside that window is at most 8 s (`docs/architecture/reconciliation.md`).
+   - **A first version was wrong, and the real cluster caught it.** It capped
+     the wait but kept the old count of re-checks, ending them at 22 s.
+     Anything ready between 22 s and 30 s then waited for the next resync
+     tick. A fresh throttled run measured 16.0 s, 54.1 s and 54.1 s. Unit
+     tests and review had passed it.
+   - **Verified on a fresh simulated-T470 cluster with the image uncached**,
+     reading upstream transition times directly:
+     - nginx was pulled and the Deployments were Available at +11–15 s;
+     - OpenChoreo's `ReleaseBinding` went Ready at +22.1–24.1 s, just after
+       the 22 s re-check;
+     - Serendip reported `Serving` at +29.9–30.4 s, on the next re-check,
+       6–8 s later.
+     A harness run with the fix also read 32 s × 3 (30 s plus the
+     harness's 2 s poll).
+   - **What remains is upstream.** OpenChoreo marks a release Ready about
+     9–11 s after its Deployment is Available. Observing workload readiness
+     more directly would cut that, but it's a design question for the
+     application platform provider, not the engine.
 2. ~~**A transient image-pull failure kills `serendipd`'s startup.**~~
    **Fixed by spec 014 (degraded startup).** Provider setup now retries in
    the background (5 s → 2 m) instead of exiting. In spec 013, run 2's first

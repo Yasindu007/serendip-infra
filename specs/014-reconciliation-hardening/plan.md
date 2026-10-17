@@ -31,7 +31,10 @@ OpenChoreo- or kgateway-specific behavior.
   successful reconcile that doesn't ask again clears it.
 - **Backoff is the engine's, not the reconciler's.** The first early re-check
   comes after 2 s, then 4, 8, 16, then capped at the resync interval, where
-  it simply merges into normal resync. The reconciler's `Delay` is a
+  it simply merges into normal resync. (Amended after the T010 benchmark
+  re-run: the wait is capped at an 8 s step and early re-checks continue
+  until one resync interval has passed since the resource started
+  converging, so they land at about 2, 6, 14, 22, 30 s.) The reconciler's `Delay` is a
   minimum hint; the engine applies whichever is larger, its backoff or the
   hint. Backoff resets when the ref settles (a reconcile returns nil).
 
@@ -211,7 +214,7 @@ OpenChoreo- or kgateway-specific behavior.
 
 | Thing | Value |
 |---|---|
-| Early re-check backoff | 2 s → doubling → capped at resync (30 s) |
+| Early re-check backoff | 2 s → doubling → capped at an 8 s step, for one resync window (30 s) after the resource starts converging (amended after the T010 benchmark re-run; was capped at resync) |
 | Background setup backoff | 5 s → doubling → capped at 2 min, no limit on attempts |
 | Re-ensure interval | 5 min (`SERENDIP_REENSURE_INTERVAL`) |
 | Fail-fast | kubeconfig unreadable/invalid, client build failure, `helm` not on PATH, invalid `SERENDIP_GATEWAY_NODE_PORT` |

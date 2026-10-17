@@ -349,6 +349,13 @@ Fixes the four weaknesses specs 010-013 left (spec.md "Problem"). Detail:
   at 30 s; re-probed with the image cached on the same throttled node:
   14.9-15.2 s. Write-up: `002-edge1-footprint.md` "Spec 014 re-run";
   harness/README "Serving" caveat updated to describe the re-check schedule.
+- **Backoff cliff fixed (2026-10-17)**: early re-check waits now double up
+  to an 8 s cap, for one resync window from when the resource started
+  converging (re-checks at ~2/6/14/22/30 s). A first version (cap with the
+  old re-check count) left a 22-30 s gap; a real cluster caught it (54 s).
+  The revised version was verified with upstream transition times: our
+  detection lag was 6-8 s after OpenChoreo's Ready. `contract-guardian` PASS.
+  Detail is in `002-edge1-footprint.md` finding 1.
 - **Deferred**: auditing foundations-loop repairs (they mutate the cluster
   outside the reconcile path; constitution rule 8 — needs an audit actor for
   system repairs); a "resync now" kick when a capability becomes ready (and
@@ -912,11 +919,23 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 - **The real T470 run is still the open gate.** It's one command once the
   hardware exists (README).
 
-1. **Backoff cliff (follow-up decision, not started)**: early re-checks at
-   ~2/6/14/30 s mean anything ready between 14 s and 30 s reports at 30 s
-   (e.g. any uncached image). Option: cap the converging backoff at ~8 s
-   (checks at 2, 6, 14, 22, 30 s). Small `core/reconcile` change, but it
-   changes spec 014's agreed schedule — needs the user's go-ahead.
+1. **Spec 015 (Identity foundation): `spec.md` drafted 2026-10-17, awaiting
+   the user's review before plan.md.** ThunderID (ADR 0006) deployed by
+   `serendipd`, plus OIDC human login to the API alongside the API keys.
+   It's the prerequisite for the UI. Agreed direction (user, 2026-10-17):
+   the UI MVP is the spec after 015 (likely 016). Research was done via
+   oss-researcher on 2026-10-17:
+   - no ADR 0006 trigger has fired (v1.0.1 on 2026-08-25, no breaking
+     changes, `main` active daily);
+   - the repo moved to `github.com/thunder-id/thunderid`;
+   - no release tag since 2026-08-25; watch it as the window closes in
+     mid-November;
+   - there is no device-code grant, so a future CLI uses auth code + PKCE
+     on a loopback redirect;
+   - the Helm chart is `oci://ghcr.io/thunder-id/helm-charts/thunderid`,
+     SQLite is supported with one replica and a PVC, it listens on port
+     8090, and its health endpoints are `/health/{liveness,readiness}`;
+   - `server.public_url` must equal the external issuer URL.
 2. **HTTPS**: the natural path is cert-manager (already installed) issuing
    certificates for an HTTPS listener on the existing gateway, not a second
    proxy such as Caddy. It needs a decision on where trusted names come from

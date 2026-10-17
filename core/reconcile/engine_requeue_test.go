@@ -126,6 +126,48 @@ func TestEngine_RequeueAfter_BackoffCapsAtResync(t *testing.T) {
 	}
 }
 
+// The wait between early re-checks never exceeds the step, and early
+// re-checks keep coming until a resync interval has passed since the
+// resource started converging -- not just for a fixed number of doublings,
+// which would leave a gap before the next resync.
+func TestEngine_RequeueAfter_StepCapsWaitWithinResyncWindow(t *testing.T) {
+	always := make([]error, 1000)
+	for i := range always {
+		always[i] = reconcile.RequeueAfter{}
+	}
+	s := &scriptedReconciler{results: always}
+	bus := event.NewInProcessBus()
+	engine := reconcile.NewEngine(bus, 200*time.Millisecond, time.Second)
+	reconcile.SetRequeueBase(engine, 10*time.Millisecond)
+	reconcile.SetRequeueStep(engine, 30*time.Millisecond)
+	engine.Register(resource.KindComponent, s, func(context.Context) ([]graph.ResourceRef, error) {
+		return nil, nil // unlisted: once the window is over, nothing re-checks it
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	go engine.Run(ctx)
+	<-engine.Ready()
+	publish(bus)
+
+	// Waits 10, 20, then 30 ms each: re-checks at about 10, 30, 60, 90, 120,
+	// 150, 180, 210 ms; the one at >= 200 ms is the last.
+	times := waitCalls(t, s, 7)
+	time.Sleep(400 * time.Millisecond)
+	times = s.callTimes()
+	for i := 2; i < len(times); i++ {
+		if gap := times[i].Sub(times[i-1]); gap > 90*time.Millisecond {
+			t.Errorf("gap %d = %v, want about the 30ms step", i, gap)
+		}
+	}
+	last := times[len(times)-1].Sub(times[0])
+	if last < 200*time.Millisecond {
+		t.Errorf("last early re-check at %v, want >= the 200ms resync window (no gap before resync)", last)
+	}
+	if last > 350*time.Millisecond {
+		t.Errorf("last early re-check at %v, want early re-checks to stop shortly after the 200ms window", last)
+	}
+}
+
 // RequeueAfter is not a failure: an unlisted ref that asked for a requeue
 // and then settles is not retried by the failed-retry path.
 func TestEngine_RequeueAfter_NeverEntersFailedSet(t *testing.T) {

@@ -44,16 +44,22 @@ next 30s resync. A Reconciler whose resource is still converging now returns
 
 - **Not a failure.** The ref is not added to the failed-retry set and nothing
   is logged as an error.
-- **The engine owns the backoff**, per ref: 2s, then 4, 8, 16. At the resync
-  interval (30s) the ref stops being scheduled early and simply rides the
-  normal resync. The reconciler's `Delay` is only a minimum hint; the engine
-  uses the larger of its backoff and the hint.
+- **The engine owns the backoff**, per ref: 2s, then 4, 8, then 8s steps
+  (the wait doubles but is capped at 8s), so re-checks land about 2, 6, 14,
+  22 and 30s after the resource started converging. Once one resync
+  interval (30s) has passed since then, the ref stops being scheduled early
+  and simply rides the normal resync. Before the 8s cap the waits were 2, 4,
+  8, 16 (re-checks at 2, 6, 14, 30s), and anything ready between 14s and 30s
+  (e.g. a workload whose image isn't cached) was reported at 30s (spec 014's
+  benchmark re-run). The reconciler's `Delay` is only a minimum hint; the
+  engine uses the larger of its backoff and the hint.
 - **What moves the backoff depends on the trigger of the reconcile that asked:**
   - an early re-check doubles it (a resource that keeps converging without
     change backs off);
-  - an event resets it to the base, because events come only from real store
-    changes (reconcilers write only on change, or a user edited the resource),
-    so the resource is moving and fast re-checks start over;
+  - an event resets it to the base and restarts the 30s window, because
+    events come only from real store changes (reconcilers write only on
+    change, or a user edited the resource), so the resource is moving and
+    fast re-checks start over;
   - resync leaves it alone.
 
   Event and resync reconciles only ever pull a schedule earlier, never push
