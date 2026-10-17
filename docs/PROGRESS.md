@@ -919,8 +919,10 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 - **The real T470 run is still the open gate.** It's one command once the
   hardware exists (README).
 
-1. **Spec 015 (Identity foundation): `spec.md` drafted 2026-10-17, awaiting
-   the user's review before plan.md.** ThunderID (ADR 0006) deployed by
+1. **Spec 015 (Identity foundation): `spec.md` approved and committed
+   (`e202f27`); `plan.md` + `tasks.md` approved 2026-10-17; implementing,
+   starting with T001 (a real-install spike that settles the
+   upstream details marked "(spike)" in plan.md).** ThunderID (ADR 0006) deployed by
    `serendipd`, plus OIDC human login to the API alongside the API keys.
    It's the prerequisite for the UI. Agreed direction (user, 2026-10-17):
    the UI MVP is the spec after 015 (likely 016). Research was done via
