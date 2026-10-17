@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
@@ -76,8 +75,7 @@ type secretValueBody struct {
 
 func (h *SecretHandler) WriteValue(w http.ResponseWriter, r *http.Request) {
 	var body secretValueBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		h.writeError(w, r, http.StatusBadRequest, "malformed request body", err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	updated, err := h.reconciler.WriteValue(r.Context(), r.PathValue("id"), body.Data)

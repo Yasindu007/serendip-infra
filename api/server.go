@@ -47,7 +47,12 @@ import (
 // providers is the live capability registry whose readiness GET
 // /v1/readiness reports (specs/014-reconciliation-hardening plan.md
 // decision 4); nil reports no capabilities.
-func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn identity.Authenticator, secretReconciler *reconcile.SecretReconciler, providers *provider.Registry) *http.Server {
+//
+// console, when non-nil, adds the web console and its browser login
+// (specs/016-ui-mvp, ADR 0013): the built files and /auth/* on the outer
+// mux, the session cookie as a credential, and GET /v1/session. Nil keeps
+// the API exactly as it was.
+func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn identity.Authenticator, secretReconciler *reconcile.SecretReconciler, providers *provider.Registry, console *Console) *http.Server {
 	apiMux := http.NewServeMux()
 
 	// 14 explicit instantiations, deliberately not abstracted further
@@ -88,6 +93,7 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
 	NewRegistryHandler(registry.NewCapabilityRegistry(capStore)).Register(apiMux)
 	NewReadinessHandler(providers).Register(apiMux)
+	apiMux.HandleFunc("GET /v1/session", console.sessionHandler)
 	// Catch-all for anything under /v1/ that doesn't match a registered
 	// kind/graph/registry route -- without this, an unmatched /v1/ path
 	// falls through to Go's default plain-text 404, violating acceptance
@@ -101,13 +107,27 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 	// go through AuthMiddleware at all -- it's mounted directly on
 	// topMux, not apiMux, so there's no bypass logic to get wrong inside
 	// a shared handler.
-	topMux.Handle("/v1/", AuthMiddleware(apiKeys, authn)(apiMux))
-	// Same reasoning as apiMux's catch-all, for paths outside /v1/ and
-	// /healthz entirely (e.g. a bare "/" or a typo'd top-level path).
-	topMux.HandleFunc("/", notFoundHandler)
+	topMux.Handle("/v1/", apiHardening(authMiddleware(apiKeys, authn, console)(apiMux)))
+	if console != nil {
+		// The console shell, its assets and /auth/* need no credential:
+		// after the cross-site return from login the browser withholds the
+		// Strict session cookie from the document request, so the shell
+		// must load without it (spec 016 T001 spike finding 6).
+		console.init(authn)
+		console.register(topMux)
+	} else {
+		// Same reasoning as apiMux's catch-all, for paths outside /v1/ and
+		// /healthz entirely (e.g. a bare "/" or a typo'd top-level path).
+		topMux.HandleFunc("/", notFoundHandler)
+	}
 
 	return &http.Server{
-		Handler: RequestIDMiddleware(topMux),
+		Handler:           RequestIDMiddleware(topMux),
+		ReadHeaderTimeout: ReadHeaderTimeout,
+		ReadTimeout:       ReadTimeout,
+		WriteTimeout:      WriteTimeout,
+		IdleTimeout:       IdleTimeout,
+		MaxHeaderBytes:    MaxHeaderBytes,
 	}
 }
 

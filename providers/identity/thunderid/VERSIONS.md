@@ -54,3 +54,27 @@ idle. The simulated-T470 figure is about 10.7 MiB and 0.2 mcores (spec 015 T008)
 - The RSA signing certificate is valid for 365 days. What ThunderID does at
   expiry is unknown.
 - Plain HTTP (`httpOnly: true`) is acceptable only on `localhost`.
+
+## Console redirect URIs (spec 016, verified on 1.0.1 by the T001 spike)
+
+- **Management access:** obtained by driving the default sign-in flow
+  (`/oauth2/authorize` → `/flow/execute` ×2 → `/oauth2/auth/callback` →
+  `/oauth2/token`) as the built-in `CONSOLE` client, with
+  `scope=openid system` and `resource=https://localhost:8090/mcp`. Both
+  values are 1.0.1 defaults. Without `resource`, authorize fails with
+  `invalid_target`.
+- **The credentials step:** action ID `action_001` in the default
+  authentication flow.
+- **Updating the client:** `GET`/`PUT /applications/{id}`. PUT replaces
+  the whole document, so the full fetched document is sent back. Apps
+  imported from bootstrap files are editable
+  (`declarative_resources.enabled: false`).
+- **Refresh tokens:** rotation is on (`renew_on_grant`,
+  `revoke_previous_on_renew`), with a lifetime of 86400 s. Replaying an
+  old refresh token revokes the whole family.
+- **Logout and revocation:** `/oauth2/logout` accepts `client_id`
+  without `id_token_hint`. Post-logout URIs match exactly.
+  `/oauth2/revoke` accepts a public client by `client_id`.
+
+Any of these may change in a minor release; re-verify them on an upgrade.
+

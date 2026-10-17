@@ -48,8 +48,7 @@ func (h *ResourceHandler[S, St]) Register(mux *http.ServeMux) {
 
 func (h *ResourceHandler[S, St]) Create(w http.ResponseWriter, r *http.Request) {
 	var res resource.Resource[S, St]
-	if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
-		h.writeError(w, r, http.StatusBadRequest, "malformed request body", err.Error())
+	if !decodeBody(w, r, &res) {
 		return
 	}
 	created, err := h.store.Create(r.Context(), res)
@@ -96,8 +95,7 @@ func (h *ResourceHandler[S, St]) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *ResourceHandler[S, St]) Update(w http.ResponseWriter, r *http.Request) {
 	var res resource.Resource[S, St]
-	if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
-		h.writeError(w, r, http.StatusBadRequest, "malformed request body", err.Error())
+	if !decodeBody(w, r, &res) {
 		return
 	}
 	// The path's {id} is authoritative over whatever the body claims --

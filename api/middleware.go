@@ -60,11 +60,39 @@ func RequestIDFromContext(ctx context.Context) string {
 // says which check a token failed. Everything downstream only ever sees the
 // resolved actor via context, never how it got there.
 func AuthMiddleware(apiKeys map[string]string, authn identity.Authenticator) func(http.Handler) http.Handler {
+	return authMiddleware(apiKeys, authn, nil)
+}
+
+// authMiddleware is AuthMiddleware plus, when console is non-nil, the
+// console's session cookie as a third credential (specs/016-ui-mvp plan.md
+// decision 6). A bearer token is checked exactly as before. A request
+// carrying both a bearer token and a session cookie is refused, so the two
+// can never be confused. A cookie request must also pass the CSRF checks.
+func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, console *Console) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reqID := audit.RequestIDFrom(r.Context())
-			token, ok := bearerToken(r)
-			if !ok {
+			token, hasBearer := bearerToken(r)
+			var sessionID string
+			if console != nil {
+				if ck, err := r.Cookie(SessionCookie); err == nil && ck.Value != "" {
+					sessionID = ck.Value
+				}
+			}
+			if hasBearer && sessionID != "" {
+				WriteProblem(w, http.StatusBadRequest, "ambiguous credentials",
+					"send either a bearer token or the console session cookie, not both", reqID)
+				return
+			}
+			if sessionID != "" {
+				actor, ctx, ok := console.authenticateCookie(w, r, sessionID)
+				if !ok {
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(audit.WithActor(ctx, actor)))
+				return
+			}
+			if !hasBearer {
 				WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", reqID)
 				return
 			}

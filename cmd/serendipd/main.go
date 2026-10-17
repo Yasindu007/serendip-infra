@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/api"
+	"github.com/serendip-infra/serendip-infra/cmd/serendipd/console"
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/graph"
 	"github.com/serendip-infra/serendip-infra/core/identity"
@@ -80,7 +83,16 @@ func run() error {
 	// background once the API is up (kube.plan.start below), so a slow or
 	// unreachable cluster degrades serendipd instead of stopping it
 	// (specs/014-reconciliation-hardening plan.md decision 4).
-	kube, err := wireKubernetes(os.Getenv("SERENDIP_KUBECONFIG"), registry, db, bus, engine)
+	// The console is served on the API's own origin (specs/016-ui-mvp
+	// plan.md decisions 1-2); its public URL is what browsers use and what
+	// the identity provider redirects back to.
+	origin, err := consoleOrigin(addr)
+	if err != nil {
+		return err
+	}
+	consoleRoutes := consoleURIs{callback: origin.String() + "/auth/callback", postLogout: origin.String() + "/"}
+
+	kube, err := wireKubernetes(os.Getenv("SERENDIP_KUBECONFIG"), registry, db, bus, engine, consoleRoutes)
 	if err != nil {
 		return fmt.Errorf("kubernetes: %w", err)
 	}
@@ -93,7 +105,11 @@ func run() error {
 		authn = kube.authn
 	}
 
-	srv := api.NewServer(db, bus, apiKeys, authn, secretReconciler, registry)
+	webConsole := &api.Console{Handler: console.Handler(), Origin: origin, Sessions: api.NewSessions(api.SessionConfig{})}
+	if kube != nil {
+		webConsole.Login = kube.login.client
+	}
+	srv := api.NewServer(db, bus, apiKeys, authn, secretReconciler, registry, webConsole)
 	srv.Addr = addr
 
 	errCh := make(chan error, 1)
@@ -177,6 +193,26 @@ func newReconcileEngine(db *sql.DB, bus event.Bus) *reconcile.Engine {
 			return refs, nil
 		})
 	return engine
+}
+
+// consoleOrigin is the console's public origin: SERENDIP_PUBLIC_URL, or
+// http://localhost:<port of addr>. A non-localhost http origin needs
+// SERENDIP_ALLOW_INSECURE_ORIGIN=1, since the session cookie would cross a
+// network in clear (until HTTPS exists).
+func consoleOrigin(addr string) (*url.URL, error) {
+	raw := os.Getenv("SERENDIP_PUBLIC_URL")
+	if raw == "" {
+		_, port, err := net.SplitHostPort(addr)
+		if err != nil || port == "" {
+			return nil, fmt.Errorf("SERENDIP_ADDR %q: can't derive the console's public URL; set SERENDIP_PUBLIC_URL", addr)
+		}
+		raw = "http://localhost:" + port
+	}
+	origin, err := api.ParseOrigin(raw, os.Getenv("SERENDIP_ALLOW_INSECURE_ORIGIN") == "1")
+	if err != nil {
+		return nil, fmt.Errorf("SERENDIP_PUBLIC_URL: %w", err)
+	}
+	return origin, nil
 }
 
 func envOr(key, fallback string) string {

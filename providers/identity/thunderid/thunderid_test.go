@@ -87,7 +87,7 @@ func lookup(t *testing.T, doc any, path ...string) any {
 
 func TestValues(t *testing.T) {
 	const issuer = "http://identity.localhost:30080"
-	raw, err := values(issuer)
+	raw, err := values(issuer, ConsoleRedirects{Callback: "http://localhost:8080/auth/callback", PostLogout: "http://localhost:8080/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +134,9 @@ func TestValues(t *testing.T) {
 	if got := lookup(t, app, "resource_type"); got != "application" {
 		t.Errorf("resource_type = %v", got)
 	}
+	if got := lookup(t, app, "signOutFlowId"); got != defaultSignOutFlowID {
+		t.Errorf("signOutFlowId = %v, want the shipped sign-out flow", got)
+	}
 	cfg := lookup(t, app, "inboundAuthConfig").([]any)[0].(map[string]any)["config"]
 	appChecks := []struct {
 		path []string
@@ -143,7 +146,8 @@ func TestValues(t *testing.T) {
 		{[]string{"publicClient"}, true},
 		{[]string{"pkceRequired"}, true},
 		{[]string{"tokenEndpointAuthMethod"}, "none"},
-		{[]string{"redirectUris"}, []any{LoopbackRedirectURI}},
+		{[]string{"redirectUris"}, []any{LoopbackRedirectURI, "http://localhost:8080/auth/callback"}},
+		{[]string{"postLogoutRedirectUris"}, []any{LoopbackRedirectURI, "http://localhost:8080/"}},
 		{[]string{"grantTypes"}, []any{"authorization_code", "refresh_token"}},
 		{[]string{"token", "accessToken", "userConfig", "attributes"}, []any{"username", "email", "name"}},
 	}

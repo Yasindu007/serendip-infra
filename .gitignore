@@ -11,8 +11,10 @@ vendor/
 
 # Node / UI
 node_modules/
-ui/dist/
 ui/.vite/
+# The built console is embedded from here; only the placeholder is committed.
+cmd/serendipd/console/dist/*
+!cmd/serendipd/console/dist/.gitkeep
 
 # Local dev / secrets
 .env

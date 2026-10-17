@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
@@ -53,8 +52,7 @@ func (h *RegistryHandler) getDefault(w http.ResponseWriter, r *http.Request) {
 func (h *RegistryHandler) setDefault(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var body defaultProviderBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		WriteProblem(w, http.StatusBadRequest, "malformed request body", err.Error(), audit.RequestIDFrom(r.Context()))
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if err := h.capabilities.SetDefault(r.Context(), name, body.Provider); err != nil {

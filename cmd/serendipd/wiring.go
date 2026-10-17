@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/event"
@@ -36,7 +37,15 @@ const defaultReensureInterval = 5 * time.Minute
 type kubeWiring struct {
 	secretReconciler *reconcile.SecretReconciler
 	authn            *lazyAuthenticator
+	login            *lazyLogin
 	plan             setupPlan
+}
+
+// consoleURIs are the console's login callback and post-logout page,
+// registered with the identity provider (specs/016-ui-mvp plan.md
+// decision 7). Empty when no console is served.
+type consoleURIs struct {
+	callback, postLogout string
 }
 
 // wireKubernetes conditionally sets up Kubernetes access. If kubeconfigPath
@@ -54,7 +63,7 @@ type kubeWiring struct {
 // -- instead of stopping it. The Lookup + type-assert pattern from earlier
 // specs is gone: each setup step hands its concrete provider to the
 // matching lazy handle directly, and registers it for completeness.
-func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine) (*kubeWiring, error) {
+func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine, console consoleURIs) (*kubeWiring, error) {
 	if kubeconfigPath == "" {
 		log.Print("serendipd: SERENDIP_KUBECONFIG not set, no Kubernetes-facing providers active")
 		return nil, nil
@@ -90,6 +99,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 	if err != nil {
 		return nil, fmt.Errorf("identity: %w", err)
 	}
+	identityDeployer.SetConsoleRedirects(thunderid.ConsoleRedirects{Callback: console.callback, PostLogout: console.postLogout})
 	// The issuer depends on the gateway's endpoint, known only once the
 	// gateway is up, but a malformed override is a config error: fail now.
 	issuerOverride := os.Getenv("SERENDIP_IDENTITY_ISSUER")
@@ -102,6 +112,37 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 	credentialsPath := envOr("SERENDIP_OPENBAO_CREDENTIALS_PATH", defaultOpenBaoCredentialsPath)
 
 	storage, secrets, platform, authn := &lazyStorage{}, &lazySecrets{}, &lazyPlatform{}, &lazyAuthenticator{}
+	login := &lazyLogin{}
+	// verifier is the identity setup's token verifier, shared with the
+	// console's relying party (one key cache).
+	var verifier atomic.Pointer[oidc.Verifier]
+	// ensureConsoleLogin registers the console's URIs with the provider and
+	// then enables the console's login. Its failure never blocks API
+	// authentication; the foundations loop retries it.
+	ensureConsoleLogin := func(ctx context.Context, issuer string) {
+		v := verifier.Load()
+		if console.callback == "" || v == nil {
+			return
+		}
+		if err := thunderid.EnsureClientRedirects(ctx, client, console.callback, console.postLogout); err != nil {
+			log.Printf("serendipd: console login not available yet: %v", err)
+			return
+		}
+		if login.client() != nil {
+			return
+		}
+		rp, err := oidc.NewRelyingParty(oidc.RPConfig{
+			Issuer: issuer, BackChannelURL: thunderid.ProxyBaseURL(client), ClientID: thunderid.ClientID,
+			RedirectURL: console.callback, PostLogoutRedirectURL: console.postLogout,
+			Verifier: v, HTTPClient: client.HTTPClient(),
+		})
+		if err != nil {
+			log.Printf("serendipd: console login: %v", err)
+			return
+		}
+		login.set(rp)
+		log.Printf("serendipd: console login enabled (callback %s)", console.callback)
+	}
 	secretReconciler := registerKubernetesReconcilers(db, bus, engine, storage, secrets, platform)
 
 	plan := setupPlan{
@@ -187,6 +228,8 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 			}
 			registry.Register(capIdentity, v)
 			authn.set(v)
+			verifier.Store(v)
+			ensureConsoleLogin(ctx, issuer)
 			log.Printf("serendipd: kubernetes: identity provider (thunderid) active, issuer %s, client %q; admin user %q, password in Secret %s/%s",
 				issuer, thunderid.ClientID, thunderid.AdminUsername, thunderid.Namespace, thunderid.AdminSecretName)
 			return nil
@@ -196,7 +239,11 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 			if err != nil {
 				return err
 			}
-			return thunderid.EnsureRoute(ctx, client, ep, issuer)
+			if err := thunderid.EnsureRoute(ctx, client, ep, issuer); err != nil {
+				return err
+			}
+			ensureConsoleLogin(ctx, issuer)
+			return nil
 		},
 		gatewayFoundations: func(ctx context.Context) error {
 			// The CRDs are the gateway's foundation; ensuring them here
@@ -212,7 +259,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		},
 		reensureEvery: reensureEvery,
 	}
-	return &kubeWiring{secretReconciler: secretReconciler, authn: authn, plan: plan}, nil
+	return &kubeWiring{secretReconciler: secretReconciler, authn: authn, login: login, plan: plan}, nil
 }
 
 // ensureGatewayReady ensures the shared gateway and treats "not programmed

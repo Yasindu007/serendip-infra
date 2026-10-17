@@ -16,9 +16,15 @@ import (
 
 // Deployer installs ThunderID with its Helm chart.
 type Deployer struct {
-	run    helm.Runner
-	client *kubernetes.Client
+	run     helm.Runner
+	client  *kubernetes.Client
+	console ConsoleRedirects
 }
+
+// SetConsoleRedirects makes a fresh install's bootstrap client accept the
+// web console's URIs from the start. Bootstrap files are only imported on
+// first install; later changes go through EnsureClientRedirects.
+func (d *Deployer) SetConsoleRedirects(c ConsoleRedirects) { d.console = c }
 
 // NewDeployer checks helm is available and targets kubeconfigPath's
 // cluster.
@@ -42,7 +48,7 @@ func (d *Deployer) Ensure(ctx context.Context, issuer string) error {
 	if err := EnsureAdminSecret(ctx, d.client); err != nil {
 		return fmt.Errorf("thunderid: %w", err)
 	}
-	vals, err := values(issuer)
+	vals, err := values(issuer, d.console)
 	if err != nil {
 		return fmt.Errorf("thunderid: %w", err)
 	}

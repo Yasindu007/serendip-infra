@@ -146,3 +146,18 @@ func (l *lazyPlatform) DeleteComponent(ctx context.Context, comp resource.Compon
 	}
 	return p.DeleteComponent(ctx, comp)
 }
+
+// lazyLogin holds the console's login client once identity setup has made
+// sure the provider accepts the console's redirect URIs. Until then the
+// console reports the identity provider as unavailable rather than sending
+// people to a login that would reject them.
+type lazyLogin struct{ lazy[identity.LoginClient] }
+
+// client returns the login client, or nil while it isn't ready.
+func (l *lazyLogin) client() identity.LoginClient {
+	lc, err := l.get()
+	if err != nil {
+		return nil
+	}
+	return lc
+}

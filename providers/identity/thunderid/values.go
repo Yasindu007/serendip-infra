@@ -41,6 +41,10 @@ const (
 	// bootstrap resources create (01-default-resources.yaml, 1.0.1).
 	defaultOUID       = "01900000-0000-7000-8000-000000000001"
 	defaultAuthFlowID = "01900000-0000-7000-8000-000000000061"
+	// defaultSignOutFlowID is the shipped "Default Sign Out Flow". Without
+	// it, RP-initiated logout fails with "Sign-out flow is not configured
+	// for the application" (spec 016 T010).
+	defaultSignOutFlowID = "01900000-0000-7000-8000-00000000006a"
 	// clientAppID is our application's own fixed ID, in the bootstrap
 	// file's ID space.
 	clientAppID = "01900000-0000-7000-8000-0000000005e1"
@@ -52,11 +56,25 @@ const (
 // "username" becomes the audit actor (decision 8).
 var tokenAttributes = []string{"username", "email", "name"}
 
+// ConsoleRedirects are the web console's login callback and post-logout
+// page (specs/016-ui-mvp plan.md decision 7). Empty fields are left out.
+type ConsoleRedirects struct {
+	Callback, PostLogout string
+}
+
 // clientDocument is the bootstrap resource declaring the serendip client,
 // in the shape of the shipped Console application (T001 spike: imported
 // and logged in against as written). JSON is valid YAML, so it is
 // rendered with encoding/json.
-func clientDocument() map[string]any {
+func clientDocument(console ConsoleRedirects) map[string]any {
+	redirects := []string{LoopbackRedirectURI}
+	postLogout := []string{LoopbackRedirectURI}
+	if console.Callback != "" {
+		redirects = append(redirects, console.Callback)
+	}
+	if console.PostLogout != "" {
+		postLogout = append(postLogout, console.PostLogout)
+	}
 	return map[string]any{
 		"resource_type":             "application",
 		"id":                        clientAppID,
@@ -65,14 +83,15 @@ func clientDocument() map[string]any {
 		"type":                      "browser",
 		"ouId":                      defaultOUID,
 		"authFlowId":                defaultAuthFlowID,
+		"signOutFlowId":             defaultSignOutFlowID,
 		"isRegistrationFlowEnabled": false,
 		"allowedUserTypes":          []string{"Person"},
 		"inboundAuthConfig": []any{map[string]any{
 			"type": "oauth2",
 			"config": map[string]any{
 				"clientId":                ClientID,
-				"redirectUris":            []string{LoopbackRedirectURI},
-				"postLogoutRedirectUris":  []string{LoopbackRedirectURI},
+				"redirectUris":            redirects,
+				"postLogoutRedirectUris":  postLogout,
 				"grantTypes":              []string{"authorization_code", "refresh_token"},
 				"responseTypes":           []string{"code"},
 				"pkceRequired":            true,
@@ -91,8 +110,8 @@ func clientDocument() map[string]any {
 
 // values renders the chart values for issuer (decision 1), as JSON (valid
 // YAML for helm -f).
-func values(issuer string) ([]byte, error) {
-	client, err := json.Marshal(clientDocument())
+func values(issuer string, console ConsoleRedirects) ([]byte, error) {
+	client, err := json.Marshal(clientDocument(console))
 	if err != nil {
 		return nil, fmt.Errorf("render client document: %w", err)
 	}
