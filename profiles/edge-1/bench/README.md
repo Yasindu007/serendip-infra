@@ -78,4 +78,6 @@ footprint may be reported as verified on its strength (constitution rule 6).
   totals exclude the VM's own overhead. On K3s, node totals are the host.
 - Cold start is dominated by image pulls, so it's network-bound. Warm
   restart is the CPU/API-bound number.
-- Create → `Serving` includes up to one 30 s reconcile resync.
+- Create → `Serving` includes the workload image pull, and is quantised by
+  the reconcile engine's early re-checks (about 2, 6, 14 and 30 s after
+  create, spec 014): a workload ready at 15 s is reported at 30 s.

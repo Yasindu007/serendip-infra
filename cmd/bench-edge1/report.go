@@ -282,7 +282,7 @@ func renderSummary(r Result) string {
 	for _, d := range r.Timings.TimeToServing {
 		serving = append(serving, fmt.Sprintf("%.0fs", time.Duration(d).Seconds()))
 	}
-	fmt.Fprintf(&b, "- Component create → Serving: %s (includes up to one 30s resync)\n", strings.Join(serving, ", "))
+	fmt.Fprintf(&b, "- Component create → Serving: %s (includes the image pull; status is re-checked about 2, 6, 14 and 30s after create)\n", strings.Join(serving, ", "))
 
 	if len(r.Findings) > 0 {
 		b.WriteString("\n### Findings\n\n")

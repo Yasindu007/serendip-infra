@@ -9,7 +9,7 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-10-13
+Last updated: 2026-10-17
 
 ## Current phase
 
@@ -19,9 +19,10 @@ with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
-**Spec 014 (reconciliation hardening) — implementation and real-cluster
-verification done; both final reviews PASS and docs synced. Only the
-benchmark re-run (T010 item 7) is left. Committed (`993fa54`).** Detail below, under "Spec 014 — what actually got built."
+**Spec 014 (reconciliation hardening) — COMPLETE.** Implementation,
+real-cluster verification, both final reviews PASS, docs synced
+(`993fa54`); benchmark re-run (T010 item 7) done 2026-10-17 — see the
+"Spec 014 benchmark re-run" bullet below. Detail below, under "Spec 014 — what actually got built."
 
 **Spec 013 (edge-1 benchmark harness, simulated T470) — COMPLETE** (`3361e46`).
 
@@ -336,6 +337,18 @@ Fixes the four weaknesses specs 010-013 left (spec.md "Problem"). Detail:
   `requeueWhen` tests). Declined on purpose: mapping `ErrProviderNotReady` on
   delete paths to `RequeueAfter` — a requeue leaves the failed set, and a
   deleted ref is never listed again, so its teardown could be lost.
+- **Benchmark re-run (T010 item 7, 2026-10-17)**: two fresh simulated-T470
+  runs, `profiles/edge-1/bench/results/2026-10-17-spec014-simulated-t470/`.
+  Every pod group PASSes vs spec 013 run 1 (memory and CPU) and run-vs-run;
+  rule 4 PASS (`serendipd` 34.8 / 26.3 MiB); 16 GB verdict unchanged (10-11%).
+  "Node overhead outside pods" drifted 300 → 512 / 370 MiB — kind
+  accounting noise (varies 140 MiB between identical runs, no Serendip
+  process there). Create → `Serving` still 30/32 s: **explained, not a
+  regression** — fresh clusters pull nginx (12-14 s, node events), which
+  lands readiness just after the ~14 s early re-check, so the next one is
+  at 30 s; re-probed with the image cached on the same throttled node:
+  14.9-15.2 s. Write-up: `002-edge1-footprint.md` "Spec 014 re-run";
+  harness/README "Serving" caveat updated to describe the re-check schedule.
 - **Deferred**: auditing foundations-loop repairs (they mutate the cluster
   outside the reconcile path; constitution rule 8 — needs an audit actor for
   system repairs); a "resync now" kick when a capability becomes ready (and
@@ -899,13 +912,11 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 - **The real T470 run is still the open gate.** It's one command once the
   hardware exists (README).
 
-1. **Finish spec 014**: both reviews PASS; remaining is T010 item 7, the
-   benchmark re-run (two simulated-T470 runs, compared with spec 013 run 1).
-   The first attempt (2026-10-13) was stopped during cold start because the
-   host ran critically low on memory; no results were produced and the
-   scratch clusters were deleted. Re-run with the host otherwise idle, using
-   the spec 013 commands in `profiles/edge-1/bench/README.md` and an output
-   folder `results/<date>-spec014-simulated-t470/`.
+1. **Backoff cliff (follow-up decision, not started)**: early re-checks at
+   ~2/6/14/30 s mean anything ready between 14 s and 30 s reports at 30 s
+   (e.g. any uncached image). Option: cap the converging backoff at ~8 s
+   (checks at 2, 6, 14, 22, 30 s). Small `core/reconcile` change, but it
+   changes spec 014's agreed schedule — needs the user's go-ahead.
 2. **HTTPS**: the natural path is cert-manager (already installed) issuing
    certificates for an HTTPS listener on the existing gateway, not a second
    proxy such as Caddy. It needs a decision on where trusted names come from

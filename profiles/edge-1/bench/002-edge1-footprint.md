@@ -7,7 +7,8 @@
 > gate, stay open until the same harness runs on a real T470 (see
 > `README.md`).
 
-Measured 2026-10-11 with `cmd/bench-edge1`. Raw data:
+Measured 2026-10-11 with `cmd/bench-edge1`; re-run 2026-10-17 after spec
+014 (see "Spec 014 re-run" below). Raw data:
 `results/2026-10-11-simulated-t470/` (`run1/`, `run2/`, `comparison.md`;
 `pilot/` and `run2-attempt1-failed/` are kept for transparency).
 
@@ -134,19 +135,70 @@ control-plane CPU on this stack is reproducible to about ±30 mcores, not
   cost, a candidate for trimming since Serendip doesn't use Traefik (ADR
   0011), **can only be measured on K3s**.
 
+## Spec 014 re-run (2026-10-17)
+
+After spec 014 (reconciliation hardening: early re-checks, server-side
+apply, degraded startup, foundations loop), the harness was re-run twice
+under the same simulated-T470 constraints, each on a fresh kind cluster with
+the Docker VM otherwise empty. Raw data: `results/2026-10-17-spec014-simulated-t470/`
+(`run1/`, `run2/`; `comparison-run1.md` and `comparison-run2.md` compare each
+against spec 013's run 1, `comparison-run1-vs-run2.md` the two re-runs).
+
+| Group | Spec 013 run 1 | Spec 014 run 1 | Spec 014 run 2 |
+|---|---|---|---|
+| Kubernetes system | 775.5 | 785.8 | 790.6 |
+| Secrets (OpenBao) | 18.0 | 18.0 | 18.0 |
+| Certificates (cert-manager) | 65.8 | 64.8 | 64.2 |
+| Application platform: control plane | 58.0 | 55.3 | 54.7 |
+| Application platform: data plane | 6.7 | 6.4 | 7.4 |
+| Gateway (kgateway) | 51.7 | 54.0 | 50.5 |
+| Node overhead outside pods | 300.3 | 512.4 | 369.5 |
+| **Node total** | **1275.9** | **1496.6** | **1354.8** |
+| `serendipd` RSS (host process) | 25.3 | 34.8 | 26.3 |
+
+Idle memory, MiB. Timings: cold start 182 s / 169 s, warm restart 36 s /
+38 s, create → `Serving` 30 s × 3 / 32 s × 3.
+
+- **Every pod group PASSes against spec 013's run 1, memory and CPU, in
+  both re-runs**, and the two re-runs PASS against each other. Server-side
+  apply and the new background loops cost nothing measurable in the cluster.
+- **Rule 4: PASS** in both (`serendipd` 34.8 and 26.3 MiB RSS, idle CPU
+  ~0). Run 1's higher RSS is within normal Go heap variation; it is still
+  about 14% of the budget.
+- **Node overhead outside pods moved** (300 → 512 / 370 MiB). That bucket is
+  the node total minus every pod: kubelet, containerd and kernel memory
+  inside the kind container, including page cache charged to it. No
+  Serendip process runs there (`serendipd` is a host process), and it varies
+  between two runs of the same code by 140 MiB, so it's noise in kind's
+  accounting, not a regression. It's the least trustworthy number on kind
+  and the one the real K3s run will replace.
+- **16 GB verdict unchanged:** 11% / 10% of budget.
+- **Create → `Serving` is still 30 s here, and that's explained, not a
+  regression.** In both runs each fresh cluster pulled `nginx:1.27-alpine`
+  first. The pull took 12–14 s (node events), which put the workload's
+  readiness just past the engine's third early re-check (about 14 s after
+  create; re-checks land at about 2, 6, 14 and 30 s). The next check is the
+  30 s one. Re-probed on the same throttled node with the image cached,
+  one Component reached `Serving` in 15.2 s and three created together in
+  14.9–15.2 s. That's the same as spec 014's T010 kind measurement (14.2 s).
+
 ## Findings carried forward
 
-1. **Status lag dominates time-to-`Serving`** (always exactly 30 s). Spec 014
-   (reconciliation hardening) targets this with faster re-checks while
-   something is progressing.
-2. **A transient image-pull failure kills `serendipd`'s startup.** Run 2's
-   first attempt failed when the node's pull of the OpenBao image from
-   quay.io hit a network `EOF`. The image pulled fine on retry 16 s later,
-   but by then OpenBao's 90 s readiness wait had expired and `serendipd`
-   exited (`run2-attempt1-failed/serendipd-failure.txt`). Startup should
-   retry provider setup instead of exiting on the first slow pull. That's a
-   spec 014 candidate. This was not a CPU-throttling effect: the same
-   install finished in about 200 s on every other attempt.
+1. **Time-to-`Serving` has a cliff between 14 s and 30 s.** Spec 014
+   replaced the flat 30 s resync lag with early re-checks backing off
+   2 → 4 → 8 → 16 s. Anything that becomes ready between about 14 s and
+   30 s after create (here, any workload whose image isn't cached yet) is
+   still reported at 30 s. A lower backoff cap while a resource is
+   converging (for example 8 s, giving checks at 2, 6, 14, 22, 30 s) would
+   halve the worst case for a few extra provider reads. That's a follow-up
+   decision, not part of spec 014.
+2. ~~**A transient image-pull failure kills `serendipd`'s startup.**~~
+   **Fixed by spec 014 (degraded startup).** Provider setup now retries in
+   the background (5 s → 2 m) instead of exiting. In spec 013, run 2's first
+   attempt failed when the node's pull of the OpenBao image from quay.io hit
+   a network `EOF`. OpenBao's 90 s readiness wait expired and `serendipd`
+   exited (`run2-attempt1-failed/serendipd-failure.txt`). Spec 014's T010
+   saw the same slow pull simply retry.
 3. **The API server is the biggest lever on footprint.** Fewer CRDs (for
    example not installing unused OpenChoreo or Gateway API kinds) would help
    more than trimming any Serendip component. This needs measurement on K3s
