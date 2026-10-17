@@ -1,6 +1,6 @@
 # Spec 015: Identity foundation (human login)
 
-Status: Approved 2026-10-17 — plan.md next
+Status: Complete 2026-10-17 — evidence in `verification.md`
 
 ## Problem
 

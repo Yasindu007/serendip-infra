@@ -79,5 +79,8 @@ footprint may be reported as verified on its strength (constitution rule 6).
 - Cold start is dominated by image pulls, so it's network-bound. Warm
   restart is the CPU/API-bound number.
 - Create → `Serving` includes the workload image pull, and is quantised by
-  the reconcile engine's early re-checks (about 2, 6, 14 and 30 s after
-  create, spec 014): a workload ready at 15 s is reported at 30 s.
+  the reconcile engine's early re-checks (about 2, 6, 14, 22 and 30 s after
+  create, at most 8 s apart; spec 014). A workload ready at 23 s is
+  reported at 30 s, the harness's 2 s poll adds up to 2 s more, and the
+  application platform's own Ready lag (about 10 s after the pods) comes
+  first.

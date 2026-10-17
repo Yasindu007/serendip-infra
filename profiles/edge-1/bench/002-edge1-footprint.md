@@ -1,4 +1,4 @@
-# Benchmark: edge-1 stack idle footprint (spec 013)
+# Benchmark: edge-1 stack idle footprint (spec 013; re-runs for specs 014 and 015)
 
 > **SIMULATION — does not satisfy the reference-hardware gate.** These runs
 > used a kind node on the dev machine, constrained to approximate a
@@ -181,6 +181,56 @@ Idle memory, MiB. Timings: cold start 182 s / 169 s, warm restart 36 s /
   30 s one. Re-probed on the same throttled node with the image cached,
   one Component reached `Serving` in 15.2 s and three created together in
   14.9–15.2 s. That's the same as spec 014's T010 kind measurement (14.2 s).
+
+## Spec 015 re-run (2026-10-17): with Identity (ThunderID)
+
+Spec 015 adds the Identity capability: ThunderID 1.0.1, one replica,
+SQLite on PVCs, in `serendip-identity`. The harness was run twice under the
+same simulated-T470 constraints, each on a fresh kind cluster. Raw data:
+`results/2026-10-17-spec015-simulated-t470/`. `comparison-run1.md` and
+`comparison-run2.md` compare against spec 014's run 1;
+`comparison-run1-vs-run2.md` compares the two runs with each other.
+
+| Group | Spec 014 run 1 | Spec 015 run 1 | Spec 015 run 2 |
+|---|---|---|---|
+| Kubernetes system | 785.8 | 806.0 | 789.0 |
+| Secrets (OpenBao) | 18.0 | 17.8 | 17.8 |
+| Certificates (cert-manager) | 64.8 | 64.2 | 62.0 |
+| Application platform: control plane | 55.3 | 56.5 | 54.4 |
+| Application platform: data plane | 6.4 | 7.7 | 8.0 |
+| Gateway (kgateway) | 54.0 | 53.5 | 52.4 |
+| **Identity (ThunderID)** | — | **10.6** | **10.8** |
+| Node overhead outside pods | 512.4 | 436.9 | 361.7 |
+| **Node total** | **1496.6** | **1453.2** | **1356.0** |
+| `serendipd` RSS (host process) | 34.8 | 26.2 | 26.3 |
+
+Idle memory is in MiB. The other measurements:
+- **Identity idle CPU**: 0.2 mcores in both runs.
+- **Cold start**: 203 s and 180 s, including ThunderID's chart and image
+  pulls.
+- **Warm restart**: 31 s and 37 s.
+- **Create → `Serving`**: 24/32/32 s and 16/32/32 s.
+
+Findings:
+- **ThunderID idles at about 10.7 MiB and about 0.2 mcores**: smaller than
+  OpenBao (18 MiB) and about a fifth of kgateway (53 MiB). Only the
+  application platform's data plane group (about 8 MiB) is smaller. This is a simulation (rule 6), and
+  ADR 0006's "lighter than Keycloak" is still not claimed, because
+  Keycloak wasn't measured.
+- **Every existing group PASSes against spec 014's run 1**, memory and CPU,
+  in both runs, and the two runs PASS against each other, Identity
+  included. Adding the capability changed nothing else.
+- **Rule 4: PASS.** `serendipd` uses 26.2 and 26.3 MiB RSS, idle CPU about
+  0. The verifier and the identity wiring add nothing measurable.
+- **16 GB verdict unchanged**: 11% and 10% of budget.
+- **The comparison tool now reports a group present only in run B as
+  "new"**, outside the verdict, instead of a FAIL against 0 MiB. A group
+  missing from run B still fails.
+- **Create → `Serving`**: the first Component reached `Serving` at 16 s and
+  24 s, inside the 8 s re-check window. The other two read 32 s. All three
+  pull nginx at the same time on a fresh node, so their readiness lands
+  later. That's consistent with the backoff fix, and finding 1's upstream
+  note still applies.
 
 ## Findings carried forward
 

@@ -103,8 +103,10 @@ release, whichever comes first.
 
 **Footprint:**
 - The T001 spike measured about **11.5 MiB** idle on an unthrottled kind
-  node. The simulated-T470 figure is in
-  `profiles/edge-1/bench/002-edge1-footprint.md` (spec 015 T008).
+  node. On the simulated-T470 node (spec 015 T008, two runs) it idles at
+  about **10.7 MiB and 0.2 mcores**: smaller than OpenBao (18 MiB) and
+  about a fifth of kgateway (53 MiB)
+  (`profiles/edge-1/bench/002-edge1-footprint.md`).
 - Both are simulations. This ADR's own rule still applies: no
   reference-hardware number exists yet, and Keycloak wasn't measured, so
   "lighter than Keycloak" is **not** claimed.

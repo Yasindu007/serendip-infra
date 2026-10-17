@@ -189,6 +189,10 @@ type GroupComparison struct {
 	CPUB  float64 `json:"cpuMilliB"`
 	MemOK bool    `json:"memOK"`
 	CPUOK bool    `json:"cpuOK"`
+	// New marks a group present only in run B: a component added between
+	// the two runs (e.g. comparing across specs). It has nothing to agree
+	// with, so it is reported but not part of the verdict.
+	New bool `json:"new,omitempty"`
 }
 
 func memWithinTolerance(a, b float64) bool {
@@ -199,7 +203,8 @@ func memWithinTolerance(a, b float64) bool {
 }
 
 // compareRuns checks platform-idle agreement between two runs, group by
-// group. Groups present in only one run fail.
+// group. A group missing from run B fails (something disappeared); a group
+// only in run B is marked New and left out of the verdict.
 func compareRuns(a, b Result) []GroupComparison {
 	names := map[string]bool{}
 	for g := range a.Platform.Groups {
@@ -219,6 +224,7 @@ func compareRuns(a, b Result) []GroupComparison {
 		c := GroupComparison{Group: g, MemA: ga.MemoryMiB.Mean, MemB: gb.MemoryMiB.Mean, CPUA: ga.CPUMillicores.Mean, CPUB: gb.CPUMillicores.Mean}
 		c.MemOK = okA && okB && memWithinTolerance(c.MemA, c.MemB)
 		c.CPUOK = okA && okB && math.Abs(c.CPUA-c.CPUB) <= cpuAbsToleranceMilli
+		c.New = !okA && okB
 		out = append(out, c)
 	}
 	return out
@@ -282,7 +288,7 @@ func renderSummary(r Result) string {
 	for _, d := range r.Timings.TimeToServing {
 		serving = append(serving, fmt.Sprintf("%.0fs", time.Duration(d).Seconds()))
 	}
-	fmt.Fprintf(&b, "- Component create → Serving: %s (includes the image pull; status is re-checked about 2, 6, 14 and 30s after create)\n", strings.Join(serving, ", "))
+	fmt.Fprintf(&b, "- Component create → Serving: %s (includes the image pull; status is re-checked about 2, 6, 14, 22 and 30s after create)\n", strings.Join(serving, ", "))
 
 	if len(r.Findings) > 0 {
 		b.WriteString("\n### Findings\n\n")
@@ -321,10 +327,14 @@ func renderComparison(cs []GroupComparison) string {
 	b.WriteString("| Group | Memory A | Memory B | Memory | CPU A | CPU B | CPU |\n|---|---|---|---|---|---|---|\n")
 	allOK := true
 	for _, c := range cs {
+		if c.New {
+			fmt.Fprintf(&b, "| %s | — | %.1f | new | — | %.1f | new |\n", c.Group, c.MemB, c.CPUB)
+			continue
+		}
 		fmt.Fprintf(&b, "| %s | %.1f | %.1f | %s | %.1f | %.1f | %s |\n", c.Group, c.MemA, c.MemB, passFail(c.MemOK), c.CPUA, c.CPUB, passFail(c.CPUOK))
 		allOK = allOK && c.MemOK && c.CPUOK
 	}
-	fmt.Fprintf(&b, "\nTolerance: memory ±%.0f%% for groups ≥ %d MiB, else ±%d MiB; CPU ±%d millicores. Overall: **%s**\n",
+	fmt.Fprintf(&b, "\nTolerance: memory ±%.0f%% for groups ≥ %d MiB, else ±%d MiB; CPU ±%d millicores. \"new\" groups exist only in run B and are not part of the verdict. Overall: **%s**\n",
 		memRelTolerance*100, memRelThresholdMiB, memAbsToleranceMiB, cpuAbsToleranceMilli, passFail(allOK))
 	return b.String()
 }

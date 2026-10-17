@@ -120,6 +120,26 @@ func TestCompareRuns(t *testing.T) {
 	}
 }
 
+// A group only in run B (added between the runs) is reported as new and
+// doesn't fail an otherwise matching comparison.
+func TestCompareRuns_NewGroupIsNotAFailure(t *testing.T) {
+	g := func(mem, cpu float64) GroupAggregate {
+		return GroupAggregate{MemoryMiB: Stat{Mean: mem}, CPUMillicores: Stat{Mean: cpu}}
+	}
+	a := resultWith(map[string]GroupAggregate{GroupGateway: g(54, 7)})
+	b := resultWith(map[string]GroupAggregate{GroupGateway: g(53, 6), GroupIdentity: g(10.6, 0.2)})
+	cs := compareRuns(a, b)
+	for _, c := range cs {
+		if c.Group == GroupIdentity && !c.New {
+			t.Errorf("identity = %+v, want New", c)
+		}
+	}
+	out := renderComparison(cs)
+	if !strings.Contains(out, "Overall: **PASS**") || !strings.Contains(out, "| new |") {
+		t.Errorf("want PASS with the identity group marked new:\n%s", out)
+	}
+}
+
 func TestRenderSummary_SimulationBannerAndNoVerifiedClaim(t *testing.T) {
 	r := Result{
 		StartedAt:  time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC),

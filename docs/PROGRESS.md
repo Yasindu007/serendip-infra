@@ -19,6 +19,12 @@ with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
 
+**Spec 015 (Identity foundation: ThunderID + OIDC human login) — COMPLETE**
+(T001-T011; final commit noted in "Spec 015 — what actually got built").
+Logged-in people can now call the API with a real OIDC access token, alongside
+the static API keys. That's the prerequisite for the UI MVP, which is the next
+spec (016).
+
 **Spec 014 (reconciliation hardening) — COMPLETE.** Implementation,
 real-cluster verification, both final reviews PASS, docs synced
 (`993fa54`); benchmark re-run (T010 item 7) done 2026-10-17 — see the
@@ -286,6 +292,89 @@ project,workflow` only when Projects v2 board work or a
 `.github/workflows/*.yml` push is actually needed, not preemptively.
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
+
+## Spec 015 — what actually got built
+
+Spec, plan (with the T001 "Spike findings") and tasks:
+`specs/015-identity-foundation/`. Architecture: `docs/architecture/identity.md`
+"What's built (spec 015)". ADR 0006 has a dated re-check. Commits: `e202f27`
+spec, `27701e2` plan, `2209225` spike, `b0a55c6` code (T002-T006), `4bbb801`
+docs and ADR, `235cbc1` hardening, plus the final T008/T009 commit.
+
+- **`core/identity`**: `Principal`, `Authenticator`, `ErrInvalidCredential`,
+  and the `person:<name>` actor (`ActorPrefix`). No product names.
+- **`api.AuthMiddleware`** replaces `ActorMiddleware`:
+  - an API key first, unchanged;
+  - otherwise the authenticator: invalid → 401 (generic body, reason only
+    in the log), not ready → 503;
+  - a nil authenticator (no cluster) means API keys only;
+  - `parseAPIKeys` rejects `person:` actors.
+- **`providers/identity/oidc`**: a standard-library, provider-neutral JWT
+  access-token verifier, with no new dependency.
+  - Algorithms: an allow-list (RS/PS/ES/EdDSA); `none`, HMAC and `crit`
+    are rejected; key kty, curve and `alg` must match.
+  - Claims: `iss`, `aud`, `exp`/`nbf`/`iat` (30 s leeway, range-checked);
+    a required `client_id` rejects ID tokens.
+  - Keys: JWKS by discovery or an override URL; at most 32 keys, RSA
+    2048-8192 bits; an unknown-kid refresh at most once per 30 s, run
+    without the caller's cancellation; cached keys survive outages.
+- **`providers/identity/thunderid`**: the ThunderID 1.0.1 Helm chart
+  (`VERSIONS.md`).
+  - One replica, SQLite on three PVCs, plain HTTP, issuer
+    `http://identity.<gateway host>:<NodePort>` (`SERENDIP_IDENTITY_ISSUER`
+    overrides it).
+  - A fixed public PKCE client `serendip`, declared through the chart's
+    first-install bootstrap file, with redirect URI
+    `http://127.0.0.1:8250/callback`.
+  - The admin password is in Secret
+    `serendip-identity/serendip-identity-admin`. It's created only on a
+    fresh install and never recreated (a new value would lie).
+  - The HTTPRoute exposes only the login paths (`/oauth2`, `/.well-known`,
+    `/gate`, `/flow/execute`, `/flow/meta`, `/design/resolve`).
+- **`cmd/serendipd`**: the `identity` capability sets up after the gateway,
+  in parallel with the platform, behind `lazyAuthenticator`. The
+  foundations loop re-ensures the route.
+- **T007, real kind cluster, every acceptance criterion observed directly:**
+  - **AC2**: identity Ready; discovery from the host has the exact issuer;
+    the Secret, release, route (Accepted/Programmed) and PVCs are present.
+  - **AC3**: a scripted auth-code + PKCE login as `admin` gave 200 on
+    `GET /v1/applications` and 201 on a create; the audit actor is
+    `person:admin`.
+  - **AC4**: these all got a generic 401: no token, garbage, a foreign
+    key, a wrong issuer, an ID token, and the real token after expiry
+    (log: `expired`).
+  - **AC5**: the API-key e2e (deploy, expose, curl 200, delete) is
+    unchanged.
+  - **AC6**:
+    - a `serendipd` restart: no reseed, same password, login works;
+    - a pod restart: byte-identical JWKS, the old token still 200;
+    - route deleted: recreated in 17 s, no restart.
+  - **AC7**: with the node stopped, API keys gave 200, identity was not
+    ready with a reason, and a valid token got an honest 503. After the
+    node came back, everything recovered with no restart and the token
+    got 200.
+  - **AC8**: imports clean; spec 015 adds no product names to `core/` or
+    `api/`.
+  - The scripted login helper (driving ThunderID's `/flow/execute` API) was
+    a scratch script; the flow it follows is recorded in plan.md Spike
+    finding 4.
+- **T008 (simulated T470, two runs)**: ThunderID idles at **about 10.7 MiB
+  and 0.2 mcores**, smaller than OpenBao and about a fifth of kgateway.
+  - Every existing group PASSes against spec 014, and the two runs agree.
+  - `serendipd` 26 MiB (rule 4 PASS); 16 GB fits at 10-11%.
+  - The compare tool now reports a group present only in run B as "new"
+    instead of FAIL-vs-0.
+  - Write-up: `002-edge1-footprint.md` "Spec 015 re-run".
+- **Reviews**: `contract-guardian` PASS twice; `go-reviewer` PASS. Its
+  hardening findings were fixed in `235cbc1`.
+- **Deferred, on purpose**:
+  - recording the stable `sub` in audit rows (today the actor is the
+    username);
+  - rate-limiting the rejected-token log line;
+  - splitting identity setup so retries don't re-run Helm;
+  - a dedicated `identity.ErrNotReady` sentinel instead of reusing
+    `reconcile.ErrProviderNotReady`;
+  - ThunderID signing-cert expiry (365 days, untested upstream).
 
 ## Spec 014 — what actually got built
 
@@ -919,25 +1008,29 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 - **The real T470 run is still the open gate.** It's one command once the
   hardware exists (README).
 
-1. **Spec 015 (Identity foundation): `spec.md` approved and committed
-   (`e202f27`); `plan.md` + `tasks.md` approved 2026-10-17; implementing,
-   starting with T001 (a real-install spike that settles the
-   upstream details marked "(spike)" in plan.md).** ThunderID (ADR 0006) deployed by
-   `serendipd`, plus OIDC human login to the API alongside the API keys.
-   It's the prerequisite for the UI. Agreed direction (user, 2026-10-17):
-   the UI MVP is the spec after 015 (likely 016). Research was done via
-   oss-researcher on 2026-10-17:
-   - no ADR 0006 trigger has fired (v1.0.1 on 2026-08-25, no breaking
-     changes, `main` active daily);
-   - the repo moved to `github.com/thunder-id/thunderid`;
-   - no release tag since 2026-08-25; watch it as the window closes in
-     mid-November;
-   - there is no device-code grant, so a future CLI uses auth code + PKCE
-     on a loopback redirect;
-   - the Helm chart is `oci://ghcr.io/thunder-id/helm-charts/thunderid`,
-     SQLite is supported with one replica and a PVC, it listens on port
-     8090, and its health endpoints are `/health/{liveness,readiness}`;
-   - `server.public_url` must equal the external issuer URL.
+1. **Spec 016: UI MVP (agreed direction, user 2026-10-17).** It's next; no
+   spec.md yet. A React + Vite console (`ui/`, rules in `ui/CLAUDE.md`):
+   - log in through the `serendip` OIDC client (auth code + PKCE);
+   - show `/v1/readiness`;
+   - create and list Applications and Components, expose them, and watch
+     their Conditions;
+   - a pure API client (constitution 7).
+
+   Known prerequisites from spec 015:
+   - **The UI needs its own redirect URI** on the `serendip` client.
+     Bootstrap files only import on first install. The working route
+     (plan.md Spike finding 10): an admin token for the built-in
+     `CONSOLE` client with `scope=system` and
+     `resource=https://localhost:8090/mcp`, then the management API.
+   - **CORS**: ThunderID allows no origins by default (needed if the SPA
+     calls `/oauth2/token` directly), and `serendipd` sends no CORS
+     headers. Or serve the UI from `serendipd`'s origin.
+   - It probably needs an unauthenticated `GET /v1/auth/config` (issuer +
+     client ID), deliberately left out of spec 015.
+   - Plain HTTP is localhost-only, so a remote browser needs HTTPS (item
+     2).
+   - **Watch ADR 0006**: no ThunderID release tag since 2026-08-25. If none
+     lands by about 2026-11-15, run the re-check.
 2. **HTTPS**: the natural path is cert-manager (already installed) issuing
    certificates for an HTTPS listener on the existing gateway, not a second
    proxy such as Caddy. It needs a decision on where trusted names come from

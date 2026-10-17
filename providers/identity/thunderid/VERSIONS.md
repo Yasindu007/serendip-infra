@@ -46,8 +46,8 @@ Bump the chart and image together: chart 1.0.1's `appVersion` is 1.0.1.
 ## Measured footprint
 
 T001, unthrottled kind node: about 11.5 MiB working set and about 0.2 mcores
-idle. The simulated-T470 figure is in
-`profiles/edge-1/bench/002-edge1-footprint.md` (spec 015 T008).
+idle. The simulated-T470 figure is about 10.7 MiB and 0.2 mcores (spec 015 T008), in
+`profiles/edge-1/bench/002-edge1-footprint.md`.
 
 ## Known limits
 
