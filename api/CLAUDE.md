@@ -4,10 +4,16 @@
 - Handlers are thin: decode -> core/store call -> encode. No business
   logic, no direct provider calls. Calling `core/store.Store[S,St]`
   directly from a handler *is* the core call (spec 002) — there's no
-  separate domain-logic layer between them yet. There is no per-request
-  policy/authz decision beyond actor resolution (below) until a real
-  policy engine exists (`audit.Record.PolicyDecision` is reserved for
-  that, spec 003+); don't invent an authz step that doesn't exist.
+  separate domain-logic layer between them yet.
+- Authorization (spec 017, `authz.go`): every `/v1` route is registered
+  through `NewServer`'s authorizing mux, which panics at startup for a
+  route missing from `routeTable()`. Adding a route means adding its rule
+  (action, and how its target scope is found). Handlers take the `Mux`
+  interface, never `*http.ServeMux` directly. List handlers must pass
+  their results through `filterReadable`, and graph handlers through
+  `filterReadableRefs`. A refusal is 403 naming the missing action and
+  scope. A refused mutation gets an audit row; the decision that allowed
+  a mutation lands in `policy_decision` via `audit.WithPolicyDecision`.
 - Actor resolution happens in `AuthMiddleware` (`middleware.go`, spec 015):
   - the static `SERENDIP_API_KEYS` token->actor map first;
   - then the Identity capability's `core/identity.Authenticator`, which

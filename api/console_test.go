@@ -22,6 +22,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/identity"
+	"github.com/serendip-infra/serendip-infra/core/policy"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 )
@@ -131,7 +132,10 @@ func newConsoleWith(t testing.TB, authn identity.Authenticator) (http.Handler, *
 	sessions := api.NewSessions(api.SessionConfig{Now: clk.Now})
 	shell := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("<html>shell</html>")) })
 	c := &api.Console{Handler: shell, Origin: origin, Login: func() identity.LoginClient { return fl }, Sessions: sessions, Now: clk.Now}
-	srv := api.NewServer(newTestDB(t), event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, authn, nil, nil, c)
+	db := newTestDB(t)
+	// The console's signed-in person (consoleAuthn's sub-1) is Owner.
+	grant(t, db, resource.PrincipalPerson, "sub-1", policy.OwnerRoleID, resource.RootScope)
+	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-alice": "alice"}, authn, nil, nil, c)
 	return srv.Handler, clk, fl, sessions
 }
 
@@ -257,6 +261,7 @@ func TestConsole_AuditActorIsThePerson(t *testing.T) {
 	origin, _ := api.ParseOrigin(testOrigin, false)
 	c := &api.Console{Handler: http.NotFoundHandler(), Origin: origin, Login: func() identity.LoginClient { return fl },
 		Sessions: api.NewSessions(api.SessionConfig{Now: clk.Now}), Now: clk.Now}
+	grant(t, db, resource.PrincipalPerson, "sub-1", policy.OwnerRoleID, resource.RootScope)
 	h := api.NewServer(db, event.NewInProcessBus(), nil, consoleAuthn{}, nil, nil, c).Handler
 	sc := signIn(t, h)
 

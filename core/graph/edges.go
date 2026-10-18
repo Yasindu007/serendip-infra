@@ -80,6 +80,39 @@ func Children(ctx context.Context, q Queryer, ref ResourceRef) ([]ResourceRef, e
 		string(resource.EdgeOwns), string(ref.Kind), ref.ID)
 }
 
+// Owners returns ref's direct owners (an "owns" edge from them to ref).
+func Owners(ctx context.Context, q Queryer, ref ResourceRef) ([]ResourceRef, error) {
+	return queryEdgeTargets(ctx, q, `
+		SELECT from_kind, from_id FROM edges WHERE edge_type = ? AND to_kind = ? AND to_id = ?`,
+		string(resource.EdgeOwns), string(ref.Kind), ref.ID)
+}
+
+// Descendants returns everything ref owns, at any depth: what a cascading
+// delete of ref removes. A cycle ends the walk rather than looping.
+func Descendants(ctx context.Context, q Queryer, ref ResourceRef) ([]ResourceRef, error) {
+	visited := map[ResourceRef]bool{ref: true}
+	frontier := []ResourceRef{ref}
+	var result []ResourceRef
+	for len(frontier) > 0 {
+		var next []ResourceRef
+		for _, node := range frontier {
+			children, err := Children(ctx, q, node)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range children {
+				if !visited[c] {
+					visited[c] = true
+					result = append(result, c)
+					next = append(next, c)
+				}
+			}
+		}
+		frontier = next
+	}
+	return result, nil
+}
+
 // Ancestors returns ref's owners, their owners and so on up to the roots,
 // nearest first (breadth-first, so a resource with several owners lists
 // all of them before any grandparent). It is what makes authorization

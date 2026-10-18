@@ -481,6 +481,21 @@ func (e *Engine) RoleInUse(ctx context.Context, roleID string) (bool, error) {
 	return false, nil
 }
 
+// HasAssignment reports whether any assignment names p as its principal.
+func (e *Engine) HasAssignment(ctx context.Context, p resource.PrincipalRef) (bool, error) {
+	if err := e.refresh(ctx); err != nil {
+		return false, err
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, a := range e.byID {
+		if a.Spec.Principal.Type == p.Type && a.Spec.Principal.ID == p.ID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Assignments returns every assignment sorted by ID, for listing and
 // filtering by callers that already decided read access. The values share
 // slices with the index: callers must not modify them.

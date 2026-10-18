@@ -6,6 +6,25 @@ type actorKey struct{}
 type requestIDKey struct{}
 type interfaceKey struct{}
 type subjectKey struct{}
+type policyDecisionKey struct{}
+
+// WithPolicyDecision returns a context carrying the authorization decision
+// that allowed the request (spec 017 plan.md decision 8), recorded with
+// every mutation the request makes.
+func WithPolicyDecision(ctx context.Context, decision string) context.Context {
+	return context.WithValue(ctx, policyDecisionKey{}, decision)
+}
+
+// PolicyDecisionFrom returns the decision set by WithPolicyDecision, or nil
+// when none was made (a mutation outside any request, such as the
+// reconciler's).
+func PolicyDecisionFrom(ctx context.Context) *string {
+	d, _ := ctx.Value(policyDecisionKey{}).(string)
+	if d == "" {
+		return nil
+	}
+	return &d
+}
 
 // WithSubject returns a context carrying the stable subject of the person
 // behind the actor (spec 017), read back by SubjectFrom and recorded with

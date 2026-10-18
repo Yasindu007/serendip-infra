@@ -14,10 +14,26 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/identity"
+	"github.com/serendip-infra/serendip-infra/core/policy"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
+
+// grant assigns role to a principal at scope, straight into db. Call it
+// before api.NewServer, whose policy index loads on first use.
+func grant(t testing.TB, db *sql.DB, pt resource.PrincipalType, id, role string, scope resource.Scope) string {
+	t.Helper()
+	s := sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](db, resource.KindRoleAssignment)
+	created, err := s.Create(context.Background(), resource.RoleAssignment{
+		Metadata: resource.Metadata{Name: "test-grant"},
+		Spec:     resource.RoleAssignmentSpec{Principal: resource.PrincipalRef{Type: pt, ID: id}, RoleDefinitionID: role, Scope: scope},
+	})
+	if err != nil {
+		t.Fatalf("grant %s %s: %v", pt, id, err)
+	}
+	return created.Metadata.ID
+}
 
 func newTestDB(t testing.TB) *sql.DB {
 	t.Helper()
@@ -194,6 +210,7 @@ func TestAuth_RecordsSubjectAndPrincipals(t *testing.T) {
 	authn := &fakeAuthn{tokens: map[string]identity.Principal{
 		"tok-carol": {Subject: "sub-carol", Name: "carol", Groups: []string{"platform"}},
 	}}
+	grant(t, db, resource.PrincipalPerson, "sub-carol", policy.OwnerRoleID, resource.RootScope)
 	h := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-ci": "ci"}, authn, nil, nil, nil).Handler
 	create := func(token, name string) {
 		t.Helper()
@@ -209,7 +226,7 @@ func TestAuth_RecordsSubjectAndPrincipals(t *testing.T) {
 	create("tok-carol", "by-carol")
 	create("key-ci", "by-ci")
 
-	rows, err := db.Query(`SELECT actor, COALESCE(actor_subject, '') FROM audit_log ORDER BY at`)
+	rows, err := db.Query(`SELECT actor, COALESCE(actor_subject, '') FROM audit_log WHERE kind = 'Organization' ORDER BY at`)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -89,7 +89,16 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
 - **Verify**: verifier table tests (groups present, absent, malformed;
   capped size); a migration test; `go test ./...`.
 
-## T005 — `api`: route table, authorization middleware, list filtering, 403
+## T005 — `api`: route table, authorization middleware, list filtering, 403 — DONE 2026-10-18
+
+- **Notes:** routes are authorized where they're registered (an
+  authorizing mux and the `Mux` interface), since a middleware in front
+  of the mux can't see the matched pattern or `{id}`. A PUT that moves a
+  resource under an owner outside its current ancestry also needs write
+  there. Graph results are filtered like lists. The API-key migration
+  (each key with no assignment becomes Owner at `/`) landed here, in
+  `NewServer`, so every existing test keeps its behaviour. T007 keeps the
+  bootstrap administrator, removed-key cleanup and break-glass.
 
 - **Do**:
   - Write the complete route-to-action table (decision 2).

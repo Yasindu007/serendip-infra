@@ -31,7 +31,7 @@ func NewRegistryHandler(c *registry.CapabilityRegistry) *RegistryHandler {
 // Capability's logical Metadata.Name (e.g. "identity"), not its
 // generated ID -- matching how CapabilityRegistry itself is keyed
 // (findByName), since capability-model.md's catalog is name-keyed.
-func (h *RegistryHandler) Register(mux *http.ServeMux) {
+func (h *RegistryHandler) Register(mux Mux) {
 	mux.HandleFunc("GET /v1/capabilities/{name}/default", h.getDefault)
 	mux.HandleFunc("PUT /v1/capabilities/{name}/default", h.setDefault)
 }

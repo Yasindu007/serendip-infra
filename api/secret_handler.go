@@ -42,7 +42,7 @@ func NewSecretHandler(s store.Store[resource.SecretSpec, resource.SecretStatus],
 //
 //	POST /v1/secrets/{id}/value   Write a value through to the provider
 //	GET  /v1/secrets/{id}/value   Read the current value from the provider
-func (h *SecretHandler) Register(mux *http.ServeMux) {
+func (h *SecretHandler) Register(mux Mux) {
 	mux.HandleFunc("POST /v1/secrets", h.Create)
 	mux.HandleFunc("GET /v1/secrets", h.List)
 	mux.HandleFunc("GET /v1/secrets/{id}", h.Get)

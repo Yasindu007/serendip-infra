@@ -10,6 +10,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/id"
 	"github.com/serendip-infra/serendip-infra/core/identity"
+	"github.com/serendip-infra/serendip-infra/core/policy"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
@@ -79,6 +80,7 @@ func AuthMiddleware(apiKeys map[string]string, authn identity.Authenticator) fun
 func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, console *Console, principals *sqlite.PrincipalRegistry) func(http.Handler) http.Handler {
 	person := func(ctx context.Context, p identity.Principal) context.Context {
 		recordSeen(ctx, principals, sqlite.KnownPrincipal{Type: resource.PrincipalPerson, ID: p.Subject, DisplayName: p.Name, Groups: p.Groups})
+		ctx = withCaller(ctx, policy.Principal{Type: resource.PrincipalPerson, ID: p.Subject, Groups: p.Groups})
 		return audit.WithSubject(audit.WithActor(ctx, identity.Actor(p)), p.Subject)
 	}
 	return func(next http.Handler) http.Handler {
@@ -110,7 +112,8 @@ func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, con
 			}
 			if actor, ok := apiKeys[token]; ok {
 				recordSeen(r.Context(), principals, sqlite.KnownPrincipal{Type: resource.PrincipalAPIKey, ID: actor, DisplayName: actor})
-				next.ServeHTTP(w, r.WithContext(audit.WithActor(r.Context(), actor)))
+				ctx := withCaller(r.Context(), policy.Principal{Type: resource.PrincipalAPIKey, ID: actor})
+				next.ServeHTTP(w, r.WithContext(audit.WithActor(ctx, actor)))
 				return
 			}
 			if authn != nil {

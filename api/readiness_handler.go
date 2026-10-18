@@ -20,7 +20,7 @@ func NewReadinessHandler(registry *provider.Registry) *ReadinessHandler {
 	return &ReadinessHandler{registry: registry}
 }
 
-func (h *ReadinessHandler) Register(mux *http.ServeMux) {
+func (h *ReadinessHandler) Register(mux Mux) {
 	mux.HandleFunc("GET /v1/readiness", h.Get)
 }
 

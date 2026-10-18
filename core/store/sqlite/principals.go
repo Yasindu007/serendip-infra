@@ -164,3 +164,19 @@ func (r *PrincipalRegistry) Forget(ctx context.Context, t resource.PrincipalType
 	r.forget(principalKey{t, id})
 	return nil
 }
+
+// EverAssigned reports whether the audit log records any role assignment
+// ever made to the principal, including since-deleted ones. Startup
+// migrations use it so an access an operator revoked isn't granted again
+// (spec 017 plan.md decision 7).
+func EverAssigned(ctx context.Context, db *sql.DB, t resource.PrincipalType, id string) (bool, error) {
+	var n int
+	err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM audit_log
+		WHERE kind = ? AND json_extract(after, '$.spec.principal.type') = ? AND json_extract(after, '$.spec.principal.id') = ?`,
+		string(resource.KindRoleAssignment), string(t), id).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("sqlite: look up past assignments of %s %s: %w", t, id, err)
+	}
+	return n > 0, nil
+}

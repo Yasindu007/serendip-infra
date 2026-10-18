@@ -19,8 +19,10 @@ type Record struct {
 	Before     json.RawMessage // nil on Create -- nothing existed before
 	After      json.RawMessage // nil on Delete -- nothing exists after
 	At         time.Time
-	// PolicyDecision is reserved for a future policy engine (spec 003+).
-	// Nil until then -- nothing sets it in spec 001.
+	// PolicyDecision is the authorization decision behind the record
+	// (spec 017): "allow: <role> (<assignment>) at <scope>" for a mutation,
+	// "deny: missing <action> at <scope>" for a refused one. Nil for
+	// mutations made outside an authorized request.
 	PolicyDecision *string
 	// ActorSubject is the stable identifier behind Actor when the actor is a
 	// person: the identity provider's subject, which survives a renamed or

@@ -352,6 +352,34 @@ tokens or passwords.
   check and the store write (T003). Otherwise two concurrent removals of
   different root Owners could both pass the last-Owner check. The API
   handler in T006 does this.
+- **Enforcement details settled in T005** (from the reviews):
+  - A create or update body is decoded for its owners exactly as the
+    handler decodes it, and one the check can't read is refused there
+    (400, or 413), never handed on. Handing it on was a bypass: the two
+    decoders disagreed on trailing data.
+  - `?cascade=true` needs delete on every descendant, by its own kind.
+    A descendant with a second owner elsewhere is still covered by
+    inheritance from the resource being deleted, as in Azure.
+  - A PUT needs write at every owner it adds or removes, and at `/` when
+    it removes them all.
+  - An API key is migrated to Owner only if it has never had an
+    assignment (judged from the audit log), so revoking a key's access
+    survives a restart. Revoking a key entirely means removing it from
+    `SERENDIP_API_KEYS`.
+  - Lists cost one decision per item; measured in T009.
+  - The owners and descendants a request is checked against are read
+    just before the store's transaction, so a child added in between
+    could be cascaded without its own check. The window is small on a
+    single-node SQLite store; closing it needs the check inside the
+    transaction.
+  - `EverAssigned` scans the audit log once per API key at startup, and
+    relies on role-assignment audit rows never being pruned. Any future
+    audit retention must keep them.
+  - A handler mounted on a plain mux (unit tests only) isn't filtered.
+    Production mounts every route through the authorizing mux.
+  - Each `NewServer` starts the policy index's 30 s tick, stopped by
+    `Server.Shutdown`. Tests that never shut down leave it running until
+    the process exits.
 - **Lockout through key removal** is guarded (decision 7); break-glass is
   the backstop.
 

@@ -30,7 +30,7 @@ func NewGraphHandler(g graph.Graph) *GraphHandler {
 
 // Register wires GET /v1/graph/{kind}/{id}/children, .../dependents,
 // .../blast-radius.
-func (h *GraphHandler) Register(mux *http.ServeMux) {
+func (h *GraphHandler) Register(mux Mux) {
 	mux.HandleFunc("GET /v1/graph/{kind}/{id}/children", h.children)
 	mux.HandleFunc("GET /v1/graph/{kind}/{id}/dependents", h.dependents)
 	mux.HandleFunc("GET /v1/graph/{kind}/{id}/blast-radius", h.blastRadius)
@@ -59,6 +59,11 @@ func (h *GraphHandler) respond(w http.ResponseWriter, r *http.Request, result []
 	if err != nil {
 		status, title := MapStoreError(err)
 		WriteProblem(w, status, title, err.Error(), audit.RequestIDFrom(r.Context()))
+		return
+	}
+	// Related resources the caller can't read stay hidden, as in lists.
+	if result, err = filterReadableRefs(r.Context(), result); err != nil {
+		WriteProblem(w, http.StatusInternalServerError, "authorization check failed", "the result couldn't be filtered; retry later", audit.RequestIDFrom(r.Context()))
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

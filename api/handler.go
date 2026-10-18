@@ -38,7 +38,7 @@ func NewResourceHandler[S, St any](s store.Store[S, St], path string) *ResourceH
 
 // Register wires this handler's 5 routes onto mux using Go 1.22+
 // pattern-based net/http.ServeMux routing -- no router library.
-func (h *ResourceHandler[S, St]) Register(mux *http.ServeMux) {
+func (h *ResourceHandler[S, St]) Register(mux Mux) {
 	mux.HandleFunc("POST /v1/"+h.path, h.Create)
 	mux.HandleFunc("GET /v1/"+h.path, h.List)
 	mux.HandleFunc("GET /v1/"+h.path+"/{id}", h.Get)
@@ -88,6 +88,11 @@ func (h *ResourceHandler[S, St]) List(w http.ResponseWriter, r *http.Request) {
 	list, err := h.store.List(r.Context(), opts)
 	if err != nil {
 		h.writeStoreError(w, r, err)
+		return
+	}
+	// Only what the caller may read (specs/017-authorization decision 4).
+	if list, err = filterReadable(r.Context(), list); err != nil {
+		h.writeError(w, r, http.StatusInternalServerError, "authorization check failed", "the list couldn't be filtered; retry later")
 		return
 	}
 	writeJSON(w, http.StatusOK, list)

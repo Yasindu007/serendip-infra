@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/core/graph"
@@ -335,4 +336,43 @@ func TestAncestors(t *testing.T) {
 			t.Errorf("Ancestors(loop-a) = %v, %v; want [loop-b] and no infinite loop", got, err)
 		}
 	})
+}
+
+func TestOwnersAndDescendants(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	ref := func(kind resource.Kind, id string) graph.ResourceRef { return graph.ResourceRef{Kind: kind, ID: id} }
+	own := func(child graph.ResourceRef, owners ...graph.ResourceRef) {
+		t.Helper()
+		var refs []resource.OwnerRef
+		for _, o := range owners {
+			refs = append(refs, resource.OwnerRef{Kind: o.Kind, ID: o.ID})
+		}
+		if err := graph.SyncEdges(ctx, db, child, refs, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	proj, env, app := ref(resource.KindProject, "p"), ref(resource.KindEnvironment, "e"), ref(resource.KindApplication, "a")
+	web, vol := ref(resource.KindComponent, "w"), ref(resource.KindVolume, "v")
+	own(env, proj)
+	own(app, env)
+	own(web, app)
+	own(vol, app, proj)
+
+	owners, err := graph.Owners(ctx, db, vol)
+	if err != nil || len(owners) != 2 || !slices.Contains(owners, app) || !slices.Contains(owners, proj) {
+		t.Errorf("Owners(vol) = %v, %v; want the application and the project", owners, err)
+	}
+	below, err := graph.Descendants(ctx, db, proj)
+	if err != nil || len(below) != 4 {
+		t.Fatalf("Descendants(proj) = %v, %v; want env, app, web and vol once each", below, err)
+	}
+	for _, want := range []graph.ResourceRef{env, app, web, vol} {
+		if !slices.Contains(below, want) {
+			t.Errorf("Descendants(proj) lacks %v", want)
+		}
+	}
+	if leaf, err := graph.Descendants(ctx, db, web); err != nil || len(leaf) != 0 {
+		t.Errorf("Descendants(web) = %v, %v; want none", leaf, err)
+	}
 }
