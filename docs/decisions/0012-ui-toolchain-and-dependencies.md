@@ -56,7 +56,7 @@ Every version was the newest release at least 14 days old on 2026-10-17.
   handful of endpoints and has about five routes. A typed `fetch` wrapper,
   a `usePoll` hook and a ~60-line history router are smaller than any of
   them, and add no dependency.
-- **lucide-react:** about ten icons are copied as inline SVG instead (ISC,
+- **lucide-react:** eight icons are copied as inline SVG instead (ISC,
   attributed in `ui/THIRD_PARTY.md`).
 - **ESLint:** dozens of transitive packages. Strict `tsc` covers the type
   level; lint rules can come later with their own entry here.

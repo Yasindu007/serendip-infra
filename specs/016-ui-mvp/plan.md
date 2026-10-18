@@ -61,17 +61,19 @@ minimum release age, and a frozen lockfile. The UI polls; nothing streams.
 ## Decisions
 
 1. **Same origin, embedded.**
-   - **Embedding.** `ui/embed.go` (`package ui`) embeds `all:dist`.
-     `ui/dist/.gitkeep` is committed, so `go build ./...` works without
-     Node.
-   - **Serving.** `ui.Handler()` serves the files with the security headers
-     (decision 8). For any path that isn't a file or `/v1`, `/auth` or
-     `/healthz`, it returns `index.html` (client-side routes). When
-     `index.html` is missing, it says "console not built — run
-     `pnpm -C ui build`".
-   - **Wiring.** `api.NewServer` takes the console handler as an
-     `http.Handler` parameter (nil = no console), so `api` never imports
-     `ui`.
+   - **Embedding** (amended in T005). `cmd/serendipd/console/console.go`
+     embeds `all:dist`; `pnpm -C ui build` writes `dist/app` there.
+     `dist/.gitkeep` is committed, so `go build ./...` works without Node.
+     `ui/go.mod` (module `serendip.invalid/ui-fence`) holds no Go code: it
+     only keeps Go tooling out of `ui/node_modules`.
+   - **Serving.** `console.Handler()` serves the files. For any path that
+     isn't a file or `/v1`, `/auth` or `/healthz`, it returns `index.html`
+     (client-side routes); a missing `/assets/` file is a 404. When
+     `index.html` is missing, it says the console isn't built and how to
+     build it. Security headers (decision 8) are set by `api`, not here.
+   - **Wiring.** `api.NewServer` takes a `*api.Console` (nil = no console)
+     that carries the handler, public origin, login client and session
+     table, so `api` never imports the console package.
    - **Headers.** Hashed asset filenames get `Cache-Control: public,
      max-age=31536000, immutable`, and `index.html` gets `no-cache`.
 2. **Public origin is configured, not guessed.**
@@ -129,16 +131,17 @@ minimum release age, and a frozen lockfile. The UI polls; nothing streams.
          console shell is public. Every authenticated call is a
          same-origin `fetch` from the page, which carries Strict cookies.
          T001 checks this in a real browser.
-   - **`GET /v1/session`** (cookie or bearer) → `{actor, subject,
-     expiresAt, idleExpiresAt}` or 401. This is how the UI learns who's
+   - **`GET /v1/session`** (cookie or bearer) → `{actor, method, subject,
+     expiresAt, idleExpiresAt}` or 401. `method` is `session` or `bearer`;
+     the other three fields are only present for a session. This is how the UI learns who's
      signed in. No token, ID or claim beyond these is ever returned.
    - **`POST /auth/logout`** (cookie + CSRF checks):
      - It deletes the session and revokes the refresh token at the
        revocation endpoint, best effort and bounded at 3 s, if upstream
        supports it.
      - It returns `{location}`: the provider's end-session URL with
-       `id_token_hint`, `post_logout_redirect_uri` and `client_id`, if
-       supported, otherwise `/`.
+       `post_logout_redirect_uri` and `client_id` (no `id_token_hint`; see
+       Risks), if supported, otherwise `/`.
      - It's a POST and not a GET, so a cross-site `<img>` can't log people
        out.
 4. **Sessions live in memory** (ADR 0013):
@@ -146,7 +149,7 @@ minimum release age, and a frozen lockfile. The UI polls; nothing streams.
      - the principal;
      - the access token's expiry;
      - the refresh token;
-     - the ID token, kept only for `id_token_hint`;
+     - the ID token (kept, but no longer sent at logout);
      - its creation time and last-seen time.
    - **Expiry:**
      - **idle 30 min.** Last-seen is refreshed on each request, at most
@@ -201,7 +204,10 @@ minimum release age, and a frozen lockfile. The UI polls; nothing streams.
    The audit actor is `identity.Actor(principal)`, the same as for a
    bearer token.
 7. **Redirect URIs on the `serendip` client** (provider-specific, in
-   `providers/identity/thunderid`):
+   `providers/identity/thunderid`). **Superseded in part by "Decision 7, as
+   amended" (below, after T010):** `serendipd` only checks read-only; the
+   management-API update is an operator command
+   (`cmd/serendip-identity-redirects`). The original text follows.
    - New installs get `<public>/auth/callback` and `<public>/` in the
      bootstrap client document, alongside the loopback URI.
    - Existing installs: `EnsureClientRedirects` runs in identity setup and
@@ -217,9 +223,11 @@ minimum release age, and a frozen lockfile. The UI polls; nothing streams.
      - It never removes a URI it didn't add.
 8. **Security headers on every console and `/auth` response:**
    - `Content-Security-Policy: default-src 'self'; script-src 'self';
-     style-src 'self'; img-src 'self' data:; font-src 'self';
-     connect-src 'self'; form-action 'self' <issuer origin>;
+     style-src 'self'; img-src 'self'; font-src 'self';
+     connect-src 'self'; form-action 'self';
      frame-ancestors 'none'; base-uri 'none'; object-src 'none'`
+     (as built: no `data:` images, and `form-action 'self'` only, since
+     login is a redirect, not a form post)
      - **No `'unsafe-inline'` and no `'unsafe-eval'`.** Vite's production
        output works under this; T005 checks for zero violations.
      - **`connect-src 'self'`** means an injected script can't send data to
@@ -228,6 +236,7 @@ minimum release age, and a frozen lockfile. The UI polls; nothing streams.
    - `Referrer-Policy: no-referrer`
    - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
    - `Cross-Origin-Opener-Policy: same-origin`
+   - `X-Frame-Options: DENY` (added in T005)
    - `/v1` and `/auth` responses also get `Cache-Control: no-store`.
 9. **API hardening** (`api/server.go`, `cmd/serendipd`):
    - **Server timeouts:** `ReadHeaderTimeout` 10 s, `ReadTimeout` 30 s,
@@ -263,12 +272,14 @@ minimum release age, and a frozen lockfile. The UI polls; nothing streams.
         lint rules can come later.
     - **`.npmrc`:**
       - `ignore-scripts=true`;
-      - `minimum-release-age=10080` (7 days);
       - `strict-peer-dependencies=true`;
-      - `save-exact=true`.
-      - `onlyBuiltDependencies` is empty: esbuild works from its
-        per-platform optional package without its postinstall (T002
-        verifies this).
+      - `save-exact=true`;
+      - `registry=https://registry.npmjs.org/`.
+    - **`pnpm-workspace.yaml`** (as built, T002):
+      - `minimumReleaseAge: 10080` (7 days);
+      - `onlyBuiltDependencies: []` and `strictDepBuilds: true`: Vite 8's
+        native bindings come as per-platform optional packages, so nothing
+        needs an install script.
     - **Install hygiene.** Run installs with no credentials in the
       environment: no `GITHUB_TOKEN` and no `NPM_TOKEN`. That's what the
       Shai-Hulud worm harvested. `ui/CLAUDE.md` makes this a rule, and the
@@ -301,15 +312,13 @@ minimum release age, and a frozen lockfile. The UI polls; nothing streams.
       icon and a word.
     - **Topology:** a topology banner when the install is single-node.
 
-    `ui/DESIGN.md` records the tokens (type scale, 4 px spacing grid,
-    colour roles: surface, text, border, accent, ok, warn, danger, info;
-    radii; focus ring) and the components:
-    - AppShell, Nav, PageHeader;
-    - StatusText, ConditionsTable, KeyValueList;
-    - Button, TextField, PortEditor, EnvEditor;
-    - ApiEquivalent;
-    - EmptyState, ErrorState, Banner;
-    - ConfirmDialog (unused until approvals exist).
+    `ui/DESIGN.md` records the tokens and components as built; it, not
+    this list, is authoritative. The planned list (AppShell, Nav, Button,
+    PortEditor, EnvEditor, ConfirmDialog, an `info` colour role) was
+    narrowed while building. The built set is Shell, PageHeader,
+    StatusText, ReadyStatus, ReconciliationPath, ConditionsTable,
+    KeyValueList, SafeLink, ApiEquivalent, TextField, Banner, Notice,
+    EmptyState, LoadingState, ErrorState and Icon.
 12. **Polling.**
     - **Interval:** 5 s on a detail page and 15 s on a list. It pauses
       while `document.hidden` and resumes immediately on focus.
@@ -401,25 +410,31 @@ trigger.
   It reuses the existing JWS/JWK code for the ID token, with no new
   dependency.
 - `api`:
-  - `session.go`: session table and pending logins;
-  - `auth_handler.go`: `/auth/*` and `/v1/session`;
-  - `AuthMiddleware` gains a sessions parameter;
-  - `NewServer` gains `console http.Handler`, `sessions *Sessions` and
-    `login identity.LoginClient` (lazy, like `authn`, so the API is up
-    before identity is).
-- `providers/identity/thunderid`: `EnsureClientRedirects`,
-  `TokenProxyURL`, `RevokeProxyURL`.
-- `ui/`: the Vite app, `embed.go`, `DESIGN.md` and `THIRD_PARTY.md`.
+  - `session.go`: the session table;
+  - `console.go`: `Console` (pending logins, `/auth/*`, cookie auth,
+    refresh, `GET /v1/session`);
+  - `hardening.go`: limits, security headers, rate limiter;
+  - `AuthMiddleware` keeps its signature; an unexported variant adds the
+    console;
+  - `NewServer` gains a final `console *Console` parameter, whose `Login`
+    is a lazy func (like `authn`), so the API is up before identity is.
+- `providers/identity/thunderid`: `EnsureClientRedirects` (read-only
+  check), `RegisterConsoleRedirects` (the operator command's call),
+  `ProxyBaseURL`.
+- `cmd/serendip-identity-redirects`: the operator command.
+- `cmd/serendipd/console`: the embedded console.
+- `ui/`: the Vite app, the `go.mod` fence, `DESIGN.md` and `THIRD_PARTY.md`.
 
 ## Files touched
 
 - `core/identity/identity.go` (+ test)
 - `providers/identity/oidc/rp.go` (new, + test)
-- `providers/identity/thunderid/{values.go,clients.go (new),ready.go}` (+ test)
-- `api/{server.go,middleware.go,session.go (new),auth_handler.go (new),console_headers.go (new)}` (+ tests)
-- `cmd/serendipd/{main.go,wiring.go}`: public URL config, server
-  timeouts, lazy login client, console handler
-- `ui/**` (new app), `ui/CLAUDE.md`, `.gitignore` (`!ui/dist/.gitkeep`)
+- `providers/identity/thunderid/{values.go,deploy.go,clients.go (new)}` (+ test)
+- `api/{server.go,middleware.go,session.go (new),console.go (new),hardening.go (new)}` (+ tests)
+- `cmd/serendipd/{main.go,wiring.go}`: public URL config, lazy login
+  client, console wiring; `cmd/serendipd/console/` (new),
+  `cmd/serendip-identity-redirects/` (new)
+- `ui/**` (new app), `ui/CLAUDE.md`, `.gitignore` (`!cmd/serendipd/console/dist/.gitkeep`)
 - `docs/decisions/0012-ui-toolchain-and-dependencies.md`,
   `docs/decisions/0013-console-session-topology.md`
 - `docs/architecture/identity.md` (Console session section), `api/CLAUDE.md`

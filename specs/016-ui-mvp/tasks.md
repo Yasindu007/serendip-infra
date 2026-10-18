@@ -281,7 +281,7 @@ before that.
 - **Verify**: every acceptance criterion has observed evidence or an
   explicit "not verified, because …". No destructive operation is run.
 
-## T011 — Final reviews
+## T011 — Final reviews — DONE 2026-10-18 (contract-guardian PASS ×4, go-reviewer PASS, /security-review over b82af3d..HEAD: no findings)
 
 - **Do**: Run `contract-guardian` over everything under `core/` and
   `providers/`, `go-reviewer` over the Go changes, and `/security-review`
@@ -289,7 +289,7 @@ before that.
 - **Verify**: all three report PASS, or their blocking findings are
   fixed and re-reviewed.
 
-## T012 [A] — Docs sync + PROGRESS
+## T012 [A] — Docs sync + PROGRESS — DONE 2026-10-18
 
 - **Do**:
   - Add a "Console sessions" section to `identity.md`, with the

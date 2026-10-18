@@ -77,7 +77,7 @@ guessed at.
 | `TextField` | Label, hint and error tied to one input with `aria-describedby`. |
 | `Banner`, `Notice` | Page-wide and inline notices (warn or danger). |
 | `EmptyState`, `LoadingState`, `ErrorState` | Every screen's non-happy states. `ErrorState` shows the request ID. |
-| `Icon` | About ten Lucide stroke icons, inline SVG, `aria-hidden`. |
+| `Icon` | Eight Lucide stroke icons, inline SVG, `aria-hidden`. |
 
 ## Writing
 

@@ -1,6 +1,6 @@
 # Spec 016: UI MVP (Serendip Console)
 
-Status: Approved 2026-10-17 (shipping without RBAC confirmed by the user)
+Status: Complete 2026-10-18 — evidence in `verification.md` (approved 2026-10-17; shipping without RBAC confirmed by the user)
 
 ## Problem
 

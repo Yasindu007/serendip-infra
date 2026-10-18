@@ -9,15 +9,21 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-10-17
+Last updated: 2026-10-18
 
 ## Current phase
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
-PR #24.** Specs 002-013 are committed locally only — decided explicitly
+PR #24.** Specs 002-016 are committed locally only — decided explicitly
 with the user to keep working locally and push everything together at
 a later checkpoint, now that GitHub auth works again (see GitHub note
 below) — not pushing yet is a choice, not a blocker.
+
+**Spec 016 (UI MVP: the Serendip console) — COMPLETE** (T001-T012,
+2026-10-18). A browser console embedded in `serendipd`, with a server-side
+OIDC login (BFF, ADR 0013), built under supply-chain controls (ADR 0012).
+Detail below, under "Spec 016 — what actually got built". Evidence:
+`specs/016-ui-mvp/verification.md`.
 
 **Spec 015 (Identity foundation: ThunderID + OIDC human login) — COMPLETE**
 (T001-T011; final commit noted in "Spec 015 — what actually got built").
@@ -292,6 +298,63 @@ project,workflow` only when Projects v2 board work or a
 `.github/workflows/*.yml` push is actually needed, not preemptively.
 `Yasindu007` remains a separate logged-in account, correctly inactive —
 standing instruction not to use it for this project stands.
+
+## Spec 016 — what actually got built
+
+- **Console:** React + TypeScript + Vite in `ui/`, embedded in
+  `serendipd` from `cmd/serendipd/console` (a "not built" page without
+  Node; `ui/go.mod` fences `node_modules` off from Go tooling). Screens:
+  sign-in, Overview, Applications (list, create, detail), Components
+  (create, edit, detail with the reconciliation path). Every form shows
+  its API request. No delete action anywhere (constitution 5). Design:
+  "Combined", `ui/DESIGN.md`; the vendored rule text is in
+  `ui/design-rules/`.
+- **Login:** `serendipd` is the OIDC relying party (`core/identity.LoginClient`,
+  `providers/identity/oidc.RelyingParty`). It provides `/auth/login`,
+  `/auth/callback` and `POST /auth/logout`, and an HttpOnly
+  SameSite=Strict session cookie as a third credential in
+  `AuthMiddleware`. Sessions are in memory (idle 30 min, absolute 12 h).
+  Refresh runs once per session at a time (ThunderID revokes the token
+  family on replay). CSRF is a custom header plus an exact `Origin`.
+  `GET /v1/session`.
+- **Hardening for every client:** server timeouts, a 1 MiB body limit
+  (413), `no-store`, a strict CSP plus security headers, and a login rate
+  limit.
+- **ThunderID:** fresh installs register the console URIs and the default
+  sign-out flow through the bootstrap file. `serendipd` checks read-only
+  without credentials. Existing installs or a changed
+  `SERENDIP_PUBLIC_URL`: one operator command,
+  `cmd/serendip-identity-redirects`, through a port-forward (option B,
+  agreed 2026-10-18; the Service proxy strips `Authorization`). An
+  automatic version is deferred to the HTTPS spec.
+- **Supply chain:** only react and react-dom at runtime; pnpm 10.34.6 via
+  corepack pinned by hash; install scripts off; a 7-day minimum release
+  age (verified: a 3-day-old React was refused); a frozen lockfile; a
+  credential guard; no third-party origin at runtime.
+- **Verified:**
+  - The user signed in and created an exposed Component in their own
+    browser; it was audited as `person:admin`.
+  - An automated BFF login, callback replay, CSRF, and logout ending at
+    ThunderID with the old session then at 401.
+  - 28 headless captures with 0 CSP violations, 0 console errors, no
+    JS-readable cookie and no overflow at 390 px.
+  - No tokens in logs.
+- **Measured (simulated T470):**
+  - `serendipd` 34.5 MiB, 0.00% CPU (rule 4 PASS; +8 MiB from spec 015);
+  - 3 polling tabs at 1.28 req/s: 0.04% CPU (PASS);
+  - the cookie path costs +2.7 µs; refresh p95 is 48 ms;
+  - every cluster group is within tolerance of spec 015.
+- **Reviews:** contract-guardian PASS (×4), go-reviewer PASS (findings
+  fixed, including a lost-rotated-refresh-token bug with a regression
+  test), and /security-review over `b82af3d..HEAD` with no findings.
+- **Still open:** a keyboard-only pass by a person (the automated
+  keyboard-relevant checks pass).
+- **Deferred, on purpose:**
+  - an automatic URI update (option A);
+  - sign-in and sign-out as audit events;
+  - a persistent or shared session store (ADR 0013 triggers);
+  - Secrets screens;
+  - Simple/Advanced/Expert modes.
 
 ## Spec 015 — what actually got built
 
@@ -1008,88 +1071,33 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 - **The real T470 run is still the open gate.** It's one command once the
   hardware exists (README).
 
-1. **Spec 016: UI MVP — in progress.** `spec.md` was approved 2026-10-17;
-   the user confirmed shipping without RBAC for now. `plan.md` and
-   `tasks.md` were **approved 2026-10-17**, and implementation has started.
-   **State at last update (nothing committed yet):**
-   - Done: T001–T008. The Go side has been reviewed (contract-guardian
-     PASS ×2, go-reviewer findings fixed). The UI is built: design
-     system, screens, 55 tests, 75 KiB gz JS.
-   - **T010 in progress (2026-10-18).** It found two real bugs, both
-     fixed in code with tests but not yet re-verified on a cluster:
-     (1) the kube Service proxy strips `Authorization`, so management-API
-     calls fail (see plan.md "T010 finding"): fresh installs now get the
-     console URIs through the bootstrap file, and every pass first checks
-     read-only; (2) the bootstrap client lacked `signOutFlowId`, so
-     logout returned 500. **Open decision for the user:** how to change
-     URIs on an existing install (an in-process port-forward, or a
-     documented manual step). Resume by recreating the kind cluster
-     `serendip-t010` (scripts in the session scratchpad: `bff_login.py`,
-     `shots.mjs`), then run the user's browser check plus the headless
-     checks.
-   - Next: T009 (perf on the simulated T470), T010 (real-browser
-     verification on kind: login, create, expose, CSP, screenshots,
-     keyboard), T011 (final reviews + /security-review), T012 (docs).
-   - Built so far: `core/identity.LoginClient`; `oidc.RelyingParty`;
-     `api` sessions, `/auth/*`, cookie auth, CSRF checks, hardening;
-     `cmd/serendipd/console` (embed); `thunderid.EnsureClientRedirects`;
-     serendipd wiring (`SERENDIP_PUBLIC_URL`,
-     `SERENDIP_ALLOW_INSECURE_ORIGIN`); ADRs 0012 and 0013; the `ui/`
-     scaffold under pnpm 10.34.6 with supply-chain controls. Key choices:
-   - an in-process BFF with an HttpOnly session cookie and in-memory
-     sessions;
-   - the UI embedded in `serendipd`;
-   - pnpm with install scripts off and a minimum release age.
-
-   T001 (the spike) is done: the bootstrap client is editable, refresh
-   tokens rotate and reuse revokes the token family (so serialised refresh
-   is mandatory), revocation and logout work, ThunderID has no
-   disabled-user state (delete the user instead), and the Strict cookie
-   is confirmed in Chrome (plan.md "Spike findings"). The visual direction is
-   "Combined" (canvas https://claude.ai/artifact/DjRkfV2nLaoBn6sK3UtK57,
-   plan.md decision 11). The user wants it kept consistent across every
-   screen. The original agenda for this
-   item is kept below for reference. A React + Vite console (`ui/`, rules in `ui/CLAUDE.md`):
-   - log in through the `serendip` OIDC client (auth code + PKCE);
-   - show `/v1/readiness`;
-   - create and list Applications and Components, expose them, and watch
-     their Conditions;
-   - a pure API client (constitution 7).
-
-   Known prerequisites from spec 015:
-   - **The UI needs its own redirect URI** on the `serendip` client.
-     Bootstrap files only import on first install. The working route
-     (plan.md Spike finding 10): an admin token for the built-in
-     `CONSOLE` client with `scope=system` and
-     `resource=https://localhost:8090/mcp`, then the management API.
-   - **CORS**: ThunderID allows no origins by default (needed if the SPA
-     calls `/oauth2/token` directly), and `serendipd` sends no CORS
-     headers. Or serve the UI from `serendipd`'s origin.
-   - It probably needs an unauthenticated `GET /v1/auth/config` (issuer +
-     client ID), deliberately left out of spec 015.
-   - Plain HTTP is localhost-only, so a remote browser needs HTTPS (item
-     2).
-   - **Watch ADR 0006**: no ThunderID release tag since 2026-08-25. If none
-     lands by about 2026-11-15, run the re-check.
-2. **HTTPS**: the natural path is cert-manager (already installed) issuing
-   certificates for an HTTPS listener on the existing gateway, not a second
-   proxy such as Caddy. It needs a decision on where trusted names come from
-   on an edge-1 laptop with no public DNS. Its own spec.
-3. Other capability candidates (none picked; decide at the start of the next
-   session): `Secret` injection into Components (spec 009 meets spec 011);
-   disabling Traefik to serve on 80/443 (needs a migration story); TLS;
-   Identity/Thunder, still gated by ADR 0006's maturity window.
-4. **specs 002-014 are still unpushed by deliberate choice** (user
-   confirmed: keep working locally, push everything together at a later
-   checkpoint) — GitHub auth itself is no longer the blocker (see
-   GitHub note above), so this is a scheduling decision to revisit, not
-   a technical one to keep re-litigating.
-5. GitHub tracking board (milestones/issues/sub-issues/project) was
-   fully built for spec 001 and merged via PR #24 — extending it to
-   cover specs 002-012 once they're pushed is still open. CodeRabbit:
-   CLI installed, only `coderabbit auth login` (browser) remains,
-   previously blocked by the account flag — retry now that auth works,
-   not yet re-attempted this session.
+1. **Gaps spec 016 found** (pick one next; decide at the start of the next
+   session):
+   - **Approval objects for destructive operations** (constitution 5).
+     `DELETE /v1/{kind}/{id}` takes effect with no approval today, so no
+     client (UI, MCP) may offer delete until this exists.
+   - **An audit read API.** Audit rows are written, but no API returns
+     them, so the console can't show activity.
+   - **RBAC / policy** (`core/policy`). Today every identity-provider
+     account is effectively an admin. The user accepted shipping the
+     console without it.
+2. **HTTPS:** cert-manager (already installed) issuing certificates for an
+   HTTPS listener on the existing gateway. It needs a decision on where
+   trusted names come from on an edge-1 laptop with no public DNS. It's
+   also the moment for option A, the automatic console-URI update, since
+   it changes `SERENDIP_PUBLIC_URL`.
+3. **Other candidates:**
+   - Secret injection into Components, plus a write-only Secrets screen;
+   - an MCP server (the AI side of constitution 7);
+   - disabling Traefik to serve on 80/443 (needs a migration story).
+4. **Watch ADR 0006:** no ThunderID release since 2026-08-25. If none
+   lands by about 2026-11-15, run the re-check.
+5. **specs 002-016 are still unpushed by deliberate choice** (the user
+   confirmed: push everything together at a later checkpoint). This is a
+   scheduling decision, not a blocker.
+6. **The GitHub tracking board** covers spec 001 only; extending it is
+   open. CodeRabbit: only `coderabbit auth login` (browser) remains.
+7. **A keyboard-only pass of the console by a person** (spec 016 AC 9).
 
 ## Standing instructions (fold into CLAUDE.md properly if this section
 keeps persisting across many sessions unchanged — don't let it live here
