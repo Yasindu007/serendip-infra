@@ -232,6 +232,44 @@ Findings:
   later. That's consistent with the backoff fix, and finding 1's upstream
   note still applies.
 
+## Spec 016 re-run (2026-10-18): with the web console
+
+**Setup.** One simulated-T470 run on a fresh kind node (2.0 CPUs of quota
+on cpuset 0-3), with `serendipd` built with the console embedded. Results:
+`results/2026-10-18-spec016-simulated-t470/run1`; comparison with spec
+015's run 1 in `comparison-spec015-vs-spec016.md`. An earlier attempt was
+discarded: the host went to sleep part-way through the workload phase, so
+only its idle phase existed. It was not committed.
+
+**The cluster:** every group is within tolerance of spec 015 (**PASS**).
+The console lives in `serendipd`, not in the cluster.
+
+**`serendipd`:**
+- **Idle:** **34.5 MiB RSS, 0.00% CPU** (rule 4: PASS). Spec 015 measured
+  26.2 MiB, so the console and its session code cost about +8 MiB, mostly
+  the embedded files (about 0.5 MB) and the new packages.
+- **New phase: 3 simulated console tabs**, each polling a Component page
+  (the Component and its Application every 5 s, nodes every 60 s):
+  - 165 requests at **1.28/s, 0 errors**;
+  - CPU 0.4 → **0.7 millicores (0.04% of 2 cores, PASS)**;
+  - RSS 35.9 → **35.9 MiB**.
+  The plan had estimated 0.6 requests/s for 3 tabs; the real pattern is
+  about 1.2/s. That was a planning arithmetic slip, and it's still far
+  inside the budget.
+
+**Measured outside the harness:**
+- **The cookie check costs about 2.7 µs per request** over an API key
+  (`api` `BenchmarkAuth`, 5 runs on the dev machine: 6.0 vs 8.7 µs; target
+  < 50 µs).
+- **A token refresh through the Kubernetes Service proxy:** p50 27 ms, p95
+  48 ms over 25 rotating refreshes, on an unthrottled kind node (target
+  p95 < 300 ms).
+
+**Unchanged from spec 015:**
+- 16 GB headroom: 12% of budget, which fits comfortably.
+- Cold start: 325 s. Warm restart: 48 s.
+- Create → Serving: 32 s × 3.
+
 ## Findings carried forward
 
 1. **Time-to-`Serving` had a cliff between 14 s and 30 s. Fixed

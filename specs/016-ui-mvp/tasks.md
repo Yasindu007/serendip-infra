@@ -244,7 +244,7 @@ before that.
   - `grep -ri "delete" ui/src/screens` finds no delete action.
   - The `tsc` and the bundle budget pass.
 
-## T009 — Performance measurements
+## T009 — Performance measurements — DONE 2026-10-18 (all targets PASS; see verification.md AC 12)
 
 - **Do**:
   - Write a Go benchmark of `AuthMiddleware` for API key vs cookie, and
@@ -258,7 +258,7 @@ before that.
   A missed target is recorded as a FAIL, not hidden. Constitution 4 is
   re-checked.
 
-## T010 — Real-browser verification (kind): acceptance criteria 1–6, 9–12
+## T010 — Real-browser verification (kind): acceptance criteria 1–6, 9–12 — DONE 2026-10-18 (verification.md; a keyboard-only pass by a person is still open)
 
 - **Do**: Run a fresh install, and separately a spec-015 install upgraded
   to this build, then do the flow in a real browser (the built-in browser
