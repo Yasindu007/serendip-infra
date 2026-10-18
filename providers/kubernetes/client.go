@@ -64,6 +64,9 @@ type Client struct {
 	baseURL string
 	http    *http.Client
 	token   string
+	// tls is the configuration http's transport uses, kept for connections
+	// made outside it (dialWebSocket).
+	tls *tls.Config
 }
 
 // NewClient builds a Client from cfg, configuring TLS from whichever
@@ -77,6 +80,7 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{
 		baseURL: cfg.Host,
 		token:   cfg.BearerToken,
+		tls:     tlsConfig,
 		http: &http.Client{
 			Transport: &http.Transport{TLSClientConfig: tlsConfig},
 		},

@@ -60,7 +60,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
     paths return 404 through the Gateway, and console login and logout
     still work (AC 1).
 
-## T004 — Port-forward dialer (`providers/kubernetes`)
+## T004 — Port-forward dialer (`providers/kubernetes`) — DONE 2026-10-18 (contract-guardian PASS; go-reviewer findings fixed: cancellation aborts the handshake, latched write errors, `net.ErrClosed` after Close, the overflow-safe length check, `%q` on server text, no bearer token over plain http to a non-loopback host. Live on kind: ReadyPod, about 33 ms per request through the tunnel, a missing pod gives ErrNotFound. Consumers must set `IdleConnTimeout` so a restarted pod is picked up: T005)
 
 - **Do**:
   - A minimal client-side WebSocket implementation: the handshake with
