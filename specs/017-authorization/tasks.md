@@ -203,7 +203,7 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
   - typecheck, the bundle budget, the contrast check, and the
     no-raw-HTML grep.
 
-## T009 [P] [A] — Benchmarks — DONE on the dev machine 2026-10-18; simulated T470 with T010
+## T009 [P] [A] — Benchmarks — DONE 2026-10-18 (dev machine, and the simulated T470 alongside T010)
 
 - **Notes:** the first run failed the list target (+8.8 ms); the fix is
   the ownership cache in `core/policy`. Results and raw files:
@@ -220,7 +220,7 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
 - **Verify**: the numbers are recorded against decision 12's targets. A
   missed target is a FAIL, never hidden.
 
-## T010 — Real-cluster verification (kind)
+## T010 — Real-cluster verification (kind) — DONE 2026-10-18 (`verification.md`)
 
 - **Do**: On a fresh install:
   - sign in as the bootstrap admin (Owner);
