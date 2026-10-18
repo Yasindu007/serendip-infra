@@ -170,7 +170,7 @@ export function ApplicationDetail({ id }: { id: string }) {
         actions={
           <>
             <Link className="button" to={accessPath(scope)}>
-              Access control
+              Access control (IAM)
             </Link>
             {canCreate && (
               <Link className="button button--primary" to={`/applications/${encodeURIComponent(id)}/components/new`}>

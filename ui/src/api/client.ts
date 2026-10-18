@@ -34,7 +34,7 @@ export function onSessionEnded(fn: SessionEndedListener): () => void {
   return () => sessionEnded.delete(fn);
 }
 
-export async function apiFetch<T>(method: "GET" | "POST" | "PUT", path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+export async function apiFetch<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const timeout = AbortSignal.timeout(TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const headers: Record<string, string> = { Accept: "application/json", "X-Serendip-Csrf": "1" };

@@ -161,7 +161,7 @@ describe("access control", () => {
     mockFetch(routes(reader));
     goTo(`/access?scope=${encodeURIComponent(scope)}`);
     render(<App />);
-    const table = await screen.findByRole("table");
+    const table = (await screen.findAllByRole("table"))[0]!;
     const rows = within(table).getAllByRole("row").slice(1);
     expect(within(rows[0]!).getByText("This scope")).toBeTruthy();
     expect(within(rows[0]!).getByText("ann")).toBeTruthy();
@@ -208,6 +208,43 @@ describe("access control", () => {
     expect(await screen.findByText("Group platform")).toBeTruthy();
     expect(screen.getByText(/last sign-in: platform/)).toBeTruthy();
     expect(screen.getByText("Direct")).toBeTruthy();
+  });
+
+  it("lets an Owner remove an assignment made here, after confirming", async () => {
+    mockFetch(routes(owner), (_url, init) => (init.method === "DELETE" ? new Response(null, { status: 204 }) : json(200, [])));
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    const table = (await screen.findAllByRole("table"))[0]!;
+    await waitFor(() => expect(within(table).getAllByRole("button", { name: /^Remove/ })).toHaveLength(1));
+    // Inherited assignments are removed where they were made.
+    expect(within(table).queryByRole("button", { name: "Remove Owner from platform" })).toBeNull();
+    fireEvent.click(within(table).getByRole("button", { name: "Remove Reader from ann" }));
+    const confirm = screen.getByRole("group", { name: "Confirm removing a role assignment" });
+    expect(within(confirm).getByText("DELETE /v1/authorization/roleAssignments/ra1")).toBeTruthy();
+    expect(calls.some((c) => c.init.method === "DELETE")).toBe(false);
+    fireEvent.click(within(confirm).getByRole("button", { name: "Remove assignment" }));
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Confirm removing a role assignment" })).toBeNull());
+    const del = calls.filter((c) => c.init.method === "DELETE");
+    expect(del.map((c) => c.url)).toEqual(["/v1/authorization/roleAssignments/ra1"]);
+  });
+
+  it("shows why the last Owner can't be removed", async () => {
+    mockFetch(routes(owner), (_url, init) =>
+      init.method === "DELETE" ? json(409, { title: "conflict", status: 409, detail: `policy: forbidden: the last Owner at "/" can't be removed` }) : json(200, []),
+    );
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove Reader from ann" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove assignment" }));
+    expect(await screen.findByText(/last Owner at "\/" can't be removed/)).toBeTruthy();
+  });
+
+  it("offers a Reader no remove control", async () => {
+    mockFetch(routes(reader));
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    await screen.findByText("Your roles here don't include assigning roles.");
+    expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
   });
 
   it("refuses a malformed scope", async () => {

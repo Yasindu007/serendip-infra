@@ -177,14 +177,17 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
 ## T008 [P] — Console: Access control, Check access, permission-aware controls — DONE 2026-10-18
 
 - **Notes (deviations from decision 11, for review):**
-  - **No remove control.** DESIGN.md's checked rule "no delete action
-    anywhere until approval objects exist" covers removing an assignment
-    too, so the page shows the `DELETE` request instead. Whether revoking
-    access counts as "destructive" under constitution 5 is the user's
-    call; the API already supports it.
-  - **A page, not a tab:** `/access?scope=…`, linked from Overview,
-    Application and Component pages. There's no tab component, and a page
-    keeps the existing design system unchanged.
+  - **Removing an assignment:** first shipped without it (DESIGN.md's "no
+    delete" rule); the user then decided it's allowed, since it's guarded
+    by RBAC. It's confirmed first with the `DELETE` shown, offered only
+    with `roleAssignments/delete` at the scope, and, as in Azure, only
+    where the assignment was made (inherited ones are removed at their
+    source). The exception is written into `ui/CLAUDE.md` and DESIGN.md.
+  - **A page per resource, Azure's blade:** "Access control (IAM)" at
+    `/access?scope=…`, linked from Overview, Application and Component
+    pages, with Azure's views in order: Check access, Role assignments
+    (with Add), Roles. The user asked to keep it close to Azure, whose
+    IAM is a per-resource blade.
   - **Check access is computed in the browser** from the assignments at
     the scope, the role definitions and the person's groups at their last
     sign-in. The API has no "someone else's effective permissions"

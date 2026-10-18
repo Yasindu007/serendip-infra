@@ -39,6 +39,7 @@ export function action(kind: string, verb: "read" | "write" | "delete"): string 
 }
 
 export const assignRoles = "serendip/authorization/roleAssignments/write";
+export const removeRoles = "serendip/authorization/roleAssignments/delete";
 
 /** "/" or "Kind/id", the form the API takes in ?scope=. */
 export function scopeParam(s: Scope): string {

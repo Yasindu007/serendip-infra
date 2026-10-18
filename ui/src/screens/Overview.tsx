@@ -22,7 +22,7 @@ export function Overview() {
         title="Overview"
         actions={
           <Link className="button" to={accessPath({})}>
-            Access control
+            Access control (IAM)
           </Link>
         }
         meta={<UpdatedLine at={readiness.updatedAt} now={now} />}

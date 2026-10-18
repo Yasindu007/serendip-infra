@@ -60,7 +60,7 @@ export function ComponentDetail({ appId, id }: { appId: string; id: string }) {
               </SafeLink>
             )}
             <Link className="button" to={accessPath(scope)}>
-              Access control
+              Access control (IAM)
             </Link>
             <Guarded allowed={canEdit} label="Edit component" reason="Your roles here don't allow changing this component.">
               <Link className="button button--primary" to={`${compPath(appId, id)}/edit`}>

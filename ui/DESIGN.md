@@ -101,8 +101,11 @@ guessed at.
   placeholder statistics. A feature that isn't built is labelled "not
   available yet".
 - **No delete action anywhere** until approval objects exist
-  (constitution 5). That includes removing a role assignment: the Access
-  control page shows the `DELETE` request instead.
+  (constitution 5). One exception, by the user's decision (spec 017):
+  removing a role assignment on the Access control (IAM) page. It revokes
+  access, destroys nothing, is guarded by RBAC, and asks for confirmation
+  with the request shown. As in Azure, an inherited assignment is removed
+  where it was made.
 - **Permission-aware controls** (spec 017): an action the caller can't
   take is hidden when it creates something, and disabled with a reason
   (`Guarded`) when it changes something that's on screen. The decision

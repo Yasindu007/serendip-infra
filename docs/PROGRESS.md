@@ -16,9 +16,8 @@ Last updated: 2026-10-18
 **Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T008
 done and committed; next is T009** (benchmarks: decision cost per
 request, list filtering, RSS; plan.md decision 12 targets).
-**Open question for the user:** should the console offer removing a role
-assignment, or does DESIGN.md's "no delete until approvals" cover it?
-(T008 notes; currently the page shows the DELETE request instead.) Plan, decisions and
+(Resolved: the user allowed removing role assignments in the console,
+since RBAC guards it; it's the one written exception to "no delete".) Plan, decisions and
 accepted risks: `specs/017-authorization/plan.md`; task status:
 `tasks.md`. Committed so far:
 - `0d82624` T001 spike: ThunderID subjects and groups.
@@ -45,7 +44,8 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
   grant-owner`. Decision 7's bootstrap condition was amended (plan.md).
 - `40e245a` T008 console: `/access?scope=` page (assignments with
   inherited labelled, add assignment, Check access), permission-aware
-  controls via `Guarded`; no remove control (see open question).
+  controls via `Guarded`; then "Access control (IAM)" laid out like
+  Azure's blade, with confirmed removal of assignments made at the scope.
 - Then T008 console Access control, T009 benchmarks, T010 real cluster,
   T011 reviews, T012 docs/ADR 0014. After 017: spec 018 (WSO2 Agent
   Manager POC, beside Serendip, may reuse our ThunderID/OpenChoreo on a

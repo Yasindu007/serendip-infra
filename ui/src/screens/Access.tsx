@@ -8,7 +8,7 @@ import { PageHeader } from "../components/Shell";
 import { EmptyState, LoadingState, Notice } from "../components/States";
 import { usePermissions } from "../hooks/usePermissions";
 import { usePoll, useNow } from "../hooks/usePoll";
-import { assignRoles, scopeParam } from "../lib/permissions";
+import { assignRoles, removeRoles, scopeParam } from "../lib/permissions";
 import { FormFailure } from "./Applications";
 import { UpdatedLine } from "./common";
 
@@ -49,13 +49,23 @@ export function AccessControl({ scope, name, crumbs }: { scope: Scope; name?: st
   const roleName = (id: string) => roles.data?.find((r) => r.metadata.id === id)?.spec.roleName ?? id;
   const who = (type: string, id: string) => principals.data?.find((p) => p.type === type && p.id === id)?.displayName;
 
+  const canRemove = access.can(removeRoles);
+  const [removing, setRemoving] = useState<RoleAssignment>();
+
   return (
     <>
-      <PageHeader {...(crumbs ? { crumbs } : {})} title={`Access control${name ? `: ${name}` : ""}`} meta={<UpdatedLine at={assignments.updatedAt} now={now} />} />
+      <PageHeader {...(crumbs ? { crumbs } : {})} title={`Access control (IAM)${name ? `: ${name}` : ""}`} meta={<UpdatedLine at={assignments.updatedAt} now={now} />} />
       <p>
         Roles assigned here apply to {describeScope(scope)} and everything it owns. Roles assigned higher up apply here too, and a role
         assigned lower down never takes access away.
       </p>
+
+      <section className="section" aria-labelledby="ac-check">
+        <h2 id="ac-check" className="section-title">
+          Check access
+        </h2>
+        <CheckAccess assignments={assignments.data ?? []} roles={roles.data ?? []} principals={principals.data ?? []} />
+      </section>
 
       <section className="section" aria-labelledby="ac-assignments">
         <h2 id="ac-assignments" className="section-title">
@@ -77,6 +87,9 @@ export function AccessControl({ scope, name, crumbs }: { scope: Scope; name?: st
                   <th scope="col">Role</th>
                   <th scope="col">Assigned at</th>
                   <th scope="col">Description</th>
+                  <th scope="col">
+                    <span className="visually-hidden">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -98,6 +111,14 @@ export function AccessControl({ scope, name, crumbs }: { scope: Scope; name?: st
                       <td>{roleName(a.spec.roleDefinitionId)}</td>
                       <td>{a.inherited ? `Inherited from ${describeScope(a.spec.scope)}` : "This scope"}</td>
                       <td>{a.spec.description ?? ""}</td>
+                      <td>
+                        {/* As in Azure, an inherited assignment is removed where it was made, not here. */}
+                        {!a.inherited && canRemove && (
+                          <button type="button" className="button" onClick={() => setRemoving(a)} aria-label={`Remove ${roleName(a.spec.roleDefinitionId)} from ${display ?? p.id}`}>
+                            Remove
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -105,17 +126,19 @@ export function AccessControl({ scope, name, crumbs }: { scope: Scope; name?: st
             </table>
           </div>
         )}
-        <p className="field-hint">
-          The console doesn't remove access until approval objects exist (constitution 5). An Owner can remove an assignment through the
-          API:
-        </p>
-        <ApiEquivalent request={{ method: "DELETE", path: "/v1/authorization/roleAssignments/{assignment id}" }} />
-      </section>
+        {removing && (
+          <RemoveAssignment
+            assignment={removing}
+            label={`${roleName(removing.spec.roleDefinitionId)} for ${who(removing.spec.principal.type, removing.spec.principal.id) ?? removing.spec.principal.id}`}
+            onDone={() => {
+              setRemoving(undefined);
+              assignments.refresh();
+            }}
+            onCancel={() => setRemoving(undefined)}
+          />
+        )}
 
-      <section className="section" aria-labelledby="ac-add">
-        <h2 id="ac-add" className="section-title">
-          Add a role assignment
-        </h2>
+        <h3 className="section-title">Add a role assignment</h3>
         {canAssign ? (
           <AddAssignment scope={scope} roles={roles.data ?? []} principals={principals.data ?? []} onAdded={assignments.refresh} />
         ) : (
@@ -123,13 +146,90 @@ export function AccessControl({ scope, name, crumbs }: { scope: Scope; name?: st
         )}
       </section>
 
-      <section className="section" aria-labelledby="ac-check">
-        <h2 id="ac-check" className="section-title">
-          Check access
+      <section className="section" aria-labelledby="ac-roles">
+        <h2 id="ac-roles" className="section-title">
+          Roles
         </h2>
-        <CheckAccess assignments={assignments.data ?? []} roles={roles.data ?? []} principals={principals.data ?? []} />
+        <RoleList roles={roles} />
       </section>
     </>
+  );
+}
+
+/**
+ * RemoveAssignment confirms before revoking access, and shows the request.
+ * The server refuses removing the last Owner of the whole platform (409),
+ * and says why.
+ */
+function RemoveAssignment({ assignment, label, onDone, onCancel }: { assignment: RoleAssignment; label: string; onDone: () => void; onCancel: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<ApiError | NetworkError>();
+  const path = `/v1/authorization/roleAssignments/${encodeURIComponent(assignment.metadata.id)}`;
+
+  async function remove() {
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      await apiFetch<void>("DELETE", path);
+      onDone();
+    } catch (err) {
+      if (isShown(err)) setFailure(err);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel" role="group" aria-label="Confirm removing a role assignment">
+      <p>
+        Remove {label} at this scope? They lose what this role gives here and below, unless another role grants it. You can assign it again
+        later.
+      </p>
+      {failure &&
+        (failure instanceof ApiError && failure.status === 409 ? (
+          <Notice tone="danger">
+            <p>{failure.detail ?? failure.title}</p>
+          </Notice>
+        ) : (
+          <FormFailure error={failure} />
+        ))}
+      <div className="form-actions">
+        <button type="button" className="button button--primary" onClick={remove} disabled={busy}>
+          {busy ? "Removing…" : "Remove assignment"}
+        </button>
+        <button type="button" className="button" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+      <ApiEquivalent request={{ method: "DELETE", path }} />
+    </div>
+  );
+}
+
+/** RoleList is Azure's Roles view: what each role allows. */
+function RoleList({ roles }: { roles: { data: RoleDefinition[] | undefined; error: ApiError | NetworkError | undefined } }) {
+  if (roles.error) return <RequestError error={roles.error} what="roles" />;
+  if (!roles.data) return <LoadingState what="roles" />;
+  return (
+    <div className="table-wrap">
+      <table className="table">
+        <thead>
+          <tr>
+            <th scope="col">Role</th>
+            <th scope="col">Type</th>
+            <th scope="col">Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {roles.data.map((r) => (
+            <tr key={r.metadata.id}>
+              <td>{r.spec.roleName}</td>
+              <td>{r.builtIn ? "Built-in" : "Custom"}</td>
+              <td>{r.spec.description ?? ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

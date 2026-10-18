@@ -11,6 +11,10 @@ rules: `ui/DESIGN.md`. Dependency decisions: ADR 0012.
   unbuilt features are labelled "not available yet", never mocked. No fake
   metrics, charts or activity.
 - No delete action anywhere until approval objects exist (constitution 5).
+  One exception, by the user's decision (spec 017 T008): removing a role
+  assignment. It revokes access rather than destroying anything, is
+  guarded by RBAC (`roleAssignments/delete`) and the last-Owner rule, and
+  is confirmed first.
 - Never render API data as HTML (`dangerouslySetInnerHTML`, `innerHTML`):
   text only. Links from API data only for `http:`/`https:` URLs.
 - No token, session ID or secret value in JS, storage, URLs or logs. The
