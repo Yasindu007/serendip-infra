@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
@@ -39,6 +40,9 @@ type Config struct {
 	// with made-up key IDs can't make the verifier hammer the provider.
 	// Defaults to 30 s.
 	RefreshInterval time.Duration
+	// GroupsClaim names the access-token claim listing the person's group
+	// names. Defaults to "groups". A token without it has no groups.
+	GroupsClaim string
 	// Now is the clock; defaults to time.Now. For tests.
 	Now func() time.Time
 }
@@ -74,6 +78,9 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 	}
 	if cfg.RefreshInterval == 0 {
 		cfg.RefreshInterval = 30 * time.Second
+	}
+	if cfg.GroupsClaim == "" {
+		cfg.GroupsClaim = "groups"
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -332,7 +339,49 @@ func (v *Verifier) checkClaims(payload []byte) (identity.Principal, error) {
 	if err := v.checkTimes(c); err != nil {
 		return identity.Principal{}, err
 	}
-	return identity.Principal{Subject: c.Sub, Name: displayName(c)}, nil
+	groups, err := v.groups(payload)
+	if err != nil {
+		return identity.Principal{}, err
+	}
+	return identity.Principal{Subject: c.Sub, Name: displayName(c), Groups: groups}, nil
+}
+
+// Bounds on the groups claim. A token past them is rejected rather than
+// trimmed, so which groups apply never depends on an arbitrary cut.
+const (
+	maxGroups     = 100
+	maxGroupRunes = 128
+)
+
+// groups reads the configured groups claim: absent or null means none; it
+// must otherwise be an array of non-empty strings without control
+// characters, within the bounds above. Duplicates are dropped.
+func (v *Verifier) groups(payload []byte) ([]string, error) {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &all); err != nil {
+		return nil, invalid("claims: " + err.Error())
+	}
+	raw, ok := all[v.cfg.GroupsClaim]
+	if !ok || string(raw) == "null" {
+		return nil, nil
+	}
+	var names []string
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return nil, invalid("malformed " + v.cfg.GroupsClaim + " claim")
+	}
+	if len(names) > maxGroups {
+		return nil, invalid(fmt.Sprintf("more than %d groups", maxGroups))
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n == "" || utf8.RuneCountInString(n) > maxGroupRunes || strings.IndexFunc(n, unicode.IsControl) >= 0 {
+			return nil, invalid("malformed group name")
+		}
+		if !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 // checkTimes checks exp (required) and nbf/iat (optional) against the clock

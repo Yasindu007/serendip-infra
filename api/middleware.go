@@ -11,6 +11,8 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/id"
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
+	"github.com/serendip-infra/serendip-infra/core/resource"
+	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
 
 // InterfaceName is what this API identifies itself as in
@@ -60,7 +62,7 @@ func RequestIDFromContext(ctx context.Context) string {
 // says which check a token failed. Everything downstream only ever sees the
 // resolved actor via context, never how it got there.
 func AuthMiddleware(apiKeys map[string]string, authn identity.Authenticator) func(http.Handler) http.Handler {
-	return authMiddleware(apiKeys, authn, nil)
+	return authMiddleware(apiKeys, authn, nil, nil)
 }
 
 // authMiddleware is AuthMiddleware plus, when console is non-nil, the
@@ -68,7 +70,17 @@ func AuthMiddleware(apiKeys map[string]string, authn identity.Authenticator) fun
 // decision 6). A bearer token is checked exactly as before. A request
 // carrying both a bearer token and a session cookie is refused, so the two
 // can never be confused. A cookie request must also pass the CSRF checks.
-func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, console *Console) func(http.Handler) http.Handler {
+//
+// A person's subject goes into the context for the audit record
+// (audit.WithSubject), and when principals is non-nil every authenticated
+// caller is recorded there, so it can be picked when assigning a role
+// (specs/017-authorization plan.md decision 6). Failing to record is
+// logged, never fatal to the request.
+func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, console *Console, principals *sqlite.PrincipalRegistry) func(http.Handler) http.Handler {
+	person := func(ctx context.Context, p identity.Principal) context.Context {
+		recordSeen(ctx, principals, sqlite.KnownPrincipal{Type: resource.PrincipalPerson, ID: p.Subject, DisplayName: p.Name, Groups: p.Groups})
+		return audit.WithSubject(audit.WithActor(ctx, identity.Actor(p)), p.Subject)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reqID := audit.RequestIDFrom(r.Context())
@@ -85,23 +97,28 @@ func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, con
 				return
 			}
 			if sessionID != "" {
-				actor, ctx, ok := console.authenticateCookie(w, r, sessionID)
+				p, ctx, ok := console.authenticateCookie(w, r, sessionID)
 				if !ok {
 					return
 				}
-				next.ServeHTTP(w, r.WithContext(audit.WithActor(ctx, actor)))
+				next.ServeHTTP(w, r.WithContext(person(ctx, p)))
 				return
 			}
 			if !hasBearer {
 				WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", reqID)
 				return
 			}
-			actor, ok := apiKeys[token]
-			if !ok && authn != nil {
+			if actor, ok := apiKeys[token]; ok {
+				recordSeen(r.Context(), principals, sqlite.KnownPrincipal{Type: resource.PrincipalAPIKey, ID: actor, DisplayName: actor})
+				next.ServeHTTP(w, r.WithContext(audit.WithActor(r.Context(), actor)))
+				return
+			}
+			if authn != nil {
 				p, err := authn.Authenticate(r.Context(), token)
 				switch {
 				case err == nil:
-					actor, ok = identity.Actor(p), true
+					next.ServeHTTP(w, r.WithContext(person(r.Context(), p)))
+					return
 				case errors.Is(err, reconcile.ErrProviderNotReady):
 					WriteProblem(w, http.StatusServiceUnavailable, "identity provider not ready",
 						"the bearer token can't be verified yet; retry later", reqID)
@@ -110,13 +127,18 @@ func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, con
 					log.Printf("api: bearer token rejected (request %s): %v", reqID, err)
 				}
 			}
-			if !ok {
-				WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", reqID)
-				return
-			}
-			ctx := audit.WithActor(r.Context(), actor)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", reqID)
 		})
+	}
+}
+
+// recordSeen notes an authenticated principal in the registry, if any.
+func recordSeen(ctx context.Context, principals *sqlite.PrincipalRegistry, p sqlite.KnownPrincipal) {
+	if principals == nil || p.ID == "" {
+		return
+	}
+	if err := principals.Seen(ctx, p); err != nil {
+		log.Printf("api: record principal %s %s (request %s): %v", p.Type, p.ID, audit.RequestIDFrom(ctx), err)
 	}
 }
 

@@ -149,7 +149,7 @@ func TestValues(t *testing.T) {
 		{[]string{"redirectUris"}, []any{LoopbackRedirectURI, "http://localhost:8080/auth/callback"}},
 		{[]string{"postLogoutRedirectUris"}, []any{LoopbackRedirectURI, "http://localhost:8080/"}},
 		{[]string{"grantTypes"}, []any{"authorization_code", "refresh_token"}},
-		{[]string{"token", "accessToken", "userConfig", "attributes"}, []any{"username", "email", "name"}},
+		{[]string{"token", "accessToken", "userConfig", "attributes"}, []any{"username", "email", "name", "groups"}},
 	}
 	for _, c := range appChecks {
 		if got := lookup(t, cfg, c.path...); !reflect.DeepEqual(got, c.want) {

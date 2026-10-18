@@ -52,9 +52,11 @@ const (
 	bootstrapFile = "70-serendip-client.yaml"
 )
 
-// tokenAttributes are the user attributes copied into tokens:
-// "username" becomes the audit actor (decision 8).
-var tokenAttributes = []string{"username", "email", "name"}
+// tokenAttributes are the user attributes copied into access tokens:
+// "username" becomes the audit actor (decision 8); "groups" lists the
+// person's group names for authorization (spec 017 plan.md decision 9).
+// UpdateClient adds any of them missing on an existing install.
+var tokenAttributes = []string{"username", "email", "name", "groups"}
 
 // ConsoleRedirects are the web console's login callback and post-logout
 // page (specs/016-ui-mvp plan.md decision 7). Empty fields are left out.

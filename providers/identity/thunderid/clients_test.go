@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// fakeThunder simulates the endpoints EnsureClientRedirects uses, with the
+// fakeThunder simulates the endpoints UpdateClient uses, with the
 // shapes observed on 1.0.1 (spec 016 T001).
 type fakeThunder struct {
 	t        *testing.T
@@ -30,6 +30,9 @@ func newFakeThunder(t *testing.T, redirects, postLogout []any) (*fakeThunder, *h
 		"inboundAuthConfig": []any{map[string]any{"type": "oauth2", "config": map[string]any{
 			"clientId": ClientID, "redirectUris": redirects, "postLogoutRedirectUris": postLogout,
 			"grantTypes": []any{"authorization_code", "refresh_token"}, "pkceRequired": true, "publicClient": true,
+			"token": map[string]any{"accessToken": map[string]any{"userConfig": map[string]any{
+				"validityPeriod": 3600, "attributes": []any{"username", "email", "name", "groups"},
+			}}},
 		}}},
 	}}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
@@ -119,10 +122,60 @@ const (
 
 func run(t *testing.T, srv *httptest.Server, password string) error {
 	t.Helper()
-	return ensureRedirects(context.Background(), srv.URL, noRedirects(srv.Client()), "http://identity.localhost:30080", password, testCallback, testPostLogout)
+	return ensureClient(context.Background(), srv.URL, noRedirects(srv.Client()), "http://identity.localhost:30080", password, testCallback, testPostLogout)
 }
 
-func TestEnsureRedirects_AddsMissingURIsInOnePut(t *testing.T) {
+// userConfig is the client's access-token attribute settings.
+func userConfig(cfg map[string]any) map[string]any {
+	return cfg["token"].(map[string]any)["accessToken"].(map[string]any)["userConfig"].(map[string]any)
+}
+
+func TestEnsureClient_AddsGroupsToAnOlderClient(t *testing.T) {
+	f, srv := newFakeThunder(t, []any{testCallback}, []any{testPostLogout})
+	userConfig(f.config())["attributes"] = []any{"username", "email", "name", "nickname"}
+	if err := run(t, srv, "pw-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if f.puts != 1 {
+		t.Fatalf("%d PUTs, want 1", f.puts)
+	}
+	uc := userConfig(f.config())
+	if got, want := uc["attributes"].([]any), []any{"username", "email", "name", "nickname", "groups"}; !slices.Equal(got, want) {
+		t.Errorf("attributes = %v, want %v (added, nothing removed)", got, want)
+	}
+	if uc["validityPeriod"] == nil {
+		t.Error("PUT lost the token validity period")
+	}
+	// A second pass is a no-op.
+	if err := run(t, srv, "pw-secret"); err != nil || f.puts != 1 {
+		t.Errorf("second pass: err = %v, puts = %d; want no write", err, f.puts)
+	}
+}
+
+func TestEnsureClient_WithoutConsoleURIsOnlyAddsAttributes(t *testing.T) {
+	f, srv := newFakeThunder(t, []any{LoopbackRedirectURI}, []any{LoopbackRedirectURI})
+	userConfig(f.config())["attributes"] = []any{"username"}
+	if err := ensureClient(context.Background(), srv.URL, noRedirects(srv.Client()), "http://identity.localhost:30080", "pw-secret", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	cfg := f.config()
+	if got := cfg["redirectUris"].([]any); !slices.Equal(got, []any{LoopbackRedirectURI}) {
+		t.Errorf("redirectUris changed: %v", got)
+	}
+	if got := userConfig(cfg)["attributes"].([]any); !slices.Contains(got, any("groups")) {
+		t.Errorf("attributes = %v, want groups added", got)
+	}
+}
+
+func TestEnsureClient_RefusesAClientWithoutTokenConfig(t *testing.T) {
+	f, srv := newFakeThunder(t, []any{testCallback}, []any{testPostLogout})
+	delete(f.config(), "token")
+	if err := run(t, srv, "pw-secret"); err == nil || f.puts != 0 {
+		t.Errorf("err = %v, puts = %d; want an error and no write", err, f.puts)
+	}
+}
+
+func TestEnsureClient_AddsMissingURIsInOnePut(t *testing.T) {
 	f, srv := newFakeThunder(t, []any{LoopbackRedirectURI, "http://someone-else/cb"}, []any{LoopbackRedirectURI})
 	if err := run(t, srv, "pw-secret"); err != nil {
 		t.Fatal(err)
@@ -146,7 +199,7 @@ func TestEnsureRedirects_AddsMissingURIsInOnePut(t *testing.T) {
 	}
 }
 
-func TestEnsureRedirects_NoDriftMakesNoWrites(t *testing.T) {
+func TestEnsureClient_NoDriftMakesNoWrites(t *testing.T) {
 	f, srv := newFakeThunder(t, []any{LoopbackRedirectURI, testCallback}, []any{LoopbackRedirectURI, testPostLogout})
 	if err := run(t, srv, "pw-secret"); err != nil {
 		t.Fatal(err)
@@ -159,7 +212,7 @@ func TestEnsureRedirects_NoDriftMakesNoWrites(t *testing.T) {
 	}
 }
 
-func TestEnsureRedirects_ErrorsNeverLeakSecrets(t *testing.T) {
+func TestEnsureClient_ErrorsNeverLeakSecrets(t *testing.T) {
 	_, srv := newFakeThunder(t, nil, nil)
 	err := run(t, srv, "wrong-password-xyz")
 	if err == nil {
@@ -172,7 +225,7 @@ func TestEnsureRedirects_ErrorsNeverLeakSecrets(t *testing.T) {
 	}
 }
 
-func TestEnsureRedirects_RefusesAnotherClient(t *testing.T) {
+func TestEnsureClient_RefusesAnotherClient(t *testing.T) {
 	f, srv := newFakeThunder(t, nil, nil)
 	f.config()["clientId"] = "not-serendip"
 	if err := run(t, srv, "pw-secret"); err == nil || f.puts != 0 {

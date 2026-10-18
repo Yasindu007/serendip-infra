@@ -68,7 +68,7 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
   - the last Owner at `/`;
   - an evaluation benchmark against the plan's target.
 
-## T004 [P] — Identity: subject and groups on the principal
+## T004 [P] — Identity: subject and groups on the principal — DONE 2026-10-18 (contract-guardian PASS, go-reviewer PASS)
 
 - **Do**:
   - Carry `sub` and groups (the claim from T001) into

@@ -107,7 +107,7 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 	// go through AuthMiddleware at all -- it's mounted directly on
 	// topMux, not apiMux, so there's no bypass logic to get wrong inside
 	// a shared handler.
-	topMux.Handle("/v1/", apiHardening(authMiddleware(apiKeys, authn, console)(apiMux)))
+	topMux.Handle("/v1/", apiHardening(authMiddleware(apiKeys, authn, console, sqlite.NewPrincipalRegistry(db))(apiMux)))
 	if console != nil {
 		// The console shell, its assets and /auth/* need no credential:
 		// after the cross-site return from login the browser withholds the

@@ -170,15 +170,16 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 	}
 	actor := audit.ActorFrom(ctx)
 	if err := writeAudit(ctx, tx, audit.Record{
-		ID:         id.New(),
-		Actor:      actor,
-		Interface:  audit.InterfaceFrom(ctx),
-		Kind:       string(s.kind),
-		ResourceID: r.Metadata.ID,
-		Before:     nil, // nothing existed before a Create
-		After:      afterJSON,
-		At:         now,
-		RequestID:  audit.RequestIDFrom(ctx),
+		ID:           id.New(),
+		Actor:        actor,
+		Interface:    audit.InterfaceFrom(ctx),
+		Kind:         string(s.kind),
+		ResourceID:   r.Metadata.ID,
+		Before:       nil, // nothing existed before a Create
+		After:        afterJSON,
+		At:           now,
+		RequestID:    audit.RequestIDFrom(ctx),
+		ActorSubject: audit.SubjectFrom(ctx),
 	}); err != nil {
 		return resource.Resource[S, St]{}, err
 	}
@@ -269,15 +270,16 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 
 	actor := audit.ActorFrom(ctx)
 	if err := writeAudit(ctx, tx, audit.Record{
-		ID:         id.New(),
-		Actor:      actor,
-		Interface:  audit.InterfaceFrom(ctx),
-		Kind:       string(s.kind),
-		ResourceID: r.Metadata.ID,
-		Before:     beforeJSON,
-		After:      afterJSON,
-		At:         now,
-		RequestID:  audit.RequestIDFrom(ctx),
+		ID:           id.New(),
+		Actor:        actor,
+		Interface:    audit.InterfaceFrom(ctx),
+		Kind:         string(s.kind),
+		ResourceID:   r.Metadata.ID,
+		Before:       beforeJSON,
+		After:        afterJSON,
+		At:           now,
+		RequestID:    audit.RequestIDFrom(ctx),
+		ActorSubject: audit.SubjectFrom(ctx),
 	}); err != nil {
 		return resource.Resource[S, St]{}, err
 	}
@@ -344,15 +346,16 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 
 	now := time.Now().UTC()
 	if err := writeAudit(ctx, tx, audit.Record{
-		ID:         id.New(),
-		Actor:      actor,
-		Interface:  audit.InterfaceFrom(ctx),
-		Kind:       string(s.kind),
-		ResourceID: resourceID,
-		Before:     beforeJSON,
-		After:      nil, // nothing exists after a Delete
-		At:         now,
-		RequestID:  audit.RequestIDFrom(ctx),
+		ID:           id.New(),
+		Actor:        actor,
+		Interface:    audit.InterfaceFrom(ctx),
+		Kind:         string(s.kind),
+		ResourceID:   resourceID,
+		Before:       beforeJSON,
+		After:        nil, // nothing exists after a Delete
+		At:           now,
+		RequestID:    audit.RequestIDFrom(ctx),
+		ActorSubject: audit.SubjectFrom(ctx),
 	}); err != nil {
 		return err
 	}
@@ -410,15 +413,16 @@ func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, 
 	*deleted = append(*deleted, ref)
 
 	return writeAudit(ctx, tx, audit.Record{
-		ID:         id.New(),
-		Actor:      actor,
-		Interface:  audit.InterfaceFrom(ctx),
-		Kind:       string(ref.Kind),
-		ResourceID: ref.ID,
-		Before:     beforeJSON,
-		After:      nil,
-		At:         time.Now().UTC(),
-		RequestID:  audit.RequestIDFrom(ctx),
+		ID:           id.New(),
+		Actor:        actor,
+		Interface:    audit.InterfaceFrom(ctx),
+		Kind:         string(ref.Kind),
+		ResourceID:   ref.ID,
+		Before:       beforeJSON,
+		After:        nil,
+		At:           time.Now().UTC(),
+		RequestID:    audit.RequestIDFrom(ctx),
+		ActorSubject: audit.SubjectFrom(ctx),
 	})
 }
 
@@ -516,11 +520,11 @@ func writeAudit(ctx context.Context, tx *sql.Tx, rec audit.Record) error {
 		policyDecision = *rec.PolicyDecision
 	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO audit_log (id, actor, interface, kind, resource_id, before, after, at, policy_decision, request_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO audit_log (id, actor, interface, kind, resource_id, before, after, at, policy_decision, request_id, actor_subject)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.ID, rec.Actor, rec.Interface, rec.Kind, rec.ResourceID,
 		nullableJSON(rec.Before), nullableJSON(rec.After), rec.At.Format(timeLayout), policyDecision,
-		nullableString(rec.RequestID))
+		nullableString(rec.RequestID), nullableString(rec.ActorSubject))
 	if err != nil {
 		return fmt.Errorf("sqlite: write audit record: %w", err)
 	}

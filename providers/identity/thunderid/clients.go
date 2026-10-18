@@ -53,7 +53,7 @@ func ProxyBaseURL(client *kubernetes.Client) string {
 // needs the administrator's token, and the Kubernetes Service proxy strips
 // the Authorization header (spec 016 T010), so every attempt would be an
 // admin login for nothing, repeated by the foundations loop.
-// The update itself is RegisterConsoleRedirects, run by an operator
+// The update itself is UpdateClient, run by an operator
 // through a tunnel that preserves headers (plan.md "T010 finding").
 func EnsureClientRedirects(ctx context.Context, client *kubernetes.Client, redirectURI, postLogoutURI string) error {
 	base, hc := ProxyBaseURL(client), noRedirects(client.HTTPClient())
@@ -131,19 +131,27 @@ func noRedirects(hc *http.Client) *http.Client {
 	return &c
 }
 
-// RegisterConsoleRedirects adds the console's callback and post-logout URIs
-// to the serendip client through the management API, logging in as the
-// administrator. baseURL must reach ThunderID without stripping the
-// Authorization header, such as a kubectl port-forward; the Kubernetes
-// Service proxy does strip it. It is the documented one-time step for an
-// install that predates the console or a changed public URL
-// (docs/architecture/identity.md "Console sessions"); serendipd itself
-// never calls it. It changes nothing when both URIs are already there.
-func RegisterConsoleRedirects(ctx context.Context, baseURL string, hc *http.Client, issuer, adminPassword, redirectURI, postLogoutURI string) error {
-	return ensureRedirects(ctx, strings.TrimSuffix(baseURL, "/"), noRedirects(hc), issuer, adminPassword, redirectURI, postLogoutURI)
+// UpdateClient brings an existing install's serendip client up to what a
+// fresh install's bootstrap file sets, through the management API, logging
+// in as the administrator:
+//
+//   - the console's callback and post-logout URIs, when given (empty ones
+//     are skipped);
+//   - every token attribute a fresh install copies into access tokens,
+//     including "groups" (specs/017-authorization plan.md decision 9).
+//
+// Bootstrap files are imported only on first install, so an install that
+// predates either change needs this once. baseURL must reach ThunderID
+// without stripping the Authorization header, such as a kubectl
+// port-forward; the Kubernetes Service proxy does strip it. serendipd
+// itself never calls it (docs/architecture/identity.md "Console
+// sessions"). It only ever adds, and writes once, or not at all when
+// nothing is missing.
+func UpdateClient(ctx context.Context, baseURL string, hc *http.Client, issuer, adminPassword, redirectURI, postLogoutURI string) error {
+	return ensureClient(ctx, strings.TrimSuffix(baseURL, "/"), noRedirects(hc), issuer, adminPassword, redirectURI, postLogoutURI)
 }
 
-func ensureRedirects(ctx context.Context, base string, hc *http.Client, issuer, password, redirectURI, postLogoutURI string) error {
+func ensureClient(ctx context.Context, base string, hc *http.Client, issuer, password, redirectURI, postLogoutURI string) error {
 	token, err := managementToken(ctx, base, hc, issuer, password)
 	if err != nil {
 		return err
@@ -162,15 +170,42 @@ func ensureRedirects(ctx context.Context, base string, hc *http.Client, issuer, 
 	}
 	changed := addURI(cfg, "redirectUris", redirectURI)
 	changed = addURI(cfg, "postLogoutRedirectUris", postLogoutURI) || changed
-	if !changed {
+	added, err := addTokenAttributes(cfg)
+	if err != nil {
+		return err
+	}
+	if !changed && !added {
 		return nil
 	}
 	// PUT replaces the whole document: send back everything that was read
-	// (T001 spike finding 1), with only the URI lists extended.
+	// (spec 016 T001 spike finding 1), with only the lists extended.
 	if err := callJSON(ctx, hc, http.MethodPut, appURL, token, app, nil); err != nil {
-		return fmt.Errorf("thunderid: update the %s client's redirect URIs: %w", ClientID, err)
+		return fmt.Errorf("thunderid: update the %s client: %w", ClientID, err)
 	}
 	return nil
+}
+
+// addTokenAttributes appends to the access token's attribute allow-list
+// (token.accessToken.userConfig.attributes, spec 017 T001 spike finding 4)
+// each of tokenAttributes it lacks, and reports whether it added any. A
+// client without that structure is an error, not something to invent.
+func addTokenAttributes(cfg map[string]any) (bool, error) {
+	tok, _ := cfg["token"].(map[string]any)
+	at, _ := tok["accessToken"].(map[string]any)
+	user, ok := at["userConfig"].(map[string]any)
+	if !ok {
+		return false, fmt.Errorf("thunderid: the %s client has no token.accessToken.userConfig", ClientID)
+	}
+	list, _ := user["attributes"].([]any)
+	added := false
+	for _, a := range tokenAttributes {
+		if !slices.Contains(list, any(a)) {
+			list = append(list, a)
+			added = true
+		}
+	}
+	user["attributes"] = list
+	return added, nil
 }
 
 func oauthConfig(app map[string]any) (map[string]any, error) {

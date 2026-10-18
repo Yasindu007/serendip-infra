@@ -375,17 +375,17 @@ func (c *Console) csrfOK(w http.ResponseWriter, r *http.Request) bool {
 // AuthMiddleware to GET /v1/session.
 type sessionContextKey struct{}
 
-// authenticateCookie resolves a cookie-authenticated request to its actor.
+// authenticateCookie resolves a cookie-authenticated request to its person.
 // On failure it has written the response and returns ok == false.
-func (c *Console) authenticateCookie(w http.ResponseWriter, r *http.Request, id string) (actor string, ctx context.Context, ok bool) {
+func (c *Console) authenticateCookie(w http.ResponseWriter, r *http.Request, id string) (p identity.Principal, ctx context.Context, ok bool) {
 	reqID := audit.RequestIDFrom(r.Context())
 	if !c.csrfOK(w, r) {
-		return "", nil, false
+		return identity.Principal{}, nil, false
 	}
 	sess := c.Sessions.lookup(id)
 	if sess == nil {
 		WriteProblem(w, http.StatusUnauthorized, "unauthorized", "the session has ended; sign in again", reqID)
-		return "", nil, false
+		return identity.Principal{}, nil, false
 	}
 	p, err := c.ensureFresh(r.Context(), sess)
 	switch {
@@ -394,16 +394,16 @@ func (c *Console) authenticateCookie(w http.ResponseWriter, r *http.Request, id 
 		c.Sessions.removeSession(sess)
 		log.Printf("api: console session ended by the identity provider (request %s)", reqID)
 		WriteProblem(w, http.StatusUnauthorized, "unauthorized", "the session has ended; sign in again", reqID)
-		return "", nil, false
+		return identity.Principal{}, nil, false
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		WriteProblem(w, http.StatusServiceUnavailable, "identity provider not ready", "the session couldn't be renewed in time; retry", reqID)
-		return "", nil, false
+		return identity.Principal{}, nil, false
 	default:
 		log.Printf("api: console session refresh failed (request %s): %v", reqID, err)
 		WriteProblem(w, http.StatusServiceUnavailable, "identity provider not ready", "the session can't be renewed right now; retry later", reqID)
-		return "", nil, false
+		return identity.Principal{}, nil, false
 	}
-	return identity.Actor(p), context.WithValue(r.Context(), sessionContextKey{}, sess), true
+	return p, context.WithValue(r.Context(), sessionContextKey{}, sess), true
 }
 
 // ensureFresh returns sess's principal, first renewing its access token if

@@ -5,6 +5,21 @@ import "context"
 type actorKey struct{}
 type requestIDKey struct{}
 type interfaceKey struct{}
+type subjectKey struct{}
+
+// WithSubject returns a context carrying the stable subject of the person
+// behind the actor (spec 017), read back by SubjectFrom and recorded with
+// every mutation the request makes.
+func WithSubject(ctx context.Context, subject string) context.Context {
+	return context.WithValue(ctx, subjectKey{}, subject)
+}
+
+// SubjectFrom returns the subject set by WithSubject, or "" when the actor
+// isn't a person (an API key, the reconciler).
+func SubjectFrom(ctx context.Context) string {
+	subject, _ := ctx.Value(subjectKey{}).(string)
+	return subject
+}
 
 // WithActor returns a context carrying the given actor identity, read
 // back by ActorFrom. There is no real identity/auth system yet (that

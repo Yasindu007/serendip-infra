@@ -102,6 +102,8 @@ driven by `GET /v1/authorization/permissions`.
      Azure picking from the directory; there's no directory API here,
      because the Service proxy strips the `Authorization` header that
      ThunderID's management API needs.
+     It's an observation, not a resource: its writes aren't audited, and
+     a failed write is logged without failing the request (T004).
 7. **Bootstrap and lockout:**
    - **Bootstrap administrator.** On first start, when no assignment
      exists at all, the bootstrap admin gets Owner and Secrets Officer at

@@ -22,6 +22,10 @@ type Record struct {
 	// PolicyDecision is reserved for a future policy engine (spec 003+).
 	// Nil until then -- nothing sets it in spec 001.
 	PolicyDecision *string
+	// ActorSubject is the stable identifier behind Actor when the actor is a
+	// person: the identity provider's subject, which survives a renamed or
+	// reused username (spec 017). Empty for API keys and system actors.
+	ActorSubject string
 	// RequestID ties this record back to the HTTP request that caused it
 	// (spec 002, RequestIDFrom). Empty for mutations not made through the
 	// API (a direct core/store call, e.g. a test or a future reconciler).

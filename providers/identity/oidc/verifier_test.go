@@ -13,9 +13,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -241,6 +243,63 @@ func TestVerifier_Authenticate(t *testing.T) {
 			}
 			if p.Name != tt.wantName || p.Subject != "0190-0030" {
 				t.Errorf("Principal = %+v, want Name %q, Subject 0190-0030", p, tt.wantName)
+			}
+		})
+	}
+}
+
+func TestVerifier_Groups(t *testing.T) {
+	is := newIssuer(t)
+	now := time.Now()
+	clock := func() time.Time { return now }
+	v := newVerifier(t, oidc.Config{Issuer: is.url(), Audience: "serendip", Now: clock})
+	custom := newVerifier(t, oidc.Config{Issuer: is.url(), Audience: "serendip", GroupsClaim: "roles", Now: clock})
+	many := make([]string, 101)
+	for i := range many {
+		many[i] = fmt.Sprintf("g%d", i)
+	}
+	long := strings.Repeat("g", 128)
+	tests := []struct {
+		name   string
+		v      *oidc.Verifier
+		extra  map[string]any
+		want   []string
+		reject bool
+	}{
+		{"absent", v, nil, nil, false},
+		{"null", v, map[string]any{"groups": json.RawMessage("null")}, nil, false},
+		{"present", v, map[string]any{"groups": []string{"platform", "eng"}}, []string{"platform", "eng"}, false},
+		{"duplicates dropped", v, map[string]any{"groups": []string{"eng", "eng"}}, []string{"eng"}, false},
+		{"empty array", v, map[string]any{"groups": []string{}}, []string{}, false},
+		{"exactly 100", v, map[string]any{"groups": many[:100]}, many[:100], false},
+		{"a 128-rune name", v, map[string]any{"groups": []string{long}}, []string{long}, false},
+		{"configured claim name", custom, map[string]any{"roles": []string{"ops"}, "groups": []string{"ignored"}}, []string{"ops"}, false},
+
+		{"a string, not an array", v, map[string]any{"groups": "platform"}, nil, true},
+		{"an array of numbers", v, map[string]any{"groups": []int{1, 2}}, nil, true},
+		{"an object", v, map[string]any{"groups": map[string]string{"a": "b"}}, nil, true},
+		{"more than 100", v, map[string]any{"groups": many}, nil, true},
+		{"a 129-rune name", v, map[string]any{"groups": []string{long + "g"}}, nil, true},
+		{"an empty name", v, map[string]any{"groups": []string{""}}, nil, true},
+		{"a control character", v, map[string]any{"groups": []string{"eng\u0007"}}, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.v.Warm(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			p, err := tt.v.Authenticate(t.Context(), is.sign("RS256", "rsa1", is.claims(now, tt.extra)))
+			if tt.reject {
+				if !errors.Is(err, identity.ErrInvalidCredential) {
+					t.Fatalf("Authenticate = (%+v, %v), want ErrInvalidCredential", p, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Authenticate: %v", err)
+			}
+			if !slices.Equal(p.Groups, tt.want) {
+				t.Errorf("Groups = %q, want %q", p.Groups, tt.want)
 			}
 		})
 	}

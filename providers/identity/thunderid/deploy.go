@@ -23,7 +23,8 @@ type Deployer struct {
 
 // SetConsoleRedirects makes a fresh install's bootstrap client accept the
 // web console's URIs from the start. Bootstrap files are only imported on
-// first install; later changes go through EnsureClientRedirects.
+// first install; on an existing install EnsureClientRedirects detects
+// missing URIs and an operator adds them with UpdateClient.
 func (d *Deployer) SetConsoleRedirects(c ConsoleRedirects) { d.console = c }
 
 // NewDeployer checks helm is available and targets kubeconfigPath's

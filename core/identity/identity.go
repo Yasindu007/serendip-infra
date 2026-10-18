@@ -12,6 +12,10 @@ type Principal struct {
 	Subject string
 	// Name is the human-readable name recorded as the audit actor.
 	Name string
+	// Groups are the names of the groups the person belongs to, as the
+	// provider reports them in the access token. Empty when the provider
+	// doesn't send them.
+	Groups []string
 }
 
 // Authenticator verifies a bearer credential.
