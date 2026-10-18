@@ -105,7 +105,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
   (the fallback when the directory is down, and a 403 for a Reader).
 - **Verify**: `go test ./api/...`, including the fail-closed route test.
 
-## T007 — Agent issuers and agent principals
+## T007 — Agent issuers and agent principals — DONE 2026-10-18 (contract-guardian PASS; go-reviewer found no way to authenticate across issuers, and its findings are fixed: `grant_type` required for agents, the agent subject bounded, sponsors indexed at reload, 503 when the sponsor can't be read. A real Agent Manager token was verified with the real router and verifier code, with the JWKS served locally; the full live run is T011, after the hosts entry)
 
 - **Do**:
   - Parse `SERENDIP_AGENT_ISSUERS` (decision 6; a bad entry is fatal).

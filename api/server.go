@@ -81,7 +81,7 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 	// go through AuthMiddleware at all -- it's mounted directly on
 	// topMux, not apiMux, so there's no bypass logic to get wrong inside
 	// a shared handler.
-	topMux.Handle("/v1/", apiHardening(authMiddleware(apiKeys, authn, console, sqlite.NewPrincipalRegistry(db))(apiMux.mux)))
+	topMux.Handle("/v1/", apiHardening(authMiddleware(apiKeys, authn, console, sqlite.NewPrincipalRegistry(db), sponsorLookup(engine))(apiMux.mux)))
 	if console != nil {
 		// The console shell, its assets and /auth/* need no credential:
 		// after the cross-site return from login the browser withholds the
@@ -201,6 +201,20 @@ func removeStaleKeyAssignments(ctx context.Context, engine *policy.Engine, assig
 			continue
 		}
 		log.Printf("api: API key %q is no longer configured; removed its assignment %s", p.ID, a.Metadata.ID)
+	}
+}
+
+// sponsorLookup names an agent's sponsor for its audit records: the
+// sponsor's subject, or "" when the agent has none (no assignment, so no
+// access either). A failed lookup is an error: the request is refused
+// rather than audited without its sponsor.
+func sponsorLookup(engine *policy.Engine) func(ctx context.Context, agentID string) (string, error) {
+	return func(ctx context.Context, agentID string) (string, error) {
+		s, ok, err := engine.SponsorOf(ctx, agentID)
+		if err != nil || !ok {
+			return "", err
+		}
+		return s.ID, nil
 	}
 }
 

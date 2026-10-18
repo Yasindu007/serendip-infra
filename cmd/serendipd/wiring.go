@@ -67,7 +67,7 @@ type consoleURIs struct {
 // -- instead of stopping it. The Lookup + type-assert pattern from earlier
 // specs is gone: each setup step hands its concrete provider to the
 // matching lazy handle directly, and registers it for completeness.
-func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine, console consoleURIs) (*kubeWiring, error) {
+func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.DB, bus event.Bus, engine *reconcile.Engine, console consoleURIs, isAgentIssuer func(string) bool) (*kubeWiring, error) {
 	if kubeconfigPath == "" {
 		log.Print("serendipd: SERENDIP_KUBECONFIG not set, no Kubernetes-facing providers active")
 		return nil, nil
@@ -207,6 +207,11 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 			issuer, err := thunderid.Issuer(ep, issuerOverride)
 			if err != nil {
 				return err
+			}
+			// A human issuer that is also an agent issuer would let people's
+			// tokens be routed as agents, or the reverse.
+			if isAgentIssuer != nil && isAgentIssuer(issuer) {
+				return fmt.Errorf("identity issuer %s is also listed in SERENDIP_AGENT_ISSUERS; an issuer is for people or for agents, not both", issuer)
 			}
 			if err := identityDeployer.Ensure(ctx, issuer); err != nil {
 				return fmt.Errorf("deploy: %w", err)

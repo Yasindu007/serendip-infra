@@ -428,11 +428,20 @@ prints admin passwords, so it stays in the scratchpad.
      the user is asked then.
 
 **Amendments from T002:**
-- **Decision 7.** When an agent token carries a `grant_type` claim
-  (ThunderID sets one), it must be `client_credentials`. A person's or
-  app's login token from an agent issuer is then refused, even with the
-  right audience. Tokens from other identity providers have no such
-  claim, and for them the issuer and audience checks stand alone.
+- **Decision 7.** An agent token must carry `grant_type:
+  client_credentials`. ThunderID sets it. A person's or app's login token
+  from an agent issuer is then refused, even with the right audience.
+  - At first, a token without the claim was going to be accepted, for
+    other identity providers. T007's go-reviewer pointed out that this
+    would let a person's token from such an issuer pass as an agent's, so
+    the claim is now required. An issuer that doesn't send it can't be an
+    agent issuer until a per-issuer exception is designed.
+  - In the other direction, the human verifier refuses a token that says
+    `client_credentials`.
+  - **Also from T007:** an agent's `sub` must be printable and at most 256
+    bytes, and a negative lifetime (`exp < iat`) is refused. If the sponsor
+    can't be looked up, the request is refused (503) rather than audited
+    without one.
 - **Decision 6.** The 1 h default maximum lifetime matches the observed
   3600 s exactly. The check allows the verifier's 30 s leeway.
 

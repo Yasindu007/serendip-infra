@@ -7,6 +7,7 @@ type requestIDKey struct{}
 type interfaceKey struct{}
 type subjectKey struct{}
 type policyDecisionKey struct{}
+type sponsorKey struct{}
 
 // WithPolicyDecision returns a context carrying the authorization decision
 // that allowed the request (spec 017 plan.md decision 8), recorded with
@@ -38,6 +39,20 @@ func WithSubject(ctx context.Context, subject string) context.Context {
 func SubjectFrom(ctx context.Context) string {
 	subject, _ := ctx.Value(subjectKey{}).(string)
 	return subject
+}
+
+// WithSponsor returns a context carrying the sponsor of the agent behind
+// the actor (spec 018), read back by SponsorFrom and recorded with every
+// mutation the request makes.
+func WithSponsor(ctx context.Context, sponsor string) context.Context {
+	return context.WithValue(ctx, sponsorKey{}, sponsor)
+}
+
+// SponsorFrom returns the sponsor set by WithSponsor, or "" when the actor
+// isn't an agent.
+func SponsorFrom(ctx context.Context) string {
+	sponsor, _ := ctx.Value(sponsorKey{}).(string)
+	return sponsor
 }
 
 // WithActor returns a context carrying the given actor identity, read

@@ -63,7 +63,7 @@ func RequestIDFromContext(ctx context.Context) string {
 // says which check a token failed. Everything downstream only ever sees the
 // resolved actor via context, never how it got there.
 func AuthMiddleware(apiKeys map[string]string, authn identity.Authenticator) func(http.Handler) http.Handler {
-	return authMiddleware(apiKeys, authn, nil, nil)
+	return authMiddleware(apiKeys, authn, nil, nil, nil)
 }
 
 // authMiddleware is AuthMiddleware plus, when console is non-nil, the
@@ -77,11 +77,45 @@ func AuthMiddleware(apiKeys map[string]string, authn identity.Authenticator) fun
 // caller is recorded there, so it can be picked when assigning a role
 // (specs/017-authorization plan.md decision 6). Failing to record is
 // logged, never fatal to the request.
-func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, console *Console, principals *sqlite.PrincipalRegistry) func(http.Handler) http.Handler {
-	person := func(ctx context.Context, p identity.Principal) context.Context {
+//
+// An agent (a token from an agent issuer, spec 018) becomes an agent
+// principal "<issuer alias>/<subject>" with no groups, and its sponsor,
+// from sponsorOf when non-nil, goes into the context for the audit record
+// (audit.WithSponsor). An agent with no sponsor has no assignment, so it
+// can do nothing anyway. When the sponsor can't be looked up the request
+// gets 503, so no agent action is ever recorded without its sponsor.
+func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, console *Console, principals *sqlite.PrincipalRegistry, sponsorOf func(ctx context.Context, agentID string) (string, error)) func(http.Handler) http.Handler {
+	person := func(ctx context.Context, p identity.Principal) (context.Context, error) {
+		if p.Kind == identity.KindAgent {
+			id := identity.AgentID(p)
+			recordSeen(ctx, principals, sqlite.KnownPrincipal{Type: resource.PrincipalAgent, ID: id, DisplayName: id})
+			ctx = withCaller(ctx, policy.Principal{Type: resource.PrincipalAgent, ID: id})
+			ctx = audit.WithSubject(audit.WithActor(ctx, identity.Actor(p)), id)
+			if sponsorOf != nil {
+				s, err := sponsorOf(ctx, id)
+				if err != nil {
+					return nil, err
+				}
+				if s != "" {
+					ctx = audit.WithSponsor(ctx, s)
+				}
+			}
+			return ctx, nil
+		}
 		recordSeen(ctx, principals, sqlite.KnownPrincipal{Type: resource.PrincipalPerson, ID: p.Subject, DisplayName: p.Name, Groups: p.Groups})
 		ctx = withCaller(ctx, policy.Principal{Type: resource.PrincipalPerson, ID: p.Subject, Groups: p.Groups})
-		return audit.WithSubject(audit.WithActor(ctx, identity.Actor(p)), p.Subject)
+		return audit.WithSubject(audit.WithActor(ctx, identity.Actor(p)), p.Subject), nil
+	}
+	// serve resolves p and runs next, or answers 503 when it can't.
+	serve := func(w http.ResponseWriter, r *http.Request, next http.Handler, ctx context.Context, p identity.Principal) {
+		ctx, err := person(ctx, p)
+		if err != nil {
+			reqID := audit.RequestIDFrom(r.Context())
+			log.Printf("api: caller %s not resolved (request %s): %v", identity.Actor(p), reqID, err)
+			WriteProblem(w, http.StatusServiceUnavailable, "not ready", "the caller's details can't be read right now; retry later", reqID)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +137,7 @@ func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, con
 				if !ok {
 					return
 				}
-				next.ServeHTTP(w, r.WithContext(person(ctx, p)))
+				serve(w, r, next, ctx, p)
 				return
 			}
 			if !hasBearer {
@@ -120,7 +154,7 @@ func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, con
 				p, err := authn.Authenticate(r.Context(), token)
 				switch {
 				case err == nil:
-					next.ServeHTTP(w, r.WithContext(person(r.Context(), p)))
+					serve(w, r, next, r.Context(), p)
 					return
 				case errors.Is(err, reconcile.ErrProviderNotReady):
 					WriteProblem(w, http.StatusServiceUnavailable, "identity provider not ready",

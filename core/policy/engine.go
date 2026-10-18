@@ -114,6 +114,9 @@ type Engine struct {
 	mu        sync.RWMutex
 	byID      map[string]resource.RoleAssignment
 	customDef map[string]resource.RoleDefinition
+	// sponsors maps each agent to the sponsor of its assignment with the
+	// lowest ID; CheckAssign keeps them all the same (spec 018).
+	sponsors map[string]resource.PrincipalRef
 
 	// mutateMu serialises "check, then write" for role assignments, so two
 	// concurrent removals of different root Owners can't both pass the
@@ -207,15 +210,24 @@ func (e *Engine) refresh(ctx context.Context) error {
 		return fmt.Errorf("policy: load role definitions: %w", err)
 	}
 	byID := make(map[string]resource.RoleAssignment, len(as))
+	sponsors := map[string]resource.PrincipalRef{}
+	sponsorFrom := map[string]string{} // agent -> assignment ID it came from
 	for _, a := range as {
 		byID[a.Metadata.ID] = a
+		p := a.Spec.Principal
+		if p.Type != resource.PrincipalAgent || p.Sponsor == nil {
+			continue
+		}
+		if from, seen := sponsorFrom[p.ID]; !seen || a.Metadata.ID < from {
+			sponsors[p.ID], sponsorFrom[p.ID] = *p.Sponsor, a.Metadata.ID
+		}
 	}
 	defs := make(map[string]resource.RoleDefinition, len(ds))
 	for _, d := range ds {
 		defs[d.Metadata.ID] = d
 	}
 	e.mu.Lock()
-	e.byID, e.customDef = byID, defs
+	e.byID, e.customDef, e.sponsors = byID, defs, sponsors
 	e.mu.Unlock()
 	return nil
 }
@@ -568,6 +580,20 @@ func (e *Engine) GrantedAnywhere(ctx context.Context, p Principal, a Action) (bo
 		}
 	}
 	return false, nil
+}
+
+// SponsorOf returns the person accountable for agentID: the sponsor its
+// role assignments name (every one names the same sponsor, CheckAssign;
+// were they ever to differ, the lowest assignment ID's wins). ok is false
+// when the agent has no assignment.
+func (e *Engine) SponsorOf(ctx context.Context, agentID string) (sponsor resource.PrincipalRef, ok bool, err error) {
+	if err := e.refresh(ctx); err != nil {
+		return resource.PrincipalRef{}, false, err
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	sponsor, ok = e.sponsors[agentID]
+	return sponsor, ok, nil
 }
 
 // HasAssignment reports whether any assignment names p as its principal.

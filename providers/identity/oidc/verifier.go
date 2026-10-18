@@ -43,6 +43,20 @@ type Config struct {
 	// GroupsClaim names the access-token claim listing the person's group
 	// names. Defaults to "groups". A token without it has no groups.
 	GroupsClaim string
+	// Kind is what an accepted token becomes. A person (the default) may
+	// not present a client_credentials token: a machine is never a person.
+	// An agent's token must say it is a client_credentials one, must carry
+	// iat, must live at most MaxLifetime, and needs a short, printable sub;
+	// its groups are ignored, since group names belong to their issuer
+	// (specs/018-agent-manager-poc plan.md decisions 6 and 7).
+	Kind identity.Kind
+	// IssuerAlias names an agent issuer in principals and audit records.
+	// Required for an agent issuer: lower-case letters, digits and "-", at
+	// most 32.
+	IssuerAlias string
+	// MaxLifetime bounds an agent token's exp - iat, since the issuer can't
+	// revoke tokens. Defaults to 1 h; at most 24 h.
+	MaxLifetime time.Duration
 	// Now is the clock; defaults to time.Now. For tests.
 	Now func() time.Time
 }
@@ -81,6 +95,24 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 	}
 	if cfg.GroupsClaim == "" {
 		cfg.GroupsClaim = "groups"
+	}
+	switch cfg.Kind {
+	case identity.KindPerson:
+		if cfg.IssuerAlias != "" || cfg.MaxLifetime != 0 {
+			return nil, errors.New("oidc: an issuer alias and a maximum lifetime are for agent issuers")
+		}
+	case identity.KindAgent:
+		if !ValidIssuerAlias(cfg.IssuerAlias) {
+			return nil, fmt.Errorf("oidc: agent issuer alias %q: want 1-32 of a-z, 0-9 and -", cfg.IssuerAlias)
+		}
+		if cfg.MaxLifetime == 0 {
+			cfg.MaxLifetime = DefaultAgentTokenLifetime
+		}
+		if cfg.MaxLifetime < 0 || cfg.MaxLifetime > MaxAgentTokenLifetime {
+			return nil, fmt.Errorf("oidc: agent token lifetime %s: want at most %s", cfg.MaxLifetime, MaxAgentTokenLifetime)
+		}
+	default:
+		return nil, fmt.Errorf("oidc: unknown principal kind %d", cfg.Kind)
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -308,6 +340,7 @@ type claims struct {
 	Nbf               *json.Number    `json:"nbf"`
 	Iat               *json.Number    `json:"iat"`
 	ClientID          string          `json:"client_id"`
+	GrantType         string          `json:"grant_type"`
 	Username          string          `json:"username"`
 	PreferredUsername string          `json:"preferred_username"`
 	Email             string          `json:"email"`
@@ -339,11 +372,69 @@ func (v *Verifier) checkClaims(payload []byte) (identity.Principal, error) {
 	if err := v.checkTimes(c); err != nil {
 		return identity.Principal{}, err
 	}
+	if v.cfg.Kind == identity.KindAgent {
+		return v.agent(c)
+	}
+	if c.GrantType == clientCredentials {
+		return identity.Principal{}, invalid("a client_credentials token is never a person")
+	}
 	groups, err := v.groups(payload)
 	if err != nil {
 		return identity.Principal{}, err
 	}
 	return identity.Principal{Subject: c.Sub, Name: displayName(c), Groups: groups}, nil
+}
+
+const clientCredentials = "client_credentials"
+
+// maxAgentSubject bounds an agent's subject, which becomes its principal
+// ID and lands verbatim in audit rows.
+const maxAgentSubject = 256
+
+// agent finishes checking an agent issuer's token: issued to a machine
+// (grant_type client_credentials, required: without it a person's token
+// from the same issuer would pass), with iat, within MaxLifetime, and a
+// printable subject. Groups are never read.
+func (v *Verifier) agent(c claims) (identity.Principal, error) {
+	if c.GrantType != clientCredentials {
+		return identity.Principal{}, invalid(fmt.Sprintf("an agent token must be client_credentials, not %q", c.GrantType))
+	}
+	if len(c.Sub) > maxAgentSubject || strings.IndexFunc(c.Sub, unicode.IsControl) >= 0 {
+		return identity.Principal{}, invalid("an agent's sub must be printable and at most 256 bytes")
+	}
+	iat, ok := unixTime(c.Iat)
+	if !ok {
+		return identity.Principal{}, invalid("an agent token needs iat")
+	}
+	exp, _ := unixTime(c.Exp) // checkTimes required it
+	if life := exp.Sub(iat); life < 0 || life > v.cfg.MaxLifetime+v.cfg.Leeway {
+		return identity.Principal{}, invalid(fmt.Sprintf("lives %s, not within the %s maximum", life, v.cfg.MaxLifetime))
+	}
+	return identity.Principal{
+		Kind:    identity.KindAgent,
+		Issuer:  v.cfg.IssuerAlias,
+		Subject: c.Sub,
+		Name:    displayName(c),
+	}, nil
+}
+
+// Agent token lifetimes (specs/018-agent-manager-poc plan.md decision 6).
+const (
+	DefaultAgentTokenLifetime = time.Hour
+	MaxAgentTokenLifetime     = 24 * time.Hour
+)
+
+// ValidIssuerAlias reports whether s can name an agent issuer.
+func ValidIssuerAlias(s string) bool {
+	if s == "" || len(s) > 32 {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // Bounds on the groups claim. A token past them is rejected rather than

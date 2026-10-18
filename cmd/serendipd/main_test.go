@@ -38,6 +38,8 @@ func TestParseAPIKeys(t *testing.T) {
 		{"k1:alice,bad,:x,k3:", map[string]string{"k1": "alice"}},
 		// An API key may not pose as a person the identity provider logged in.
 		{"k1:person:admin,k2:alice", map[string]string{"k2": "alice"}},
+		// Nor as an agent an agent issuer authenticated.
+		{"k1:agent:am-dev/x,k2:alice", map[string]string{"k2": "alice"}},
 	}
 	for _, tt := range tests {
 		if got := parseAPIKeys(tt.raw); !reflect.DeepEqual(got, tt.want) {

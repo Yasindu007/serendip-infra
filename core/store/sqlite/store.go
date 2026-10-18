@@ -180,6 +180,7 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 		At:             now,
 		RequestID:      audit.RequestIDFrom(ctx),
 		ActorSubject:   audit.SubjectFrom(ctx),
+		ActorSponsor:   audit.SponsorFrom(ctx),
 		PolicyDecision: audit.PolicyDecisionFrom(ctx),
 	}); err != nil {
 		return resource.Resource[S, St]{}, err
@@ -281,6 +282,7 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 		At:             now,
 		RequestID:      audit.RequestIDFrom(ctx),
 		ActorSubject:   audit.SubjectFrom(ctx),
+		ActorSponsor:   audit.SponsorFrom(ctx),
 		PolicyDecision: audit.PolicyDecisionFrom(ctx),
 	}); err != nil {
 		return resource.Resource[S, St]{}, err
@@ -358,6 +360,7 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 		At:             now,
 		RequestID:      audit.RequestIDFrom(ctx),
 		ActorSubject:   audit.SubjectFrom(ctx),
+		ActorSponsor:   audit.SponsorFrom(ctx),
 		PolicyDecision: audit.PolicyDecisionFrom(ctx),
 	}); err != nil {
 		return err
@@ -426,6 +429,7 @@ func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, 
 		At:             time.Now().UTC(),
 		RequestID:      audit.RequestIDFrom(ctx),
 		ActorSubject:   audit.SubjectFrom(ctx),
+		ActorSponsor:   audit.SponsorFrom(ctx),
 		PolicyDecision: audit.PolicyDecisionFrom(ctx),
 	})
 }
@@ -535,6 +539,7 @@ func RecordDenied(ctx context.Context, db *sql.DB, kind resource.Kind, resourceI
 		PolicyDecision: &decision,
 		RequestID:      audit.RequestIDFrom(ctx),
 		ActorSubject:   audit.SubjectFrom(ctx),
+		ActorSponsor:   audit.SponsorFrom(ctx),
 	}); err != nil {
 		return err
 	}
@@ -550,11 +555,11 @@ func writeAudit(ctx context.Context, tx *sql.Tx, rec audit.Record) error {
 		policyDecision = *rec.PolicyDecision
 	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO audit_log (id, actor, interface, kind, resource_id, before, after, at, policy_decision, request_id, actor_subject)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO audit_log (id, actor, interface, kind, resource_id, before, after, at, policy_decision, request_id, actor_subject, actor_sponsor)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.ID, rec.Actor, rec.Interface, rec.Kind, rec.ResourceID,
 		nullableJSON(rec.Before), nullableJSON(rec.After), rec.At.Format(timeLayout), policyDecision,
-		nullableString(rec.RequestID), nullableString(rec.ActorSubject))
+		nullableString(rec.RequestID), nullableString(rec.ActorSubject), nullableString(rec.ActorSponsor))
 	if err != nil {
 		return fmt.Errorf("sqlite: write audit record: %w", err)
 	}

@@ -28,6 +28,10 @@ type Record struct {
 	// person: the identity provider's subject, which survives a renamed or
 	// reused username (spec 017). Empty for API keys and system actors.
 	ActorSubject string
+	// ActorSponsor is the person accountable for the actor when the actor
+	// is an agent (spec 018): the sponsor its role assignments name. Empty
+	// for everyone else.
+	ActorSponsor string
 	// RequestID ties this record back to the HTTP request that caused it
 	// (spec 002, RequestIDFrom). Empty for mutations not made through the
 	// API (a direct core/store call, e.g. a test or a future reconciler).

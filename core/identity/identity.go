@@ -6,8 +6,27 @@ import (
 	"time"
 )
 
-// Principal is an authenticated person.
+// Kind is what sort of caller a Principal is.
+type Kind int
+
+const (
+	// KindPerson is someone who signed in to the identity provider. It is
+	// the zero value.
+	KindPerson Kind = iota
+	// KindAgent is an AI agent with its own identity from a trusted agent
+	// issuer (specs/018-agent-manager-poc plan.md decision 7). It is never
+	// a person, and it has no groups.
+	KindAgent
+)
+
+// Principal is an authenticated caller: a person, or an agent.
 type Principal struct {
+	// Kind says which. A token from the human issuer is always a person,
+	// and one from an agent issuer always an agent.
+	Kind Kind
+	// Issuer is the alias of the agent issuer an agent came from; empty
+	// for a person.
+	Issuer string
 	// Subject is the provider's stable, usually opaque, subject identifier.
 	Subject string
 	// Name is the human-readable name recorded as the audit actor.
@@ -83,8 +102,22 @@ type LoginClient interface {
 // it).
 const ActorPrefix = "person:"
 
-// Actor is the audit actor for p.
+// AgentActorPrefix starts every audit actor that names an agent. API keys
+// may not use it either.
+const AgentActorPrefix = "agent:"
+
+// AgentID is an agent's principal ID: its issuer's alias and its subject,
+// so subjects from different agent issuers can never collide.
+func AgentID(p Principal) string {
+	return p.Issuer + "/" + p.Subject
+}
+
+// Actor is the audit actor for p: "person:<name>" for a person, and
+// "agent:<issuer alias>/<subject>" for an agent.
 func Actor(p Principal) string {
+	if p.Kind == KindAgent {
+		return AgentActorPrefix + AgentID(p)
+	}
 	return ActorPrefix + p.Name
 }
 

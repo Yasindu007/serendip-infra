@@ -27,6 +27,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/providers/identity/oidc"
 )
 
 // resyncEvery/reconcileTimeout are specs/003-reconciliation-engine/plan.md's
@@ -66,6 +67,18 @@ func run() error {
 	dbPath := envOr("SERENDIP_DB_PATH", "serendip.db")
 	addr := envOr("SERENDIP_ADDR", ":8080")
 	apiKeys := parseAPIKeys(os.Getenv("SERENDIP_API_KEYS"))
+	agentIssuers, err := parseAgentIssuers(os.Getenv("SERENDIP_AGENT_ISSUERS"), os.Getenv("SERENDIP_IDENTITY_ISSUER"))
+	if err != nil {
+		return err
+	}
+	isAgentIssuer := func(issuer string) bool {
+		for _, a := range agentIssuers {
+			if strings.TrimSuffix(a.issuer, "/") == strings.TrimSuffix(issuer, "/") {
+				return true
+			}
+		}
+		return false
+	}
 
 	db, err := sqlite.Open(ctx, dbPath)
 	if err != nil {
@@ -99,7 +112,7 @@ func run() error {
 	}
 	consoleRoutes := consoleURIs{callback: origin.String() + "/auth/callback", postLogout: origin.String() + "/"}
 
-	kube, err := wireKubernetes(os.Getenv("SERENDIP_KUBECONFIG"), registry, db, bus, engine, consoleRoutes)
+	kube, err := wireKubernetes(os.Getenv("SERENDIP_KUBECONFIG"), registry, db, bus, engine, consoleRoutes, isAgentIssuer)
 	if err != nil {
 		return fmt.Errorf("kubernetes: %w", err)
 	}
@@ -110,6 +123,15 @@ func run() error {
 	if kube != nil {
 		secretReconciler = kube.secretReconciler
 		authn = kube.authn
+	}
+	if len(agentIssuers) > 0 {
+		agents, err := agentVerifiers(ctx, agentIssuers)
+		if err != nil {
+			return err
+		}
+		// Tokens are routed by issuer: an agent issuer's only ever become
+		// agents, everything else goes to the human issuer's verifier.
+		authn = oidc.NewIssuerRouter(authn, agents)
 	}
 
 	// Before the API starts, so the administrator can act from the first
@@ -258,10 +280,11 @@ func parseAPIKeys(raw string) map[string]string {
 			log.Printf("serendipd: skipping malformed SERENDIP_API_KEYS entry %q", pair)
 			continue
 		}
-		// "person:" actors name people the identity provider authenticated
-		// (core/identity.Actor); an API key may not claim to be one.
-		if strings.HasPrefix(actor, identity.ActorPrefix) {
-			log.Printf("serendipd: skipping SERENDIP_API_KEYS entry for actor %q: the %q prefix is reserved for logged-in people", actor, identity.ActorPrefix)
+		// "person:" and "agent:" actors name callers the identity provider
+		// or an agent issuer authenticated (core/identity.Actor); an API key
+		// may not claim to be one.
+		if strings.HasPrefix(actor, identity.ActorPrefix) || strings.HasPrefix(actor, identity.AgentActorPrefix) {
+			log.Printf("serendipd: skipping SERENDIP_API_KEYS entry for actor %q: the %q and %q prefixes are reserved for authenticated people and agents", actor, identity.ActorPrefix, identity.AgentActorPrefix)
 			continue
 		}
 		keys[token] = actor
