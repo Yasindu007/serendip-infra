@@ -268,6 +268,95 @@ describe("access control", () => {
     expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
   });
 
+  const agentRoles = roles.map((r) => ({ ...r, assignableToAgents: r.metadata.id !== "r-owner" }));
+  const withAgents = (p: unknown) => ({ ...routes(p), "/v1/authorization/roleDefinitions": agentRoles });
+
+  it("assigns a role to an agent with a sponsor, offering only roles an agent may hold", async () => {
+    mockFetch(withAgents(owner), (url, init) => (init.method === "POST" && url === "/v1/authorization/roleAssignments" ? json(201, assignments[0]) : json(200, [])));
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    const form = await screen.findByRole("form", { name: "Add a role assignment" });
+    await screen.findAllByText("ann");
+    fireEvent.change(within(form).getByLabelText("Principal type"), { target: { value: "agent" } });
+    const roleSelect = within(form).getByLabelText("Role");
+    expect(within(roleSelect).queryByRole("option", { name: "Owner" })).toBeNull();
+    expect(within(roleSelect).getByRole("option", { name: "Reader" })).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText("Agent"), { target: { value: "am-dev/agent-1" } });
+    // No sponsor: refused before anything is sent.
+    fireEvent.click(within(form).getByRole("button", { name: "Assign role" }));
+    expect(await within(form).findByText("An agent needs a sponsor: the person accountable for it.")).toBeTruthy();
+    expect(calls.some((c) => c.init.method === "POST")).toBe(false);
+
+    fireEvent.change(within(form).getByLabelText("Sponsor"), { target: { value: "ann" } });
+    fireEvent.change(roleSelect, { target: { value: "r-reader" } });
+    const shown = within(form).getByText((_, el) => el?.tagName === "PRE").textContent ?? "";
+    fireEvent.click(within(form).getByRole("button", { name: "Assign role" }));
+    await screen.findByText("Reader assigned to am-dev/agent-1.");
+    const sent = JSON.parse(calls.find((c) => c.init.method === "POST")!.init.body as string);
+    expect(sent.spec.principal).toEqual({ type: "agent", id: "am-dev/agent-1", sponsor: { type: "person", id: "sub-ann" } });
+    expect(shown).toBe(formatRequest({ method: "POST", path: "/v1/authorization/roleAssignments", body: sent }));
+  });
+
+  it("suggests people from the identity provider, not only those who signed in", async () => {
+    const q = (text: string) => `/v1/authorization/directory?type=person&q=${text}`;
+    mockFetch({ ...routes(owner), [q("car")]: { source: "live", truncated: true, items: [{ type: "person", id: "sub-carol", displayName: "carol" }] } }, () =>
+      json(200, { source: "live", truncated: false, items: [] }),
+    );
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    const form = await screen.findByRole("form", { name: "Add a role assignment" });
+    fireEvent.change(within(form).getByLabelText("Person"), { target: { value: "car" } });
+    await waitFor(() => expect(form.querySelector('datalist option[value="carol"]')?.getAttribute("label")).toBe("sub-carol"));
+    expect(within(form).getByText("More match than are shown: type more of the name.")).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText("Person"), { target: { value: "carol" } });
+    expect(within(form).getByText("sub-carol", { selector: ".mono" })).toBeTruthy();
+  });
+
+  it("says when suggestions only come from sign-ins", async () => {
+    mockFetch(routes(owner), (url) =>
+      url.startsWith("/v1/authorization/directory") ? json(200, { source: "signedIn", truncated: false, items: [{ type: "person", id: "sub-ann", displayName: "ann" }] }) : json(200, []),
+    );
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    const form = await screen.findByRole("form", { name: "Add a role assignment" });
+    expect(await within(form).findByText(/identity provider can't be reached right now/)).toBeTruthy();
+  });
+
+  it("checks a person's access with their groups read live", async () => {
+    mockFetch({ ...routes(reader), "/v1/authorization/principals/person/sub-ann/groups": { source: "live", groups: ["platform", "t018-readers"] } });
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    const form = await screen.findByRole("form", { name: "Check access" });
+    await screen.findAllByText("ann");
+    fireEvent.change(within(form).getByLabelText("Principal"), { target: { value: "ann" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Check access" }));
+    expect(await screen.findByText("Live from the identity provider: ann is in platform, t018-readers.")).toBeTruthy();
+    expect(screen.getByText("Group platform")).toBeTruthy();
+  });
+
+  it("says when the identity provider has no such person", async () => {
+    mockFetch(routes(reader), (url) => (url.endsWith("/groups") ? json(404, { title: "not found", status: 404 }) : json(200, [])));
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    const form = await screen.findByRole("form", { name: "Check access" });
+    fireEvent.change(within(form).getByLabelText("Principal"), { target: { value: "sub-gone" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Check access" }));
+    expect(await screen.findByText(/identity provider has no such person/)).toBeTruthy();
+  });
+
+  it("explains that agents have no groups", async () => {
+    mockFetch(routes(reader));
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    const form = await screen.findByRole("form", { name: "Check access" });
+    fireEvent.change(within(form).getByLabelText("Principal type"), { target: { value: "agent" } });
+    fireEvent.change(within(form).getByLabelText("Principal"), { target: { value: "am-dev/agent-1" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Check access" }));
+    expect(await screen.findByText(/Agents have no groups/)).toBeTruthy();
+    // No live group lookup is made for an agent.
+    expect(calls.some((c) => c.url.includes("/groups"))).toBe(false);
+  });
+
   it("refuses a malformed scope", async () => {
     mockFetch({ "/v1/session": session });
     goTo("/access?scope=nonsense");

@@ -138,7 +138,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
   built-in role and a custom role with a wildcard).
 - **Verify**: `go test ./core/policy/... ./api/...`; contract-guardian.
 
-## T009 — Console
+## T009 — Console — DONE 2026-10-18 (75 UI tests pass, typecheck clean, build 79.8 KiB gz of the 160 KiB budget; real-browser check in T011)
 
 - **Do**:
   - In Add assignment: type `agent`, a required sponsor picker, and

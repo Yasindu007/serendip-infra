@@ -120,14 +120,19 @@ export interface RoleDefinitionSpec {
   assignableScopes?: Scope[];
 }
 
-/** GET /v1/authorization/roleDefinitions: built-ins are marked. */
-export type RoleDefinition = Resource<RoleDefinitionSpec, BaseStatus> & { builtIn: boolean };
+/**
+ * GET /v1/authorization/roleDefinitions: built-ins are marked, and the
+ * server says which roles an agent may hold (spec 018).
+ */
+export type RoleDefinition = Resource<RoleDefinitionSpec, BaseStatus> & { builtIn: boolean; assignableToAgents?: boolean };
 
 export type PrincipalType = "person" | "group" | "apiKey" | "agent";
 
 export interface PrincipalRef {
   type: PrincipalType;
   id: string;
+  /** The person accountable for an agent; required for, and only on, an agent. */
+  sponsor?: PrincipalRef;
 }
 
 export interface RoleAssignmentSpec {
@@ -154,4 +159,27 @@ export interface KnownPrincipal {
   groups?: string[];
   firstSeen: string;
   lastSeen: string;
+}
+
+/** Where a directory answer came from: the identity provider now, or sign-ins. */
+export type DirectorySource = "live" | "signedIn";
+
+/** One person or group that can be granted a role. */
+export interface DirectoryItem {
+  type: PrincipalType;
+  id: string;
+  displayName?: string;
+}
+
+/** GET /v1/authorization/directory?type=&q= */
+export interface DirectoryView {
+  source: DirectorySource;
+  truncated: boolean;
+  items: DirectoryItem[];
+}
+
+/** GET /v1/authorization/principals/person/{id}/groups */
+export interface GroupsView {
+  source: DirectorySource;
+  groups: string[];
 }
