@@ -133,6 +133,9 @@ func routeTable() map[string]rule {
 		"DELETE /v1/authorization/roleAssignments/{id}": {action: authzAction("roleAssignments", "delete"), target: targetAssignment, kind: resource.KindRoleAssignment},
 		"GET /v1/authorization/permissions":             {authOnly: true},
 		"GET /v1/authorization/principals":              {authOnly: true},
+		// Directory data, gated in the handler like the list above.
+		"GET /v1/authorization/principals/person/{id}/groups": {authOnly: true},
+		"GET /v1/authorization/directory":                     {authOnly: true},
 
 		"POST /v1/secrets/{id}/value": {action: policy.Action{Name: "serendip/secrets/value/write", Data: true}, target: targetResource, kind: resource.KindSecret},
 		"GET /v1/secrets/{id}/value":  {action: policy.Action{Name: "serendip/secrets/value/read", Data: true}, target: targetResource, kind: resource.KindSecret},

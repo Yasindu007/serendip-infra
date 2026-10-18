@@ -44,7 +44,7 @@ var people = map[string]identity.Principal{
 	"tok-member":  {Subject: "sub-member", Name: "member", Groups: []string{"platform"}},
 }
 
-func newAuthzWorld(t *testing.T, grants func(w *authzWorld)) *authzWorld {
+func newAuthzWorld(t *testing.T, grants func(w *authzWorld), opts ...api.ServerOption) *authzWorld {
 	t.Helper()
 	ctx := context.Background()
 	w := &authzWorld{t: t, db: newTestDB(t), id: map[string]string{}}
@@ -96,7 +96,7 @@ func newAuthzWorld(t *testing.T, grants func(w *authzWorld)) *authzWorld {
 	bus := event.NewInProcessBus()
 	secrets := sqlite.NewStore[resource.SecretSpec, resource.SecretStatus](w.db, resource.KindSecret).SetBus(bus)
 	rec := reconcile.NewSecretReconciler(secrets, newFakeSecretsProvider())
-	w.h = api.NewServer(w.db, bus, map[string]string{"key-ci": "ci"}, authn, rec, nil, nil).Handler
+	w.h = api.NewServer(w.db, bus, map[string]string{"key-ci": "ci"}, authn, rec, nil, nil, opts...).Handler
 	return w
 }
 

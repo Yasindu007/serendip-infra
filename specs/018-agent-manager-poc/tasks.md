@@ -94,7 +94,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
   - On the cluster: a log line shows one successful directory call.
   - `bash .claude/scripts/check-imports.sh`; contract-guardian.
 
-## T006 — Directory and live-groups API routes
+## T006 — Directory and live-groups API routes — DONE 2026-10-18 (go-reviewer PASS, nits fixed. Live on kind: person and group search and a person's groups `source: live`, an unknown person 404; with ThunderID scaled to 0, every answer `signedIn` in about 15 ms and other routes unaffected; live again once the pod returned, without a restart. Wired as `api.WithDirectory`, an optional `NewServer` argument)
 
 - **Do**:
   - Add `GET /v1/authorization/directory` and

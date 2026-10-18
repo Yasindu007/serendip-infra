@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
+	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/policy"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
@@ -23,10 +24,13 @@ import (
 // handler adds Azure's other rules: constrained delegation, assignable
 // scopes, the last Owner at "/", and no deleting a role still assigned.
 type AuthorizationHandler struct {
-	engine       *policy.Engine
-	assignments  store.Store[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus]
-	definitions  store.Store[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus]
-	principals   *sqlite.PrincipalRegistry
+	engine      *policy.Engine
+	assignments store.Store[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus]
+	definitions store.Store[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus]
+	principals  *sqlite.PrincipalRegistry
+	// directory, when set, answers who can be granted a role and a
+	// person's current groups live; nil means sign-ins are the only source.
+	directory    identity.Directory
 	exists       func(ctx context.Context, kind resource.Kind, id string) (bool, error)
 	recordDenied dbForAudit
 }
@@ -42,6 +46,8 @@ func (h *AuthorizationHandler) Register(mux Mux) {
 	mux.HandleFunc("DELETE /v1/authorization/roleAssignments/{id}", h.deleteAssignment)
 	mux.HandleFunc("GET /v1/authorization/permissions", h.permissions)
 	mux.HandleFunc("GET /v1/authorization/principals", h.listPrincipals)
+	mux.HandleFunc("GET /v1/authorization/principals/person/{id}/groups", h.personGroups)
+	mux.HandleFunc("GET /v1/authorization/directory", h.searchDirectory)
 }
 
 // roleDefinitionView is a role definition as the API shows it: built-in
@@ -350,20 +356,7 @@ func (h *AuthorizationHandler) permissions(w http.ResponseWriter, r *http.Reques
 // role to. It's a directory of people and groups, so only callers who can
 // assign roles somewhere may read it.
 func (h *AuthorizationHandler) listPrincipals(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	caller, ok := callerFrom(ctx)
-	if !ok {
-		WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", audit.RequestIDFrom(ctx))
-		return
-	}
-	write := authzAction("roleAssignments", "write")
-	can, err := h.engine.GrantedAnywhere(ctx, caller, write)
-	if err != nil {
-		writeStoreErr(w, r, err)
-		return
-	}
-	if !can {
-		WriteProblem(w, http.StatusForbidden, "forbidden", "missing "+write.Name+" at any scope", audit.RequestIDFrom(ctx))
+	if !h.mayListPrincipals(w, r) {
 		return
 	}
 	t := resource.PrincipalType(r.URL.Query().Get("type"))
@@ -380,6 +373,29 @@ func (h *AuthorizationHandler) listPrincipals(w http.ResponseWriter, r *http.Req
 		list = []sqlite.KnownPrincipal{}
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// mayListPrincipals is the gate on directory data (people, groups, and
+// who belongs to what): only callers who can assign roles somewhere may
+// read it. It answers the refusal itself.
+func (h *AuthorizationHandler) mayListPrincipals(w http.ResponseWriter, r *http.Request) bool {
+	ctx := r.Context()
+	caller, ok := callerFrom(ctx)
+	if !ok {
+		WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", audit.RequestIDFrom(ctx))
+		return false
+	}
+	write := authzAction("roleAssignments", "write")
+	can, err := h.engine.GrantedAnywhere(ctx, caller, write)
+	if err != nil {
+		writeStoreErr(w, r, err)
+		return false
+	}
+	if !can {
+		WriteProblem(w, http.StatusForbidden, "forbidden", "missing "+write.Name+" at any scope", audit.RequestIDFrom(ctx))
+		return false
+	}
+	return true
 }
 
 // parseScope reads "/" or "Kind/id" as a scope of a kind the API serves.

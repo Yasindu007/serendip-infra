@@ -124,7 +124,11 @@ func run() error {
 	if kube != nil {
 		webConsole.Login = kube.login.client
 	}
-	srv := api.NewServer(db, bus, apiKeys, authn, secretReconciler, registry, webConsole)
+	var serverOpts []api.ServerOption
+	if kube != nil {
+		serverOpts = append(serverOpts, api.WithDirectory(kube.directory))
+	}
+	srv := api.NewServer(db, bus, apiKeys, authn, secretReconciler, registry, webConsole, serverOpts...)
 	srv.Addr = addr
 
 	errCh := make(chan error, 1)
