@@ -27,7 +27,7 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
 - **Verify**: every item has observed evidence. Delete the scratch
   cluster.
 
-## T002 — `core/resource` kinds + `core/graph.Ancestors`
+## T002 — `core/resource` kinds + `core/graph.Ancestors` — DONE 2026-10-18 (contract-guardian PASS)
 
 - **Do**:
   - Add the `RoleDefinition` and `RoleAssignment` kinds, specs and

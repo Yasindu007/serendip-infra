@@ -80,6 +80,40 @@ func Children(ctx context.Context, q Queryer, ref ResourceRef) ([]ResourceRef, e
 		string(resource.EdgeOwns), string(ref.Kind), ref.ID)
 }
 
+// Ancestors returns ref's owners, their owners and so on up to the roots,
+// nearest first (breadth-first, so a resource with several owners lists
+// all of them before any grandparent). It is what makes authorization
+// scopes inherit: an assignment on a Project applies to everything the
+// Project owns, at any depth (specs/017-authorization plan.md decision 1).
+// A cycle in owns edges, which validation should never allow, ends the
+// walk rather than looping.
+func Ancestors(ctx context.Context, q Queryer, ref ResourceRef) ([]ResourceRef, error) {
+	visited := map[ResourceRef]bool{ref: true}
+	frontier := []ResourceRef{ref}
+	var result []ResourceRef
+	for len(frontier) > 0 {
+		var next []ResourceRef
+		for _, node := range frontier {
+			owners, err := queryEdgeTargets(ctx, q, `
+				SELECT from_kind, from_id FROM edges WHERE edge_type = ? AND to_kind = ? AND to_id = ?`,
+				string(resource.EdgeOwns), string(node.Kind), node.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, o := range owners {
+				if visited[o] {
+					continue
+				}
+				visited[o] = true
+				result = append(result, o)
+				next = append(next, o)
+			}
+		}
+		frontier = next
+	}
+	return result, nil
+}
+
 // Dependents returns resources that declare a "depends-on" relationship
 // targeting ref -- what would need to know if ref changed or went away.
 func Dependents(ctx context.Context, q Queryer, ref ResourceRef) ([]ResourceRef, error) {

@@ -151,7 +151,7 @@ driven by `GET /v1/authorization/permissions`.
      adding users today.
 10. **Constrained delegation** (Azure's RBAC Administrator with a
     condition), without the ABAC language. An assignment may carry
-    `delegation: {roleIds: [...], principalTypes: [...]}`. When the caller
+    `delegation: {roleDefinitionIds: [...], principalTypes: [...]}`. When the caller
     creates or removes an assignment, the role and principal type must be
     allowed by some delegation-carrying assignment that grants
     `roleAssignments/write` at that scope.
@@ -288,7 +288,9 @@ tokens or passwords.
 - `core/resource`:
   - `RoleDefinitionSpec`: `roleName`, `description`, `permissions[]`
     (`actions`, `notActions`, `dataActions`, `notDataActions`),
-    `assignableScopes[]`, `builtIn`;
+    `assignableScopes[]`. There is no stored `builtIn` field: built-in
+    roles live in `core/policy` code, and the validator is told which kind
+    it's checking, so a stored flag can't be spoofed. (Amended in T002.)
   - `RoleAssignmentSpec`: `principal{type,id}`, `roleDefinitionId`,
     `scope` (`/` or `{kind,id}`), `description`, `delegation`;
   - their Status types, and the kinds `RoleDefinition` and

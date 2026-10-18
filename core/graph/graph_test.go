@@ -259,3 +259,80 @@ func TestDeleteEdgesFor_RemovesBothDirections(t *testing.T) {
 		t.Errorf("edges from project = %d, want 0 after DeleteEdgesFor (project was also the 'from' side)", edgeCount)
 	}
 }
+
+func TestAncestors(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	owns := func(child, owner graph.ResourceRef) {
+		t.Helper()
+		if err := graph.SyncEdges(ctx, db, child, []resource.OwnerRef{{Kind: owner.Kind, ID: owner.ID}}, nil); err != nil {
+			t.Fatalf("SyncEdges(%v) = %v", child, err)
+		}
+	}
+	org := ref(resource.KindOrganization, "org")
+	project := ref(resource.KindProject, "proj")
+	env := ref(resource.KindEnvironment, "prod")
+	app := ref(resource.KindApplication, "app")
+	comp := ref(resource.KindComponent, "web")
+	cluster := ref(resource.KindCluster, "c1")
+	owns(project, org)
+	owns(env, project)
+	owns(app, env)
+	owns(comp, app)
+	// A non-owns edge must not count as inheritance.
+	if err := graph.SyncEdges(ctx, db, comp, []resource.OwnerRef{{Kind: app.Kind, ID: app.ID}},
+		[]resource.Relationship{{Type: resource.EdgeRunsOn, TargetKind: cluster.Kind, TargetID: cluster.ID}}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("five levels, nearest first", func(t *testing.T) {
+		got, err := graph.NewSQLiteGraph(db).Ancestors(ctx, comp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []graph.ResourceRef{app, env, project, org}
+		if len(got) != len(want) {
+			t.Fatalf("Ancestors(comp) = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("Ancestors(comp)[%d] = %v, want %v", i, got[i], want[i])
+			}
+		}
+	})
+	t.Run("unowned resource has none", func(t *testing.T) {
+		got, err := graph.Ancestors(ctx, db, org)
+		if err != nil || len(got) != 0 {
+			t.Errorf("Ancestors(org) = %v, %v; want none", got, err)
+		}
+	})
+	t.Run("several owners are all listed before grandparents", func(t *testing.T) {
+		shared := ref(resource.KindComponent, "shared")
+		other := ref(resource.KindApplication, "other")
+		owns(other, env)
+		if err := graph.SyncEdges(ctx, db, shared, []resource.OwnerRef{{Kind: app.Kind, ID: app.ID}, {Kind: other.Kind, ID: other.ID}}, nil); err != nil {
+			t.Fatal(err)
+		}
+		got, err := graph.Ancestors(ctx, db, shared)
+		if err != nil || len(got) < 2 {
+			t.Fatalf("Ancestors(shared) = %v, %v", got, err)
+		}
+		first := map[graph.ResourceRef]bool{got[0]: true, got[1]: true}
+		if !first[app] || !first[other] {
+			t.Errorf("Ancestors(shared) = %v, want both direct owners first", got)
+		}
+		if got[2] != env || len(got) != 5 {
+			t.Errorf("Ancestors(shared) = %v, want env once, then project and org", got)
+		}
+	})
+	t.Run("a cycle ends the walk", func(t *testing.T) {
+		a := ref(resource.KindProject, "loop-a")
+		b := ref(resource.KindProject, "loop-b")
+		owns(a, b)
+		owns(b, a)
+		got, err := graph.Ancestors(ctx, db, a)
+		if err != nil || len(got) != 1 || got[0] != b {
+			t.Errorf("Ancestors(loop-a) = %v, %v; want [loop-b] and no infinite loop", got, err)
+		}
+	})
+}
