@@ -13,6 +13,37 @@ Last updated: 2026-10-18
 
 ## Current phase
 
+**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T005
+done and committed; next is T006** (the authorization endpoints: role
+definitions, role assignments, permissions). Plan, decisions and
+accepted risks: `specs/017-authorization/plan.md`; task status:
+`tasks.md`. Committed so far:
+- `0d82624` T001 spike: ThunderID subjects and groups.
+- `43fb525` T002 role definition and assignment resources, scope ancestry.
+- `cf5aeaf` T003 `core/policy`: built-in roles, evaluation (~4 µs per
+  decision), delegation, last-Owner guard, `LockAssignments`.
+- `a0ba669` T004 subject and groups on the principal, audit
+  `actor_subject`, known-principals registry, ThunderID `groups` token
+  attribute (`UpdateClient`, operator tool now optional `--public-url`).
+- `7d96f00` T005 enforcement on every `/v1` route: route table +
+  authorizing mux (panics on an unmapped route), list/graph filtering,
+  403 shape, `policy_decision` and denied-mutation audit, API keys that
+  never had an assignment become Owner at `/`.
+  - Reviews caught and we fixed: an unreadable-body bypass, cascade
+    deletes and owner removal escaping checks, revoked keys regranted.
+- **For T006:** the assignment handlers must hold
+  `Engine.LockAssignments` across check + write, use
+  `CheckAssign`/`CheckUnassign`, and close AC 2's role-assignment half.
+- **For T007:** bootstrap administrator (Owner + Secrets Officer at `/`,
+  subject `01900000-0000-7000-8000-000000000030`), removed-key cleanup,
+  `serendipd break-glass grant-owner`. API-key migration already landed
+  in T005 (`api/server.go` `migrateAPIKeys`).
+- Then T008 console Access control, T009 benchmarks, T010 real cluster,
+  T011 reviews, T012 docs/ADR 0014. After 017: spec 018 (WSO2 Agent
+  Manager POC, beside Serendip, may reuse our ThunderID/OpenChoreo on a
+  throwaway cluster), then 019 approvals (draft in `specs/019-approvals/`,
+  uncommitted, on hold).
+
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
 PR #24.** Specs 002-016 are committed locally only — decided explicitly
 with the user to keep working locally and push everything together at
