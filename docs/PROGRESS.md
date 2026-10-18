@@ -91,6 +91,27 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
   manual. Only ThunderID's management API has this problem: OpenBao's
   header passes the proxy, and the rest is driven through the
   Kubernetes API.
+- **Research for that decision (oss-researcher, 2026-10-18; ThunderID
+  1.0.1, from source and issues, not yet tested on a cluster):**
+  - **Delegated mode is likely feasible.** Nothing restricts `system`
+    scope to ThunderID's own CONSOLE client. `serendip` asking for
+    `scope=openid system` and `resource=https://localhost:8090/mcp` should
+    give an admin a management token from their own roles. Refresh
+    re-evaluates roles, and token exchange can only narrow. *Spike it
+    first.*
+  - **Workload identity is mechanically feasible but all-or-nothing.** A
+    confidential `client_credentials` app with a role granting `system`
+    works (there's a precedent in openndx PR #633). But 1.0.1 has only the
+    one coarse `system` permission, so a "narrow" machine identity would
+    really be a full-admin secret. Finer permissions exist in code
+    (`system:user:view`, …) but aren't grantable yet.
+  - **Connection: the management API shares ThunderID's one port with
+    OIDC.** So the public Gateway route (which keeps `Authorization`)
+    already reaches it, and a separate tunnel isn't needed. **That also
+    means the management API is publicly reachable today**, protected
+    only by its bearer-token check. 018 should restrict the public route
+    to the login paths (`/oauth2`, `/.well-known`, `/flow`, `/auth`,
+    `/console`) and give management a restricted route.
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
 PR #24.** Specs 002-016 are committed locally only — decided explicitly
