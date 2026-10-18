@@ -56,7 +56,7 @@ export function AccessControl({ scope, name, crumbs }: { scope: Scope; name?: st
     <>
       <PageHeader {...(crumbs ? { crumbs } : {})} title={`Access control (IAM)${name ? `: ${name}` : ""}`} meta={<UpdatedLine at={assignments.updatedAt} now={now} />} />
       <p>
-        Roles assigned here apply to {describeScope(scope)} and everything it owns. Roles assigned higher up apply here too, and a role
+        Roles assigned here apply to {name && scope.kind ? `${scope.kind} ${name}` : describeScope(scope)} and everything it owns. Roles assigned higher up apply here too, and a role
         assigned lower down never takes access away.
       </p>
 
@@ -223,7 +223,8 @@ function RoleList({ roles }: { roles: { data: RoleDefinition[] | undefined; erro
           {roles.data.map((r) => (
             <tr key={r.metadata.id}>
               <td>{r.spec.roleName}</td>
-              <td>{r.builtIn ? "Built-in" : "Custom"}</td>
+              {/* A non-breaking hyphen: "Built-in" must not wrap at the hyphen. */}
+              <td>{r.builtIn ? "Built‑in" : "Custom"}</td>
               <td>{r.spec.description ?? ""}</td>
             </tr>
           ))}

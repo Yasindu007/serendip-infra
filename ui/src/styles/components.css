@@ -141,6 +141,7 @@
   margin-left: auto;
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start; /* a Guarded action's reason mustn't stretch its neighbours */
   gap: var(--space-2);
 }
 
