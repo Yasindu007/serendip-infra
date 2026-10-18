@@ -234,6 +234,52 @@ function RoleList({ roles }: { roles: { data: RoleDefinition[] | undefined; erro
   );
 }
 
+/**
+ * resolvePrincipal reads what was typed into a principal field: a known
+ * subject, or the name of exactly one known principal, which resolves to
+ * its subject. Anything else is taken as typed.
+ */
+export function resolvePrincipal(principals: KnownPrincipal[], type: PrincipalType, text: string): { id: string; name?: string } {
+  const t = text.trim();
+  const ofType = principals.filter((p) => p.type === type);
+  const byId = ofType.find((p) => p.id === t);
+  if (byId) return byId.displayName ? { id: t, name: byId.displayName } : { id: t };
+  const byName = ofType.filter((p) => p.displayName === t);
+  if (byName.length === 1) return { id: byName[0]!.id, name: t };
+  return { id: t };
+}
+
+/**
+ * PrincipalSuggestions offers known principals by name, with the subject
+ * beside it. A name shared by two principals is offered by subject, so
+ * picking it can't be ambiguous.
+ */
+function PrincipalSuggestions({ id, principals, type }: { id: string; principals: KnownPrincipal[]; type: PrincipalType }) {
+  const ofType = principals.filter((p) => p.type === type);
+  const shared = (n: string | undefined) => n !== undefined && ofType.filter((p) => p.displayName === n).length > 1;
+  return (
+    <datalist id={id}>
+      {ofType.map((p) =>
+        p.displayName && !shared(p.displayName) ? (
+          <option key={p.id} value={p.displayName} label={p.id} />
+        ) : (
+          <option key={p.id} value={p.id} label={p.displayName ?? ""} />
+        ),
+      )}
+    </datalist>
+  );
+}
+
+/** The subject a typed name resolves to, shown under the field. */
+function ResolvedSubject({ text, resolved }: { text: string; resolved: { id: string; name?: string } }) {
+  if (!resolved.name || resolved.id === text.trim()) return null;
+  return (
+    <p className="field-hint">
+      Subject <span className="mono">{resolved.id}</span>
+    </p>
+  );
+}
+
 function AddAssignment({ scope, roles, principals, onAdded }: { scope: Scope; roles: RoleDefinition[]; principals: KnownPrincipal[]; onAdded: () => void }) {
   const [type, setType] = useState<PrincipalType>("person");
   const [id, setId] = useState("");
@@ -246,11 +292,11 @@ function AddAssignment({ scope, roles, principals, onAdded }: { scope: Scope; ro
 
   const role = roleId || roles[0]?.metadata.id || "";
   const idError = touched && id.trim() === "" ? "Enter who gets the role." : undefined;
+  const resolved = resolvePrincipal(principals, type, id);
   const body = {
     metadata: {},
-    spec: { principal: { type, id: id.trim() }, roleDefinitionId: role, scope, ...(description ? { description } : {}) },
+    spec: { principal: { type, id: resolved.id }, roleDefinitionId: role, scope, ...(description ? { description } : {}) },
   };
-  const suggestions = principals.filter((p) => p.type === type);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -261,7 +307,7 @@ function AddAssignment({ scope, roles, principals, onAdded }: { scope: Scope; ro
     setAdded(undefined);
     try {
       await apiFetch<RoleAssignment>("POST", "/v1/authorization/roleAssignments", body);
-      setAdded(`${roles.find((r) => r.metadata.id === role)?.spec.roleName ?? "The role"} assigned to ${id.trim()}.`);
+      setAdded(`${roles.find((r) => r.metadata.id === role)?.spec.roleName ?? "The role"} assigned to ${resolved.name ?? resolved.id}.`);
       setId("");
       setDescription("");
       setTouched(false);
@@ -277,15 +323,14 @@ function AddAssignment({ scope, roles, principals, onAdded }: { scope: Scope; ro
       <SelectField id="ra-type" label="Principal type" value={type} onChange={(e) => setType(e.target.value as PrincipalType)} options={principalTypes} />
       <TextField
         id="ra-principal"
-        label={type === "person" ? "Person (subject)" : type === "group" ? "Group name" : "API key name"}
+        label={type === "person" ? "Person" : type === "group" ? "Group name" : "API key name"}
         hint={
           type === "person"
-            ? "The person's subject at the identity provider. People who have signed in are suggested."
+            ? "The name of someone who has signed in, or their subject at the identity provider."
             : type === "group"
               ? "The group's name as the identity provider sends it."
               : "The key's name in SERENDIP_API_KEYS."
         }
-        mono
         list="ra-suggestions"
         value={id}
         onChange={(e) => setId(e.target.value)}
@@ -293,13 +338,8 @@ function AddAssignment({ scope, roles, principals, onAdded }: { scope: Scope; ro
         {...(idError ? { error: idError } : {})}
         required
       />
-      <datalist id="ra-suggestions">
-        {suggestions.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.displayName ?? p.id}
-          </option>
-        ))}
-      </datalist>
+      <ResolvedSubject text={id} resolved={resolved} />
+      <PrincipalSuggestions id="ra-suggestions" principals={principals} type={type} />
       <SelectField
         id="ra-role"
         label="Role"
@@ -332,7 +372,9 @@ function AddAssignment({ scope, roles, principals, onAdded }: { scope: Scope; ro
 function CheckAccess({ assignments, roles, principals }: { assignments: RoleAssignment[]; roles: RoleDefinition[]; principals: KnownPrincipal[] }) {
   const [type, setType] = useState<PrincipalType>("person");
   const [id, setId] = useState("");
-  const [checked, setChecked] = useState<{ type: PrincipalType; id: string }>();
+  const [checked, setChecked] = useState<{ type: PrincipalType; id: string; name?: string }>();
+  const resolved = resolvePrincipal(principals, type, id);
+  const who = checked ? (checked.name ?? checked.id) : "";
 
   const groups = checked?.type === "person" ? (principals.find((p) => p.type === "person" && p.id === checked.id)?.groups ?? []) : [];
   const applying = checked
@@ -349,20 +391,13 @@ function CheckAccess({ assignments, roles, principals }: { assignments: RoleAssi
         aria-label="Check access"
         onSubmit={(e) => {
           e.preventDefault();
-          if (id.trim()) setChecked({ type, id: id.trim() });
+          if (id.trim()) setChecked({ type, ...resolved });
         }}
       >
         <SelectField id="ca-type" label="Principal type" value={type} onChange={(e) => setType(e.target.value as PrincipalType)} options={principalTypes} />
-        <TextField id="ca-principal" label="Principal" mono list="ca-suggestions" value={id} onChange={(e) => setId(e.target.value)} />
-        <datalist id="ca-suggestions">
-          {principals
-            .filter((p) => p.type === type)
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.displayName ?? p.id}
-              </option>
-            ))}
-        </datalist>
+        <TextField id="ca-principal" label="Principal" hint="A name or a subject." list="ca-suggestions" value={id} onChange={(e) => setId(e.target.value)} />
+        <ResolvedSubject text={id} resolved={resolved} />
+        <PrincipalSuggestions id="ca-suggestions" principals={principals} type={type} />
         <div className="form-actions">
           <button className="button" type="submit">
             Check access
@@ -372,13 +407,13 @@ function CheckAccess({ assignments, roles, principals }: { assignments: RoleAssi
       {checked &&
         (applying.length === 0 ? (
           <EmptyState title="No access here">
-            No role assignment applies to {checked.id} at this scope{checked.type === "person" ? ", directly or through a group they're known to be in" : ""}.
+            No role assignment applies to {who} at this scope{checked.type === "person" ? ", directly or through a group they're known to be in" : ""}.
           </EmptyState>
         ) : (
           <>
             {checked.type === "person" && (
               <Notice>
-                Group memberships are as of {checked.id}'s last sign-in{groups.length ? `: ${groups.join(", ")}` : " (none known)"}. Roles add up.
+                Group memberships are as of {who}'s last sign-in{groups.length ? `: ${groups.join(", ")}` : " (none known)"}. Roles add up.
               </Notice>
             )}
             <div className="table-wrap">

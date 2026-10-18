@@ -179,7 +179,7 @@ describe("access control", () => {
     goTo(`/access?scope=${encodeURIComponent(scope)}`);
     render(<App />);
     const form = await screen.findByRole("form", { name: "Add a role assignment" });
-    fireEvent.change(within(form).getByLabelText("Person (subject)"), { target: { value: "sub-bob" } });
+    fireEvent.change(within(form).getByLabelText("Person"), { target: { value: "sub-bob" } });
     await waitFor(() => expect(within(form).getByRole("option", { name: "Reader" })).toBeTruthy());
     fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "r-reader" } });
     fireEvent.change(within(form).getByLabelText("Description"), { target: { value: "on call" } });
@@ -197,16 +197,37 @@ describe("access control", () => {
     expect(shown).toBe(formatRequest({ method: "POST", path: "/v1/authorization/roleAssignments", body: sent }));
   });
 
+  it("takes a person's name and sends their subject", async () => {
+    mockFetch(routes(owner), (url, init) => (init.method === "POST" && url === "/v1/authorization/roleAssignments" ? json(201, assignments[0]) : json(200, [])));
+    goTo(`/access?scope=${encodeURIComponent(scope)}`);
+    render(<App />);
+    const form = await screen.findByRole("form", { name: "Add a role assignment" });
+    await screen.findAllByText("ann");
+    // Suggestions lead with the name; the subject is the secondary label.
+    const option = form.querySelector('datalist option[value="ann"]');
+    expect(option?.getAttribute("label")).toBe("sub-ann");
+    fireEvent.change(within(form).getByLabelText("Person"), { target: { value: "ann" } });
+    expect(within(form).getByText("sub-ann", { selector: ".mono" })).toBeTruthy();
+    await waitFor(() => expect(within(form).getByRole("option", { name: "Reader" })).toBeTruthy());
+    fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "r-reader" } });
+    const shown = within(form).getByText((_, el) => el?.tagName === "PRE").textContent ?? "";
+    expect(shown).toContain('"id": "sub-ann"');
+    fireEvent.click(within(form).getByRole("button", { name: "Assign role" }));
+    await screen.findByText("Reader assigned to ann.");
+    const sent = JSON.parse(calls.find((c) => c.init.method === "POST")!.init.body as string);
+    expect(sent.spec.principal).toEqual({ type: "person", id: "sub-ann" });
+  });
+
   it("checks a person's access through their groups", async () => {
     mockFetch(routes(reader));
     goTo(`/access?scope=${encodeURIComponent(scope)}`);
     render(<App />);
     const form = await screen.findByRole("form", { name: "Check access" });
     await screen.findAllByText("ann");
-    fireEvent.change(within(form).getByLabelText("Principal"), { target: { value: "sub-ann" } });
+    fireEvent.change(within(form).getByLabelText("Principal"), { target: { value: "ann" } });
     fireEvent.click(within(form).getByRole("button", { name: "Check access" }));
     expect(await screen.findByText("Group platform")).toBeTruthy();
-    expect(screen.getByText(/last sign-in: platform/)).toBeTruthy();
+    expect(screen.getByText(/as of ann's last sign-in: platform/)).toBeTruthy();
     expect(screen.getByText("Direct")).toBeTruthy();
   });
 
