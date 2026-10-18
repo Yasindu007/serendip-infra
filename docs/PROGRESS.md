@@ -32,6 +32,16 @@ user's approval.** Key plan decisions:
   delete, and have one sponsor each.
 - T001 DONE: port-forward works on kind 1.34 and K3s v1.36.4 (our pin,
   `agent/bootstrap/install.go`); findings in plan.md.
+- T002 DONE: an Agent Manager 1.0.0 quick start (k3d `amp-local`, 5.1 GiB
+  at idle) is still running, with agents `serendip-ext` (Reader role on
+  resource server `https://serendip.local/api`) and `serendip-norole`.
+  The real token: `sub` = agent ID, `aud` = identifier, 3600 s,
+  `grant_type` claim, no groups or owner. Any agent gets a
+  Serendip-audience token, so Serendip's assignments alone decide. The
+  owner is `amp-system-client`, so the sponsor lives in Serendip. kind
+  `serendip-t018` is stopped (`docker start serendip-t018-control-plane`).
+  Next is T003. T011 needs `serendipd` on `:8088` (Agent Manager holds
+  8080) and a hosts entry for `default-idp.amp.localhost` (ask the user).
 
 The notes below are the research behind it.
 (Resolved: the user allowed removing role assignments in the console,

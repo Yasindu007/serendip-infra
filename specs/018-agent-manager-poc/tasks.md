@@ -28,7 +28,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
   decision 2 (the SPDY-tunnel fallback) before T004. Delete the scratch
   clusters except `serendip-t018`.
 
-## T002 — Spike: Agent Manager quick start and a real agent token
+## T002 — Spike: Agent Manager quick start and a real agent token — DONE 2026-10-18 (plan.md "Spike findings (T002)"; decisions 6 and 7 amended)
 
 - **Do**:
   - Check the host's RAM and the `.wslconfig` headroom. If the two

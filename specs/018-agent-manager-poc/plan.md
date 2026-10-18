@@ -349,6 +349,93 @@ headless-Chrome driver over the DevTools protocol. Neither is kept.
      group created a moment earlier (`POST /groups`, 201) appeared
      straight away, with no new sign-in. That's AC 2's live behaviour.
 
+## Spike findings (T002, 2026-10-18)
+
+**The setup:** the official `amp/v1.0.0` quick start, from the image
+`ghcr.io/wso2/amp-quick-start:v1.0.0`. The checksums of `start.sh` and
+`k3d-install.sh` matched the release. It ran with `install.sh`'s 13
+steps, in about 20 minutes, with no errors. Its k3d cluster runs K3s
+v1.32.9. The kind node `serendip-t018` was stopped during the run to
+leave memory, and is restarted for T011. A stdlib Python driver did the
+calls. Secrets were read into memory and never printed. The install log
+prints admin passwords, so it stays in the scratchpad.
+
+1. **The footprint:** the k3d server node uses **5.13 GiB at idle**,
+   and the Docker VM has 7.76 GiB.
+   - With `serendip-t018` (1.3 GiB) beside it, that's about 6.5 GiB. It
+     fits without changing `.wslconfig`, but with little headroom.
+   - The host has 32 GB, with about 8.5 GB free while both run.
+2. **The installer's host effects:**
+   - It binds host ports 8080, 8443, 10082, 11080, 11082, 11085,
+     19080 and 19443. **8080 collides with `serendipd`'s default**, so
+     T011 runs `serendipd` with `SERENDIP_ADDR=:8088` and a matching
+     `SERENDIP_PUBLIC_URL`.
+   - It mounts the Docker socket into its container, and `chmod 666`s
+     it when it can't connect.
+3. **Creating an agent through Agent Manager's API** worked:
+   - **The client:** `amp-api-client`, the chart-default client, with
+     `client_credentials` and the `amp:agent:*` and
+     `amp:agent-identity:*` scopes.
+   - **The calls:**
+     - `POST /orgs/default/projects/default/agents` (external) returned
+       202;
+     - `PUT …/agents/{name}/identities?environment=default` reached
+       `completed`, with `agentId`;
+     - `POST …/identities` returned `clientId` and a one-time
+       `clientSecret`.
+   - **The ThunderID agent** is
+     `amp-agent-<ou>-default-default-<name>`, with `assertion.validityPeriod`
+     3600.
+4. **The agent issuer** is the default environment's ThunderID at
+   `http://default-idp.amp.localhost:8080`.
+   - Discovery is reachable from the host.
+   - It advertises `introspect`, `dcr` and `par` publicly, the same
+     prefix issue as ours.
+   - In it, through the `amp-system-client` management token:
+     - a resource server with identifier `https://serendip.local/api`
+       and type `API` (201);
+     - an action `read` (201);
+     - a role holding it (201);
+     - the role assigned to the agent (204).
+5. **The real agent token** (`client_credentials`,
+   `resource=https://serendip.local/api`, client_secret_basic):
+   - `{aud: "https://serendip.local/api", client_id, exp, grant_type:
+     "client_credentials", iat, iss: "http://default-idp.amp.localhost:8080",
+     jti, nbf, sub, scope?}`.
+   - **`sub` is exactly the agent's ID.**
+   - `exp − iat` = 3600.
+   - **There's no `groups` claim, no agent-type claim and no owner or
+     sponsor claim.**
+   - `scope` is present only when requested and held.
+6. **Any agent in that issuer gets a Serendip-audience token,** even
+   one with no role. Asking for a scope it doesn't hold silently drops
+   it.
+   - So `aud` and `scope` mean nothing for authorization. Serendip's own
+     assignments decide, and an agent without one gets nothing
+     (decision 7). Serendip ignores `scope`.
+7. **The agent's `owner` in ThunderID is `amp-system-client`,** the
+   client Agent Manager provisions with, not a person.
+   - Agent Manager's `requestedBy` was `amp-api-client`, because a
+     machine client made the request.
+   - So the upstream owner can't serve as a sponsor. The sponsor is
+     recorded in Serendip (decision 8, confirmed).
+8. **Go on Windows can't resolve `*.localhost` subdomains,** for
+   example `default-idp.amp.localhost` and `identity.localhost`. curl and
+   Chrome resolve them internally.
+   - So `serendipd` on this host can't fetch the agent issuer's
+     discovery document or JWKS by name. Real installs use DNS.
+   - For the POC, T011 needs a hosts-file entry. That requires admin, so
+     the user is asked then.
+
+**Amendments from T002:**
+- **Decision 7.** When an agent token carries a `grant_type` claim
+  (ThunderID sets one), it must be `client_credentials`. A person's or
+  app's login token from an agent issuer is then refused, even with the
+  right audience. Tokens from other identity providers have no such
+  claim, and for them the issuer and audience checks stand alone.
+- **Decision 6.** The 1 h default maximum lifetime matches the observed
+  3600 s exactly. The check allows the verifier's 30 s leeway.
+
 ## Interfaces and types created
 
 - **`core/identity`:**
