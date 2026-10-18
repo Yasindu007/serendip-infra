@@ -180,3 +180,13 @@ func EverAssigned(ctx context.Context, db *sql.DB, t resource.PrincipalType, id 
 	}
 	return n > 0, nil
 }
+
+// ResourceExists reports whether a resource of kind with id is stored, for
+// checks that only need existence (an assignment's scope) across kinds.
+func ResourceExists(ctx context.Context, db *sql.DB, kind resource.Kind, id string) (bool, error) {
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM resources WHERE kind = ? AND id = ?`, string(kind), id).Scan(&n); err != nil {
+		return false, fmt.Errorf("sqlite: look up %s %s: %w", kind, id, err)
+	}
+	return n > 0, nil
+}

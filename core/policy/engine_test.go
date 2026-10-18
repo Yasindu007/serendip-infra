@@ -426,3 +426,31 @@ func BenchmarkDecide(b *testing.B) {
 		}
 	}
 }
+
+// A constrained delegate who may grant a role that can itself assign roles
+// must pass on a delegation no wider than their own, or they could mint an
+// unconstrained administrator.
+func TestDelegateCantMintAWiderAdministrator(t *testing.T) {
+	w := newWorld(t)
+	w.grant(alice, policy.RBACAdministratorRoleID, projA, &resource.Delegation{
+		RoleDefinitionIDs: []string{policy.ReaderRoleID, policy.RBACAdministratorRoleID},
+		PrincipalTypes:    []resource.PrincipalType{resource.PrincipalPerson},
+	})
+	to := resource.PrincipalRef{Type: resource.PrincipalPerson, ID: bob.ID}
+	try := func(d *resource.Delegation) error {
+		return w.engine.CheckAssign(w.ctx, alice, resource.RoleAssignmentSpec{Principal: to, RoleDefinitionID: policy.RBACAdministratorRoleID, Scope: app, Delegation: d})
+	}
+	if err := try(nil); !errors.Is(err, policy.ErrForbidden) {
+		t.Errorf("unconstrained administrator: err = %v, want ErrForbidden", err)
+	}
+	if err := try(&resource.Delegation{RoleDefinitionIDs: []string{policy.OwnerRoleID}, PrincipalTypes: []resource.PrincipalType{resource.PrincipalPerson}}); !errors.Is(err, policy.ErrForbidden) {
+		t.Errorf("delegation wider than hers: err = %v, want ErrForbidden", err)
+	}
+	if err := try(&resource.Delegation{RoleDefinitionIDs: []string{policy.ReaderRoleID}, PrincipalTypes: []resource.PrincipalType{resource.PrincipalPerson}}); err != nil {
+		t.Errorf("delegation within hers: %v", err)
+	}
+	// Roles that can't assign need no delegation.
+	if err := w.engine.CheckAssign(w.ctx, alice, resource.RoleAssignmentSpec{Principal: to, RoleDefinitionID: policy.ReaderRoleID, Scope: app}); err != nil {
+		t.Errorf("plain Reader: %v", err)
+	}
+}

@@ -41,6 +41,16 @@ const (
 	targetRoot
 	// targetGraph is the resource named by {kind} and {id}.
 	targetGraph
+	// targetAssignmentBody is a role assignment's scope, from the body.
+	targetAssignmentBody
+	// targetRoleBody is each assignable scope of a custom role, from the
+	// body: creating a role needs write wherever it could be assigned.
+	targetRoleBody
+	// targetAssignment is the scope of the role assignment named by {id}.
+	targetAssignment
+	// targetRole is each assignable scope of the custom role named by
+	// {id}.
+	targetRole
 )
 
 // rule is one route's authorization requirement.
@@ -80,6 +90,10 @@ var resourcePaths = map[resource.Kind]string{
 	resource.KindSecret:           "secrets",
 }
 
+func authzAction(what, verb string) policy.Action {
+	return policy.Action{Name: "serendip/authorization/" + what + "/" + verb}
+}
+
 func action(kind resource.Kind, verb string) policy.Action {
 	return policy.Action{Name: "serendip/" + resourcePaths[kind] + "/" + verb}
 }
@@ -103,6 +117,22 @@ func routeTable() map[string]rule {
 		"GET /v1/graph/{kind}/{id}/children":     {target: targetGraph},
 		"GET /v1/graph/{kind}/{id}/dependents":   {target: targetGraph},
 		"GET /v1/graph/{kind}/{id}/blast-radius": {target: targetGraph},
+
+		// Authorization itself (T006). Anyone may read role definitions and
+		// ask what they may do: neither is secret, and someone with access
+		// to one project still needs the role names to understand it. The
+		// principals list is a directory, so its handler also requires
+		// being able to assign roles somewhere (plan.md decision 2).
+		"GET /v1/authorization/roleDefinitions":         {authOnly: true},
+		"GET /v1/authorization/roleDefinitions/{id}":    {authOnly: true},
+		"POST /v1/authorization/roleDefinitions":        {action: authzAction("roleDefinitions", "write"), target: targetRoleBody, kind: resource.KindRoleDefinition},
+		"DELETE /v1/authorization/roleDefinitions/{id}": {action: authzAction("roleDefinitions", "delete"), target: targetRole, kind: resource.KindRoleDefinition},
+		"GET /v1/authorization/roleAssignments":         {list: true, kind: resource.KindRoleAssignment},
+		"GET /v1/authorization/roleAssignments/{id}":    {action: authzAction("roleAssignments", "read"), target: targetAssignment, kind: resource.KindRoleAssignment},
+		"POST /v1/authorization/roleAssignments":        {action: authzAction("roleAssignments", "write"), target: targetAssignmentBody, kind: resource.KindRoleAssignment},
+		"DELETE /v1/authorization/roleAssignments/{id}": {action: authzAction("roleAssignments", "delete"), target: targetAssignment, kind: resource.KindRoleAssignment},
+		"GET /v1/authorization/permissions":             {authOnly: true},
+		"GET /v1/authorization/principals":              {authOnly: true},
 
 		"POST /v1/secrets/{id}/value": {action: policy.Action{Name: "serendip/secrets/value/write", Data: true}, target: targetResource, kind: resource.KindSecret},
 		"GET /v1/secrets/{id}/value":  {action: policy.Action{Name: "serendip/secrets/value/read", Data: true}, target: targetResource, kind: resource.KindSecret},
@@ -174,6 +204,22 @@ type readFilterKey struct{}
 
 type readFilter func(ctx context.Context, kind resource.Kind, id string) (bool, error)
 
+// deciderKey carries a "may the caller do this there?" check for list
+// handlers whose items aren't ordinary resources (role assignments).
+type deciderKey struct{}
+
+type decider func(ctx context.Context, act policy.Action, at resource.Scope) (bool, error)
+
+// allowedAt answers through the request's decider. Without one (a handler
+// on a plain mux, in unit tests) everything is allowed, as for lists.
+func allowedAt(ctx context.Context, act policy.Action, at resource.Scope) (bool, error) {
+	d, ok := ctx.Value(deciderKey{}).(decider)
+	if !ok {
+		return true, nil
+	}
+	return d(ctx, act, at)
+}
+
 func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reqID := audit.RequestIDFrom(r.Context())
@@ -190,7 +236,12 @@ func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 			h(w, r.WithContext(ctx))
 			return
 		case ru.list:
-			h(w, r.WithContext(context.WithValue(ctx, readFilterKey{}, readFilter(a.readable(caller)))))
+			ctx = context.WithValue(ctx, readFilterKey{}, readFilter(a.readable(caller)))
+			ctx = context.WithValue(ctx, deciderKey{}, decider(func(ctx context.Context, act policy.Action, at resource.Scope) (bool, error) {
+				d, err := a.engine.Decide(ctx, caller, act, at)
+				return d.Effect == policy.Allow, err
+			}))
+			h(w, r.WithContext(ctx))
 			return
 		}
 
@@ -265,6 +316,41 @@ func (a *authorizer) checks(ctx context.Context, r *http.Request, ru rule) ([]ch
 			return nil, "", errUnknownKind
 		}
 		return []check{{action(kind, "read"), resource.Scope{Kind: kind, ID: id}}}, id, nil
+	case targetAssignmentBody:
+		doc, err := bodyDoc(r)
+		if err != nil {
+			return nil, "", err
+		}
+		return []check{{ru.action, doc.Spec.Scope}}, "", nil
+	case targetRoleBody:
+		doc, err := bodyDoc(r)
+		if err != nil {
+			return nil, "", err
+		}
+		return scopeChecks(ru.action, doc.Spec.AssignableScopes), "", nil
+	case targetAssignment:
+		// An assignment that doesn't exist is decided at "/": an Owner
+		// learns it's missing (404), anyone else gets 403 either way.
+		at := resource.RootScope
+		all, err := a.engine.Assignments(ctx)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, x := range all {
+			if x.Metadata.ID == id {
+				at = x.Spec.Scope
+			}
+		}
+		return []check{{ru.action, at}}, id, nil
+	case targetRole:
+		role, ok, err := a.engine.Role(ctx, id)
+		if err != nil {
+			return nil, "", err
+		}
+		if !ok || policy.IsBuiltIn(id) {
+			return []check{{ru.action, resource.RootScope}}, id, nil
+		}
+		return scopeChecks(ru.action, role.AssignableScopes), id, nil
 	case targetParent:
 		owners, err := bodyOwners(r)
 		if err != nil {
@@ -304,6 +390,18 @@ func (a *authorizer) checks(ctx context.Context, r *http.Request, ru rule) ([]ch
 		}
 	}
 	return out, id, nil
+}
+
+// scopeChecks is act at each scope, or at "/" when there are none.
+func scopeChecks(act policy.Action, scopes []resource.Scope) []check {
+	if len(scopes) == 0 {
+		return []check{{act, resource.RootScope}}
+	}
+	out := make([]check, 0, len(scopes))
+	for _, s := range scopes {
+		out = append(out, check{act, s})
+	}
+	return out
 }
 
 // deleteAction is delete for a kind, or for a kind the API doesn't serve,
@@ -349,29 +447,45 @@ func (a *authorizer) moveChecks(ctx context.Context, r *http.Request, ru rule, r
 	return out, nil
 }
 
-// bodyOwners reads the request body's metadata.ownerRefs and puts the body
-// back for the handler. It decodes exactly as decodeBody does (the first
-// JSON value, through json.Decoder), so the owners checked here are the
-// owners the handler stores.
+// bodyOwners returns the request body's metadata.ownerRefs as scopes (see
+// bodyDoc).
 func bodyOwners(r *http.Request) ([]resource.Scope, error) {
-	body, err := io.ReadAll(r.Body)
-	r.Body = io.NopCloser(bytes.NewReader(body))
+	doc, err := bodyDoc(r)
 	if err != nil {
-		return nil, &badBody{err}
-	}
-	var doc struct {
-		Metadata struct {
-			OwnerRefs []resource.OwnerRef `json:"ownerRefs"`
-		} `json:"metadata"`
-	}
-	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&doc); err != nil {
-		return nil, &badBody{err}
+		return nil, err
 	}
 	out := make([]resource.Scope, 0, len(doc.Metadata.OwnerRefs))
 	for _, o := range doc.Metadata.OwnerRefs {
 		out = append(out, resource.Scope{Kind: o.Kind, ID: o.ID})
 	}
 	return out, nil
+}
+
+// probe is the part of a request body authorization decides on.
+type probe struct {
+	Metadata struct {
+		OwnerRefs []resource.OwnerRef `json:"ownerRefs"`
+	} `json:"metadata"`
+	Spec struct {
+		Scope            resource.Scope   `json:"scope"`
+		AssignableScopes []resource.Scope `json:"assignableScopes"`
+	} `json:"spec"`
+}
+
+// bodyDoc reads the body's probe and puts the body back for the handler.
+// It decodes exactly as decodeBody does (the first JSON value, through
+// json.Decoder), so what's checked here is what the handler stores.
+func bodyDoc(r *http.Request) (probe, error) {
+	body, err := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return probe{}, &badBody{err}
+	}
+	var doc probe
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&doc); err != nil {
+		return probe{}, &badBody{err}
+	}
+	return doc, nil
 }
 
 // readable returns the check list and graph results are filtered with.

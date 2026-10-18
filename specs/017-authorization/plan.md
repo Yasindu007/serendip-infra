@@ -60,6 +60,13 @@ driven by `GET /v1/authorization/permissions`.
    - `GET /v1/session` and `GET /v1/authorization/permissions` need only
      authentication: anyone may ask who they are and what they can do. The
      table marks them explicitly as `authenticated-only`, not unmapped.
+   - **Amended in T006:** reading role definitions is authenticated-only
+     too. Role definitions aren't secret, and someone with access to one
+     project needs the role names to understand it, which a read action at
+     `/` would deny them. `GET /v1/authorization/principals` is a directory
+     of people and groups, so its handler additionally requires
+     `roleAssignments/write` at some scope: exactly the callers who pick
+     whom to assign.
    - **The route table is the single source.** A middleware looks up the
      mux pattern (`r.Pattern`, Go 1.23+) in it. The startup check and a
      unit test both fail if any registered route has no entry, so the
@@ -162,6 +169,11 @@ driven by `GET /v1/authorization/permissions`.
       user… including themselves".
     - An Owner, or a User Access Administrator without delegation, is
       unrestricted, as in Azure.
+    - **No minting wider administrators** (added in T006, from review).
+      When a delegate grants a role that can itself assign roles, the new
+      assignment must carry a delegation within the delegate's own (its
+      roles and principal types a subset). Otherwise a constrained
+      delegate could create an unconstrained one.
 11. **Console:**
     - **An Access control tab** on Overview (scope `/`), Application and
       Component pages. It lists the assignments at this scope and

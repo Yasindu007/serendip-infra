@@ -117,14 +117,30 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
   - denied-mutation audit rows;
   - all existing tests unchanged in behaviour.
 
-## T006 — `api`: authorization endpoints
+## T006 — `api`: authorization endpoints — DONE 2026-10-18
+
+- **Notes (decisions made while building):**
+  - Reading role definitions and `permissions` needs only authentication
+    (plan.md decision 2, amended). `principals` is a directory of people
+    and groups, so it also needs `roleAssignments/write` at some scope:
+    the people who use the picker, including a project-scoped
+    administrator.
+  - Creating a custom role needs `roleDefinitions/write` at every
+    assignable scope; deleting one, delete at all of them (Azure's rule).
+    There is no update yet.
+  - Listing assignments with `?scope=` needs read there and returns those
+    made there and inherited from above (`inherited: true`); without it,
+    each is shown only where the caller may read assignments.
+  - Assignment scopes must exist; duplicates are 409; removing the last
+    Owner at `/` is 409 (the caller may, the state forbids it); delegation
+    refusals are 403 and audited as refused mutations.
 
 - **Do**:
   - `GET`/`POST /v1/authorization/roleDefinitions` (custom roles;
     built-ins listed read-only);
   - `GET`/`POST`/`DELETE /v1/authorization/roleAssignments` (filter by
     scope and by principal);
-  - `GET /v1/authorization/permissions?kind=&id=`;
+  - `GET /v1/authorization/permissions?scope=`;
   - `GET /v1/authorization/principals` (the registry).
   - Enforce Azure's rules and decision 10's delegation.
 - **Files**: `api/authorization_handler.go` and tests.

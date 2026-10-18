@@ -68,7 +68,7 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 	engine, stopPolicy := newPolicyEngine(db, bus)
 	migrateAPIKeys(engine, db, bus, apiKeys)
 	apiMux := &authzMux{mux: http.NewServeMux(), a: newAuthorizer(engine, graph.NewSQLiteGraph(db), recordDeniedIn(db))}
-	registerAPI(apiMux, db, bus, secretReconciler, providers, console)
+	registerAPI(apiMux, db, bus, engine, secretReconciler, providers, console)
 
 	topMux := http.NewServeMux()
 	topMux.HandleFunc("GET /healthz", healthzHandler)
@@ -164,7 +164,7 @@ func migrateAPIKeys(engine *policy.Engine, db *sql.DB, bus event.Bus, apiKeys ma
 
 // registerAPI registers every /v1 route on mux. NewServer passes its
 // authorizing mux; the fail-closed test passes a recorder to enumerate them.
-func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, secretReconciler *reconcile.SecretReconciler, providers *provider.Registry, console *Console) {
+func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, secretReconciler *reconcile.SecretReconciler, providers *provider.Registry, console *Console) {
 	// 14 explicit instantiations, deliberately not abstracted further
 	// (specs/002-http-api/plan.md Risks: "each line is trivial and
 	// independently readable" -- a loop over a slice of type-erased
@@ -203,6 +203,18 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, secretReconciler *reconc
 	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
 	NewRegistryHandler(registry.NewCapabilityRegistry(capStore)).Register(apiMux)
 	NewReadinessHandler(providers).Register(apiMux)
+	g := graph.NewSQLiteGraph(db)
+	(&AuthorizationHandler{
+		engine:       engine,
+		assignments:  sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](db, resource.KindRoleAssignment).SetBus(bus),
+		definitions:  sqlite.NewStore[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus](db, resource.KindRoleDefinition).SetBus(bus),
+		principals:   sqlite.NewPrincipalRegistry(db),
+		ancestors:    g.Ancestors,
+		recordDenied: recordDeniedIn(db),
+		exists: func(ctx context.Context, kind resource.Kind, id string) (bool, error) {
+			return sqlite.ResourceExists(ctx, db, kind, id)
+		},
+	}).Register(apiMux)
 	apiMux.HandleFunc("GET /v1/session", console.sessionHandler)
 	// Catch-all for anything under /v1/ that doesn't match a registered
 	// kind/graph/registry route -- without this, an unmatched /v1/ path

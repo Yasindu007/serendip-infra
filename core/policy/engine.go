@@ -359,7 +359,7 @@ func (e *Engine) CheckAssign(ctx context.Context, caller Principal, spec resourc
 			return err
 		}
 	}
-	return e.checkDelegated(ctx, caller, Action{Name: ActionRoleAssignmentsWrite}, spec, true)
+	return e.checkDelegated(ctx, caller, Action{Name: ActionRoleAssignmentsWrite}, spec, &role)
 }
 
 // CheckUnassign decides whether caller may delete the assignment with id:
@@ -375,7 +375,7 @@ func (e *Engine) CheckUnassign(ctx context.Context, caller Principal, id string)
 	if !ok {
 		return fmt.Errorf("%w: no role assignment %s", store.ErrNotFound, id)
 	}
-	if err := e.checkDelegated(ctx, caller, Action{Name: ActionRoleAssignmentsDelete}, a.Spec, false); err != nil {
+	if err := e.checkDelegated(ctx, caller, Action{Name: ActionRoleAssignmentsDelete}, a.Spec, nil); err != nil {
 		return err
 	}
 	last, err := e.IsLastRootOwner(ctx, id)
@@ -398,7 +398,15 @@ func isSelf(p resource.PrincipalRef, caller Principal) bool {
 	return p.Type == caller.Type && p.ID == caller.ID
 }
 
-func (e *Engine) checkDelegated(ctx context.Context, caller Principal, a Action, spec resource.RoleAssignmentSpec, creating bool) error {
+// checkDelegated checks caller's right to perform a on spec. newRole is the
+// role being granted when creating an assignment, nil when removing one.
+func (e *Engine) checkDelegated(ctx context.Context, caller Principal, a Action, spec resource.RoleAssignmentSpec, newRole *resource.RoleDefinitionSpec) error {
+	creating := newRole != nil
+	// A role that can itself assign roles, granted through a delegation,
+	// must carry a delegation no wider than the granter's own. Otherwise a
+	// constrained delegate could mint an unconstrained administrator.
+	grantsAssigning := creating && (Allows(newRole.Permissions, Action{Name: ActionRoleAssignmentsWrite}) ||
+		Allows(newRole.Permissions, Action{Name: ActionRoleAssignmentsDelete}))
 	cands, err := e.applicable(ctx, caller, spec.Scope)
 	if err != nil {
 		return err
@@ -414,7 +422,8 @@ func (e *Engine) checkDelegated(ctx context.Context, caller Principal, a Action,
 			return nil // unconstrained, as an Owner or User Access Administrator is in Azure
 		}
 		if slices.Contains(d.RoleDefinitionIDs, spec.RoleDefinitionID) && slices.Contains(d.PrincipalTypes, spec.Principal.Type) &&
-			!(creating && isSelf(spec.Principal, caller)) {
+			!(creating && isSelf(spec.Principal, caller)) &&
+			(!grantsAssigning || within(spec.Delegation, d)) {
 			constrainedOK = true
 		}
 	}
@@ -422,11 +431,30 @@ func (e *Engine) checkDelegated(ctx context.Context, caller Principal, a Action,
 	case !granted:
 		return fmt.Errorf("%w: missing %s at %s", ErrForbidden, a.Name, spec.Scope)
 	case !constrainedOK && creating:
-		return fmt.Errorf("%w: your delegation doesn't allow this role or principal type, or granting to yourself or your own groups", ErrForbidden)
+		return fmt.Errorf("%w: your delegation doesn't allow this role or principal type, granting to yourself or your own groups, "+
+			"or granting role assignment rights without a delegation within yours", ErrForbidden)
 	case !constrainedOK:
 		return fmt.Errorf("%w: your delegation doesn't cover this role or principal type", ErrForbidden)
 	}
 	return nil
+}
+
+// within reports whether inner is set and allows nothing outer doesn't.
+func within(inner, outer *resource.Delegation) bool {
+	if inner == nil {
+		return false
+	}
+	for _, r := range inner.RoleDefinitionIDs {
+		if !slices.Contains(outer.RoleDefinitionIDs, r) {
+			return false
+		}
+	}
+	for _, t := range inner.PrincipalTypes {
+		if !slices.Contains(outer.PrincipalTypes, t) {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *Engine) checkAssignable(ctx context.Context, role resource.RoleDefinitionSpec, at resource.Scope) error {
@@ -475,6 +503,33 @@ func (e *Engine) RoleInUse(ctx context.Context, roleID string) (bool, error) {
 	defer e.mu.RUnlock()
 	for _, a := range e.byID {
 		if a.Spec.RoleDefinitionID == roleID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// GrantedAnywhere reports whether some assignment that applies to p, at any
+// scope, grants a: whether p can do it somewhere, such as assign roles.
+func (e *Engine) GrantedAnywhere(ctx context.Context, p Principal, a Action) (bool, error) {
+	if err := e.refresh(ctx); err != nil {
+		return false, err
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, x := range e.byID {
+		if !appliesTo(x.Spec, p) {
+			continue
+		}
+		role, ok := builtInRoles[x.Spec.RoleDefinitionID]
+		if !ok {
+			def, found := e.customDef[x.Spec.RoleDefinitionID]
+			if !found {
+				continue
+			}
+			role = def.Spec
+		}
+		if Allows(role.Permissions, a) {
 			return true, nil
 		}
 	}

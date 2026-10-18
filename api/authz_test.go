@@ -40,6 +40,8 @@ var people = map[string]identity.Principal{
 	"tok-owner":   {Subject: "sub-owner", Name: "owner"},
 	"tok-mixed":   {Subject: "sub-mixed", Name: "mixed"},
 	"tok-nobody":  {Subject: "sub-nobody", Name: "nobody"},
+	"tok-admin":   {Subject: "sub-admin", Name: "admin"},
+	"tok-member":  {Subject: "sub-member", Name: "member", Groups: []string{"platform"}},
 }
 
 func newAuthzWorld(t *testing.T, grants func(w *authzWorld)) *authzWorld {
