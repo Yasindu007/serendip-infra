@@ -13,9 +13,9 @@ Last updated: 2026-10-18
 
 ## Current phase
 
-**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T006
-done and committed; next is T007** (bootstrap administrator, removed-key
-cleanup, break-glass). Plan, decisions and
+**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T007
+done and committed; next is T008** (console: Access control page, Check
+access, permission-aware controls; UI work, see `ui/CLAUDE.md`). Plan, decisions and
 accepted risks: `specs/017-authorization/plan.md`; task status:
 `tasks.md`. Committed so far:
 - `0d82624` T001 spike: ThunderID subjects and groups.
@@ -36,10 +36,10 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
   `permissions?scope=`, `principals` (gated on assigning somewhere).
   Reviews closed a delegation escalation (decision 10's "no minting wider
   administrators") and client-chosen IDs.
-- **For T007:** bootstrap administrator (Owner + Secrets Officer at `/`,
-  subject `01900000-0000-7000-8000-000000000030`), removed-key cleanup,
-  `serendipd break-glass grant-owner`. API-key migration already landed
-  in T005 (`api/server.go` `migrateAPIKeys`).
+- `9053421` T007 bootstrap administrator (Owner + Secrets Officer at
+  `/`, per role, only if never held; `thunderid.AdminSubject`),
+  removed-key cleanup (keeps the last Owner), `serendipd break-glass
+  grant-owner`. Decision 7's bootstrap condition was amended (plan.md).
 - Then T008 console Access control, T009 benchmarks, T010 real cluster,
   T011 reviews, T012 docs/ADR 0014. After 017: spec 018 (WSO2 Agent
   Manager POC, beside Serendip, may reuse our ThunderID/OpenChoreo on a
