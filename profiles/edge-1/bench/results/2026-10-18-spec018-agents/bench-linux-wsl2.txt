@@ -1,0 +1,23 @@
+4
+6.6.87.2-microsoft-standard-WSL2
+BenchmarkTokens/person/verifier-4         	   39016	     85751 ns/op	        57.00 p50-µs	       373.0 p99-µs	    5998 B/op	      85 allocs/op
+BenchmarkTokens/person/verifier-4         	   51164	     70977 ns/op	        56.00 p50-µs	       229.0 p99-µs	    5998 B/op	      85 allocs/op
+BenchmarkTokens/person/verifier-4         	   52628	     71123 ns/op	        56.00 p50-µs	       243.0 p99-µs	    5997 B/op	      85 allocs/op
+BenchmarkTokens/person/router-4           	   49434	     72921 ns/op	        60.00 p50-µs	       233.0 p99-µs	    7415 B/op	     103 allocs/op
+BenchmarkTokens/person/router-4           	   47938	     74468 ns/op	        60.00 p50-µs	       247.0 p99-µs	    7416 B/op	     103 allocs/op
+BenchmarkTokens/person/router-4           	   51204	     77661 ns/op	        60.00 p50-µs	       297.0 p99-µs	    7414 B/op	     103 allocs/op
+BenchmarkTokens/agent/router-4            	   51975	     70674 ns/op	        58.00 p50-µs	       219.0 p99-µs	    6493 B/op	      72 allocs/op
+BenchmarkTokens/agent/router-4            	   48156	     70651 ns/op	        57.00 p50-µs	       221.0 p99-µs	    6496 B/op	      72 allocs/op
+BenchmarkTokens/agent/router-4            	   50362	     75129 ns/op	        58.00 p50-µs	       270.0 p99-µs	    6494 B/op	      72 allocs/op
+BenchmarkAgentRequests/get/person-4         	   44938	     85827 ns/op	        60.00 p50-µs	       380.0 p99-µs	   13668 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/person-4         	   46867	     89795 ns/op	        60.00 p50-µs	       457.0 p99-µs	   13665 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/person-4         	   44588	     79771 ns/op	        54.00 p50-µs	       370.0 p99-µs	   13667 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   40922	     85048 ns/op	        56.00 p50-µs	       413.0 p99-µs	   13748 B/op	     160 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   43969	     90386 ns/op	        58.00 p50-µs	       490.0 p99-µs	   13747 B/op	     160 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   46596	     92687 ns/op	        58.00 p50-µs	       533.0 p99-µs	   13755 B/op	     160 allocs/op
+BenchmarkAgentRequests/list100/person-4     	    2090	   2011741 ns/op	      1642 p50-µs	      7024 p99-µs	  480404 B/op	    6404 allocs/op
+BenchmarkAgentRequests/list100/person-4     	    1966	   1872347 ns/op	      1587 p50-µs	      4515 p99-µs	  479747 B/op	    6406 allocs/op
+BenchmarkAgentRequests/list100/person-4     	    2094	   1873676 ns/op	      1637 p50-µs	      4050 p99-µs	  479439 B/op	    6403 allocs/op
+BenchmarkAgentRequests/list100/agent-4      	    1710	   2117473 ns/op	      1731 p50-µs	      7216 p99-µs	  480151 B/op	    6407 allocs/op
+BenchmarkAgentRequests/list100/agent-4      	    1922	   2246595 ns/op	      1919 p50-µs	      6367 p99-µs	  480910 B/op	    6407 allocs/op
+BenchmarkAgentRequests/list100/agent-4      	    1814	   1936272 ns/op	      1728 p50-µs	      3759 p99-µs	  480123 B/op	    6406 allocs/op

@@ -150,7 +150,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
 - **Verify**: `npm test` and `npm run build` in `ui/`, plus the embed
   build; a real-browser check on the cluster in T011.
 
-## T010 — Benchmarks [A]
+## T010 — Benchmarks [A] — DONE 2026-10-18 (PASS: an agent request adds no measurable p99 on Linux and +56 µs on the simulated T470, against a 100 µs target; directory about 7 ms warm; idle memory +0.2 MiB; `profiles/edge-1/bench/results/2026-10-18-spec018-agents/summary.md`)
 
 - **Do**:
   - Benchmark the middleware with an agent token (router plus verifier)

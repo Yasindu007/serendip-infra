@@ -87,7 +87,19 @@ func newBenchWorld(b *testing.B) *benchWorld {
 		grant(b, w.db, resource.PrincipalPerson, fmt.Sprintf("sub-%d", i), policy.ContributorRoleID, resource.Scope{Kind: resource.KindProject, ID: other})
 	}
 
-	authn := &fakeAuthn{tokens: map[string]identity.Principal{"tok": {Subject: "sub-reader", Name: "reader"}}}
+	// The same Reader grant for an agent, with its sponsor (spec 018).
+	agents := sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](w.db, resource.KindRoleAssignment)
+	if _, err := agents.Create(ctx, resource.RoleAssignment{Metadata: resource.Metadata{Name: "agent"}, Spec: resource.RoleAssignmentSpec{
+		Principal:        resource.PrincipalRef{Type: resource.PrincipalAgent, ID: "am-dev/bench", Sponsor: &resource.PrincipalRef{Type: resource.PrincipalPerson, ID: "sub-reader"}},
+		RoleDefinitionID: policy.ReaderRoleID, Scope: resource.Scope{Kind: resource.KindProject, ID: proj},
+	}}); err != nil {
+		b.Fatal(err)
+	}
+
+	authn := &fakeAuthn{tokens: map[string]identity.Principal{
+		"tok":       {Subject: "sub-reader", Name: "reader"},
+		"tok-agent": {Kind: identity.KindAgent, Issuer: "am-dev", Subject: "bench", Name: "bench"},
+	}}
 	w.authz = api.NewServer(w.db, event.NewInProcessBus(), nil, authn, nil, nil, nil).Handler
 	mux := http.NewServeMux()
 	api.NewResourceHandler(comps, "components").Register(mux)
@@ -95,9 +107,11 @@ func newBenchWorld(b *testing.B) *benchWorld {
 	return w
 }
 
-func get(h http.Handler, path string) int {
+func get(h http.Handler, path string) int { return getAs(h, path, "tok") }
+
+func getAs(h http.Handler, path, token string) int {
 	r := httptest.NewRequest(http.MethodGet, path, nil)
-	r.Header.Set("Authorization", "Bearer tok")
+	r.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, r)
 	return rec.Code
@@ -105,9 +119,11 @@ func get(h http.Handler, path string) int {
 
 // timed runs the request b.N times, reporting p50 and p99 per request:
 // the targets are percentiles, which ns/op (a mean) isn't.
-func timed(b *testing.B, h http.Handler, path string) {
+func timed(b *testing.B, h http.Handler, path string) { timedAs(b, h, path, "tok") }
+
+func timedAs(b *testing.B, h http.Handler, path, token string) {
 	b.Helper()
-	if code := get(h, path); code != http.StatusOK {
+	if code := getAs(h, path, token); code != http.StatusOK {
 		b.Fatalf("GET %s: %d", path, code)
 	}
 	var d []time.Duration
@@ -115,7 +131,7 @@ func timed(b *testing.B, h http.Handler, path string) {
 	b.ResetTimer()
 	for b.Loop() {
 		start := time.Now()
-		get(h, path)
+		getAs(h, path, token)
 		d = append(d, time.Since(start))
 	}
 	b.StopTimer()
@@ -136,4 +152,18 @@ func BenchmarkAuthorization(b *testing.B) {
 	b.Run("get/with", func(b *testing.B) { timed(b, w.authz, one) })
 	b.Run("list100/without", func(b *testing.B) { timed(b, w.plain, list) })
 	b.Run("list100/with", func(b *testing.B) { timed(b, w.authz, list) })
+}
+
+// BenchmarkAgentRequests measures what an agent caller costs over a person
+// with the same role (specs/018-agent-manager-poc T010): the sponsor
+// lookup in the middleware and the guardrail checks in each decision.
+// Token verification is measured separately, in providers/identity/oidc.
+func BenchmarkAgentRequests(b *testing.B) {
+	w := newBenchWorld(b)
+	one := "/v1/components/" + w.compID
+	list := "/v1/components?ownerId=" + w.appID
+	b.Run("get/person", func(b *testing.B) { timedAs(b, w.authz, one, "tok") })
+	b.Run("get/agent", func(b *testing.B) { timedAs(b, w.authz, one, "tok-agent") })
+	b.Run("list100/person", func(b *testing.B) { timedAs(b, w.authz, list, "tok") })
+	b.Run("list100/agent", func(b *testing.B) { timedAs(b, w.authz, list, "tok-agent") })
 }

@@ -1,0 +1,16 @@
+BenchmarkAgentRequests/get/person-4         	   44349	    101043 ns/op	        60.00 p50-µs	       687.0 p99-µs	   13669 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/person-4         	   59672	     77799 ns/op	        54.00 p50-µs	       360.0 p99-µs	   13666 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/person-4         	   65494	     89888 ns/op	        56.00 p50-µs	       484.0 p99-µs	   13663 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/person-4         	   37242	    112040 ns/op	        58.00 p50-µs	       780.0 p99-µs	   13666 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/person-4         	   64101	     85068 ns/op	        56.00 p50-µs	       446.0 p99-µs	   13663 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/person-4         	   57728	     78710 ns/op	        54.00 p50-µs	       366.0 p99-µs	   13667 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/person-4         	   65136	     84161 ns/op	        56.00 p50-µs	       424.0 p99-µs	   13664 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/person-4         	   59425	     81269 ns/op	        57.00 p50-µs	       362.0 p99-µs	   13666 B/op	     157 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   53244	     90712 ns/op	        58.00 p50-µs	       476.0 p99-µs	   13749 B/op	     160 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   61227	     83209 ns/op	        58.00 p50-µs	       382.0 p99-µs	   13753 B/op	     160 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   62043	     86653 ns/op	        56.00 p50-µs	       435.0 p99-µs	   13752 B/op	     160 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   60698	     80085 ns/op	        55.00 p50-µs	       363.0 p99-µs	   13753 B/op	     160 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   55527	     83838 ns/op	        56.00 p50-µs	       413.0 p99-µs	   13759 B/op	     160 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   58390	     82424 ns/op	        57.00 p50-µs	       380.0 p99-µs	   13755 B/op	     160 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   62808	     89345 ns/op	        58.00 p50-µs	       464.0 p99-µs	   13752 B/op	     160 allocs/op
+BenchmarkAgentRequests/get/agent-4          	   60374	     96882 ns/op	        60.00 p50-µs	       555.0 p99-µs	   13755 B/op	     160 allocs/op

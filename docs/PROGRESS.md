@@ -66,7 +66,11 @@ user's approval.** Key plan decisions:
   required sponsor and only `assignableToAgents` roles. The pickers
   search the live directory, saying when they fall back to sign-ins.
   Check access reads a person's groups live, says so, and handles 404.
-- Next is T010 (benchmarks), then T011, the real-cluster run. T011 needs
+- T010 DONE (PASS): an agent request costs the same as a person's
+  (Linux p99 435 against 424 µs; simulated T470 +56 µs). The directory
+  takes about 7 ms warm and 39 ms on a new tunnel. Idle memory +0.2 MiB.
+  See `profiles/edge-1/bench/results/2026-10-18-spec018-agents/`.
+- Next is T011, the real-cluster run. T011 needs
   the user to add a hosts entry for `default-idp.amp.localhost`, and
   `serendipd` on `:8088` with its console URIs registered by the
   operator tool.
