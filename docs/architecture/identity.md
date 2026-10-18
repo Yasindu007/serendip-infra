@@ -193,11 +193,11 @@ The install:
 
 ### Logging in
 
-The OIDC client is `serendip`: public, authorization code + PKCE. Its only
-redirect URI is the fixed loopback `http://127.0.0.1:8250/callback`.
-ThunderID matches redirect URIs exactly and imports its client definition
-on first install only. Adding a redirect URI later (the UI will need one)
-goes through ThunderID's management API; spec 015's plan.md records how.
+The OIDC client is `serendip`: public, authorization code + PKCE. Its
+redirect URIs are the fixed loopback `http://127.0.0.1:8250/callback` (for
+a future CLI) and the web console's callback (below). ThunderID matches
+redirect URIs exactly and imports its client definition on first install
+only.
 
 The bootstrap administrator:
 - The username is `admin`. The password is in the Kubernetes Secret
@@ -217,13 +217,135 @@ The bootstrap administrator:
 - **Plain HTTP.** Fine for a browser on `localhost`; anywhere else needs
   TLS first (a later spec). Browsers won't do OIDC over plain HTTP on other
   hosts anyway.
-- **No revocation before expiry.** Tokens are verified offline, so a
-  token stays valid until it expires (1 h by default), even after logout.
+- **No revocation before expiry for bearer tokens.** They're verified
+  offline, so a token stays valid until it expires (1 h by default). The
+  console is different: logging out ends its session at once (below).
 - **The audit actor is the username.** The stable `sub` isn't recorded,
   so a renamed or reused username is ambiguous in old audit rows. Names
   are cleaned of control characters and capped at 128 characters.
 - **ThunderID's RSA signing certificate is valid for 365 days.** What
   happens at expiry is untested upstream; it's a follow-up.
+
+## Console sessions (spec 016)
+
+The web console logs people in through `serendipd` itself (ADR 0013).
+Detail and evidence: `specs/016-ui-mvp/`.
+
+### What the browser holds
+
+- **Only an opaque session ID**, in the cookie `serendip_session`
+  (`HttpOnly`, `SameSite=Strict`, `Path=/`, host-only; `Secure` once the
+  public URL is https).
+- **Tokens stay in `serendipd`'s memory.** The access, refresh and ID
+  tokens never reach page JavaScript, browser storage, URLs or logs, so
+  an XSS or a compromised npm package has no token to steal.
+- **Session IDs are stored only as their SHA-256.**
+
+### How a login runs
+
+1. `GET /auth/login?return=<path>`. `serendipd` generates `state`, a
+   nonce and a PKCE verifier, remembers them for 10 minutes (single use,
+   at most 256 pending), sets a pre-login cookie scoped to `/auth`, and
+   redirects to the identity provider.
+2. The person signs in at the provider.
+3. `GET /auth/callback`. `serendipd` checks that `state` matches the
+   pre-login cookie, exchanges the code with the verifier, checks the ID
+   token (signature, issuer, audience, expiry, nonce) and the access
+   token, and requires both to name the same subject.
+4. It creates a fresh session ID (no fixation possible) and redirects to
+   the requested path. Only a same-origin path is accepted, so there's no
+   open redirect.
+
+Login routes are rate limited per client address. Errors go to
+`/signin?error=<code>`, with a fixed code that never reflects the request.
+
+### Using the API from the console
+
+- **The cookie is a third credential** in `AuthMiddleware`, after API keys
+  and bearer tokens. It resolves to the same `person:<username>` actor, so
+  audit rows look the same whichever way a person came in.
+- **CSRF protection.** Every cookie request must carry
+  `X-Serendip-Csrf: 1`. Anything that changes state must also send an
+  `Origin` exactly equal to the public URL. No CORS headers are ever sent.
+  A request carrying both a bearer token and the cookie is refused.
+- **`GET /v1/session`** says who the caller is and when the session ends.
+  It never returns a credential.
+
+### Expiry, refresh and removing someone
+
+- **Expiry:** idle 30 minutes, absolute 12 hours, at most 1024 sessions.
+  Sessions live in memory, so restarting `serendipd` signs everyone out.
+- **Refresh:** the access token is renewed when it has under a minute
+  left, **one refresh per session at a time**. ThunderID rotates refresh
+  tokens and revokes the whole family when an old one is replayed, so
+  concurrent refreshes would end the session. The rotated token is stored
+  before anything else can fail.
+  - A refused refresh ends the session.
+  - An unreachable provider keeps it and answers 503.
+- **Removing someone:** ThunderID has no "disabled" state. Delete the
+  person in ThunderID; their next refresh fails, so console access ends
+  within one access-token lifetime (≤ 1 hour).
+
+### Logout
+
+`POST /auth/logout` (with the CSRF checks):
+- ends the session and clears the cookie;
+- revokes the refresh token at the provider, best effort;
+- answers with the provider's end-session URL, which the browser then
+  visits to end the provider session. The URL carries no ID token.
+
+### The console's address at the identity provider
+
+The `serendip` client must list `<public URL>/auth/callback` as a redirect
+URI and `<public URL>/` as a post-logout URI. The public URL is
+`SERENDIP_PUBLIC_URL`, by default `http://localhost:<port>`. Plain http on
+any other host needs `SERENDIP_ALLOW_INSECURE_ORIGIN=1`, because the
+cookie would then cross a network in clear.
+
+- **Fresh installs: automatic.** The bootstrap client already lists both
+  URIs.
+- **Every startup and re-ensure: a read-only check.** `serendipd` probes
+  the provider's public authorize and logout endpoints with no credentials
+  to confirm that both URIs are accepted. It logs `console login enabled`
+  once they are.
+- **An install that predates the console, or after changing
+  `SERENDIP_PUBLIC_URL`: a one-time step by an operator.** `serendipd`
+  can't make this change itself, because the Kubernetes Service proxy it
+  uses strips the `Authorization` header the management API needs. Until
+  the step is done, the console reports the identity provider as
+  unavailable and `serendipd` logs the missing URIs. API keys and bearer
+  tokens are unaffected. The steps:
+
+  ```sh
+  # 1. A tunnel that keeps headers (leave it running).
+  kubectl -n serendip-identity port-forward svc/thunderid-service 18090:8090
+
+  # 2. In another shell: the admin password, then the registration.
+  export SERENDIP_IDENTITY_ADMIN_PASSWORD="$(kubectl -n serendip-identity \
+    get secret serendip-identity-admin -o jsonpath='{.data.password}' | base64 -d)"
+  go run ./cmd/serendip-identity-redirects --public-url http://localhost:8080
+  unset SERENDIP_IDENTITY_ADMIN_PASSWORD
+  ```
+
+  - `--public-url` is the new `SERENDIP_PUBLIC_URL`.
+  - `--issuer` defaults to `http://identity.localhost:30080`; pass the
+    issuer `serendipd` logs if it differs.
+  - The command adds only missing URIs and never removes one. It prints
+    the result, never the password or a token.
+  - Within one re-ensure interval, `serendipd` logs `console login
+    enabled`.
+
+  An automatic version (an in-process tunnel) is deferred to the HTTPS
+  spec, which changes the public URL anyway.
+
+### Limits
+
+- **No RBAC.** Every account in the identity provider is effectively an
+  administrator of Serendip. Only give accounts to people who should be.
+- **Plain HTTP works only for a browser on the same machine.** Remote
+  browsers need the HTTPS spec.
+- **Sign-in and sign-out are logged with the actor** but aren't audit
+  records yet. The audit log covers mutations.
 
 ## Open questions
 

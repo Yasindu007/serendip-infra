@@ -19,6 +19,24 @@ Rules of thumb:
 - Anything upstream (K3s flags, Longhorn CRDs) -> oss-researcher, never
   pasted into the main session.
 
+## Open the web console (spec 016)
+
+1. Build the console once, then serendipd (which embeds it):
+   ```sh
+   corepack pnpm -C ui install --frozen-lockfile   # no GITHUB_TOKEN/NPM_TOKEN in the env
+   corepack pnpm -C ui build
+   go build -o serendipd ./cmd/serendipd
+   ```
+2. Run serendipd with a cluster (`SERENDIP_KUBECONFIG`) and open
+   http://localhost:8080 (not 127.0.0.1) in a browser on the same machine.
+3. Sign in as `admin`. The password is in the Secret
+   `serendip-identity/serendip-identity-admin`, key `password`.
+
+Without a cluster the console still loads, but sign-in reports the identity
+provider as unavailable; API keys work as always. Details, and the
+one-time step for installs that predate the console:
+`docs/architecture/identity.md` "Console sessions".
+
 ## CodeRabbit (PR review)
 
 Config lives at `.coderabbit.yaml` (path-scoped review instructions for

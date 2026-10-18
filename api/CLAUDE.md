@@ -18,6 +18,21 @@
   keys only. Keep `api/` provider-neutral: it sees only the interface,
   never a product. Everything downstream reads only the resolved actor
   from context (`core/audit.ActorFrom`), never how it got there.
+- With the web console wired (`*Console`, spec 016, ADR 0013), the
+  session cookie `serendip_session` is a third credential, resolved in
+  the same middleware to the same `person:` actor:
+  - Cookie requests must carry `X-Serendip-Csrf: 1`, and unsafe methods
+    an exact `Origin`; never add CORS headers.
+  - Bearer + cookie together is a 400.
+  - Tokens live only in `session.go`'s in-memory table; nothing in `api/`
+    may log, return or persist a token or a raw session ID.
+  - Refresh is serialised per session (`ensureFresh`); keep it that way
+    (rotated refresh tokens are single-use).
+  - Login routes (`/auth/*`) live on the outer mux beside the console's
+    static files, outside `AuthMiddleware`.
+- Hardening applies to every client (`hardening.go`): server timeouts,
+  a 1 MiB body limit (use `decodeBody`, which answers 413), and
+  `Cache-Control: no-store` on `/v1`.
 - Routes needing no auth (e.g. `GET /healthz`) are registered on a
   separate outer `http.ServeMux`, with the authenticated `/v1/` subtree
   mounted as a single `AuthMiddleware`-wrapped handler (`server.go`) —

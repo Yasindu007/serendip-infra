@@ -53,8 +53,8 @@ func ProxyBaseURL(client *kubernetes.Client) string {
 // needs the administrator's token, and the Kubernetes Service proxy strips
 // the Authorization header (spec 016 T010), so every attempt would be an
 // admin login for nothing, repeated by the foundations loop.
-// ensureRedirects keeps that update path, tested, for when a tunnel that
-// preserves headers exists (plan.md "T010 finding").
+// The update itself is RegisterConsoleRedirects, run by an operator
+// through a tunnel that preserves headers (plan.md "T010 finding").
 func EnsureClientRedirects(ctx context.Context, client *kubernetes.Client, redirectURI, postLogoutURI string) error {
 	base, hc := ProxyBaseURL(client), noRedirects(client.HTTPClient())
 	ok, err := redirectsAccepted(ctx, base, hc, redirectURI, postLogoutURI)
@@ -129,6 +129,18 @@ func noRedirects(hc *http.Client) *http.Client {
 	c := *hc
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &c
+}
+
+// RegisterConsoleRedirects adds the console's callback and post-logout URIs
+// to the serendip client through the management API, logging in as the
+// administrator. baseURL must reach ThunderID without stripping the
+// Authorization header, such as a kubectl port-forward; the Kubernetes
+// Service proxy does strip it. It is the documented one-time step for an
+// install that predates the console or a changed public URL
+// (docs/architecture/identity.md "Console sessions"); serendipd itself
+// never calls it. It changes nothing when both URIs are already there.
+func RegisterConsoleRedirects(ctx context.Context, baseURL string, hc *http.Client, issuer, adminPassword, redirectURI, postLogoutURI string) error {
+	return ensureRedirects(ctx, strings.TrimSuffix(baseURL, "/"), noRedirects(hc), issuer, adminPassword, redirectURI, postLogoutURI)
 }
 
 func ensureRedirects(ctx context.Context, base string, hc *http.Client, issuer, password, redirectURI, postLogoutURI string) error {
