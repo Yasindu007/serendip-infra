@@ -39,6 +39,9 @@ type kubeWiring struct {
 	authn            *lazyAuthenticator
 	login            *lazyLogin
 	plan             setupPlan
+	// adminSubject is the identity provider's bootstrap administrator,
+	// made Owner at "/" on first start (spec 017).
+	adminSubject string
 }
 
 // consoleURIs are the console's login callback and post-logout page,
@@ -259,7 +262,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		},
 		reensureEvery: reensureEvery,
 	}
-	return &kubeWiring{secretReconciler: secretReconciler, authn: authn, login: login, plan: plan}, nil
+	return &kubeWiring{secretReconciler: secretReconciler, authn: authn, login: login, plan: plan, adminSubject: thunderid.AdminSubject}, nil
 }
 
 // ensureGatewayReady ensures the shared gateway and treats "not programmed

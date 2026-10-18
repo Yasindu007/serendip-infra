@@ -148,7 +148,15 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
   7 (custom roles, refusing deletion while assigned) and AC 8's
   last-Owner refusal.
 
-## T007 — `cmd/serendipd`: bootstrap, API-key migration, break-glass
+## T007 — `cmd/serendipd`: bootstrap, API-key migration, break-glass — DONE 2026-10-18
+
+- **Notes:** the API-key rules (migration, and removed-key cleanup that
+  keeps the last Owner at `/`) live together in `api/server.go`
+  `migrateAPIKeys`, run by `NewServer`. The bootstrap administrator and
+  `serendipd break-glass grant-owner` are in `cmd/serendipd`. The
+  bootstrap condition is amended (plan.md decision 7). Break-glass refuses
+  a missing store file, an unknown or shared username, and is idempotent.
+  `api.PolicyRebuildInterval` is a variable so tests can shorten it.
 
 - **Do**:
   - The bootstrap administrator gets Owner and Secrets Officer (decision

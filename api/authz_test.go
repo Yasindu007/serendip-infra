@@ -481,3 +481,45 @@ func TestAuthz_DuplicateOwnerRefsKeys(t *testing.T) {
 		t.Errorf("create under devapp via a duplicate key: %d %s, want 403", rec.Code, rec.Body)
 	}
 }
+
+// A key removed from config loses its assignments at the next start,
+// unless that would remove the last Owner at "/".
+func TestAuthz_RemovedAPIKeysLoseTheirAssignments(t *testing.T) {
+	db := newTestDB(t)
+	keyAssignments := func() []string {
+		t.Helper()
+		rows, err := db.Query(`SELECT json_extract(spec, '$.principal.id') FROM resources WHERE kind = 'RoleAssignment' AND json_extract(spec, '$.principal.type') = 'apiKey' ORDER BY 1`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var id string
+			_ = rows.Scan(&id)
+			out = append(out, id)
+		}
+		return out
+	}
+	start := func(keys map[string]string) { api.NewServer(db, event.NewInProcessBus(), keys, nil, nil, nil, nil) }
+
+	start(map[string]string{"k1": "ci", "k2": "deploy"})
+	if got := keyAssignments(); !slices.Equal(got, []string{"ci", "deploy"}) {
+		t.Fatalf("after first start: %v", got)
+	}
+	start(map[string]string{"k1": "ci"})
+	if got := keyAssignments(); !slices.Equal(got, []string{"ci"}) {
+		t.Errorf("after removing deploy: %v, want only ci", got)
+	}
+	// ci is now the only Owner at "/": removing it from config keeps it.
+	start(nil)
+	if got := keyAssignments(); !slices.Equal(got, []string{"ci"}) {
+		t.Errorf("after removing every key: %v, want ci kept as the last Owner", got)
+	}
+	// With another Owner in place, it goes.
+	grant(t, db, resource.PrincipalPerson, "sub-owner", policy.OwnerRoleID, resource.RootScope)
+	start(nil)
+	if got := keyAssignments(); len(got) != 0 {
+		t.Errorf("with a person Owner: %v, want none", got)
+	}
+}

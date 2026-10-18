@@ -46,6 +46,13 @@ const (
 const defaultOpenBaoCredentialsPath = "/var/lib/serendip/secrets/openbao-init.json"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "break-glass" {
+		if err := runBreakGlass(context.Background(), os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "serendipd break-glass:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "serendipd:", err)
 		os.Exit(1)
@@ -103,6 +110,14 @@ func run() error {
 	if kube != nil {
 		secretReconciler = kube.secretReconciler
 		authn = kube.authn
+	}
+
+	// Before the API starts, so the administrator can act from the first
+	// request (spec 017 plan.md decision 7).
+	if kube != nil {
+		if err := bootstrapAdmin(ctx, db, bus, kube.adminSubject); err != nil {
+			return err
+		}
 	}
 
 	webConsole := &api.Console{Handler: console.Handler(), Origin: origin, Sessions: api.NewSessions(api.SessionConfig{})}

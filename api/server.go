@@ -18,6 +18,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/registry"
 	"github.com/serendip-infra/serendip-infra/core/resource"
+	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
 
@@ -102,9 +103,10 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 	return srv
 }
 
-// policyRebuildInterval is how often the policy index reloads, which picks
+// PolicyRebuildInterval is how often the policy index reloads, which picks
 // up assignments written by another process (the break-glass command).
-const policyRebuildInterval = 30 * time.Second
+// Set it before NewServer; tests shorten it.
+var PolicyRebuildInterval = 30 * time.Second
 
 // newPolicyEngine returns the policy engine over db's role assignments and
 // definitions, kept current by bus events and a periodic rebuild, and the
@@ -115,7 +117,7 @@ func newPolicyEngine(db *sql.DB, bus event.Bus) (*policy.Engine, func()) {
 	engine := policy.NewEngine(assignments, definitions, graph.NewSQLiteGraph(db).Ancestors)
 	stopWatch := engine.Watch(bus)
 	ctx, cancel := context.WithCancel(context.Background())
-	go engine.Run(ctx, policyRebuildInterval)
+	go engine.Run(ctx, PolicyRebuildInterval)
 	return engine, func() { cancel(); stopWatch() }
 }
 
@@ -128,14 +130,18 @@ const apiKeyMigration = "migrated from unscoped API key (spec 017)"
 // an operator can narrow it, or revoke it entirely, and a restart doesn't
 // undo that. Failures are logged: the key then has no access, which is the
 // safe direction.
+//
+// A key no longer configured loses its assignments, unless one of them is
+// the last Owner at "/": that one stays, with a warning, so removing a key
+// can't lock everyone out.
 func migrateAPIKeys(engine *policy.Engine, db *sql.DB, bus event.Bus, apiKeys map[string]string) {
-	if len(apiKeys) == 0 {
-		return
-	}
 	ctx := audit.WithInterface(audit.WithActor(context.Background(), "serendipd"), "bootstrap")
 	assignments := sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](db, resource.KindRoleAssignment).SetBus(bus)
-	actors := slices.Sorted(maps.Values(apiKeys))
-	for _, actor := range slices.Compact(actors) {
+	actors := slices.Compact(slices.Sorted(maps.Values(apiKeys)))
+	unlock := engine.LockAssignments()
+	defer unlock()
+	removeStaleKeyAssignments(ctx, engine, assignments, actors)
+	for _, actor := range actors {
 		ref := resource.PrincipalRef{Type: resource.PrincipalAPIKey, ID: actor}
 		has, err := engine.HasAssignment(ctx, ref)
 		if err == nil && !has {
@@ -160,6 +166,36 @@ func migrateAPIKeys(engine *policy.Engine, db *sql.DB, bus event.Bus, apiKeys ma
 		log.Printf("api: API key %q had no role assignment; it is now Owner at \"/\" (%s)", actor, apiKeyMigration)
 	}
 	engine.Invalidate()
+}
+
+// removeStaleKeyAssignments deletes the assignments of API keys that are no
+// longer configured, keeping the last Owner at "/".
+func removeStaleKeyAssignments(ctx context.Context, engine *policy.Engine, assignments store.Store[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus], configured []string) {
+	all, err := engine.Assignments(ctx)
+	if err != nil {
+		log.Printf("api: list role assignments to clean up removed API keys: %v", err)
+		return
+	}
+	for _, a := range all {
+		p := a.Spec.Principal
+		if p.Type != resource.PrincipalAPIKey || slices.Contains(configured, p.ID) {
+			continue
+		}
+		last, err := engine.IsLastRootOwner(ctx, a.Metadata.ID)
+		if err != nil {
+			log.Printf("api: API key %q is no longer configured; keeping its assignment %s, since checking for the last Owner failed: %v", p.ID, a.Metadata.ID, err)
+			continue
+		}
+		if last {
+			log.Printf("api: WARNING: API key %q is no longer configured, but its assignment %s is the last Owner at \"/\"; keeping it", p.ID, a.Metadata.ID)
+			continue
+		}
+		if err := assignments.Delete(ctx, a.Metadata.ID, false); err != nil {
+			log.Printf("api: remove assignment %s of removed API key %q: %v", a.Metadata.ID, p.ID, err)
+			continue
+		}
+		log.Printf("api: API key %q is no longer configured; removed its assignment %s", p.ID, a.Metadata.ID)
+	}
 }
 
 // registerAPI registers every /v1 route on mux. NewServer passes its

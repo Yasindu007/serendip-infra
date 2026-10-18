@@ -37,6 +37,12 @@ const (
 	AdminSecretName = "serendip-identity-admin"
 	AdminSecretKey  = "password"
 
+	// AdminSubject is the bootstrap administrator's subject ("sub") in
+	// access tokens: the fixed user ID in the shipped bootstrap resources,
+	// the same on every install (specs/017-authorization T001 finding 1).
+	// serendipd makes it Owner at "/" on first start.
+	AdminSubject = "01900000-0000-7000-8000-000000000030"
+
 	// The default organization unit and authentication flow the shipped
 	// bootstrap resources create (01-default-resources.yaml, 1.0.1).
 	defaultOUID       = "01900000-0000-7000-8000-000000000001"

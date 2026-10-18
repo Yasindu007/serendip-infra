@@ -118,6 +118,13 @@ driven by `GET /v1/authorization/permissions`.
      `01900000-0000-7000-8000-000000000030` (Upstream fact 3), which lives
      in the ThunderID provider, not in `core/`. T001 confirms it survives
      two fresh installs.
+   - **Amended in T007:** the condition is, per role, "the bootstrap
+     administrator has never held it" (from the audit log), not "no
+     assignment exists at all". Per role, so a start interrupted between
+     the two grants finishes the second next time. An install upgraded from spec 016 already
+     has its API keys' assignments, and its administrator would otherwise
+     get 403 on everything. A second start still changes nothing, and an
+     operator who removes the administrator's roles isn't overruled.
    - **API keys.** Each key in `SERENDIP_API_KEYS` gets Owner at `/` if it
      has no assignment yet, recorded with the description "migrated from
      unscoped API key (spec 017)".
@@ -384,6 +391,11 @@ tokens or passwords.
     could be cascaded without its own check. The window is small on a
     single-node SQLite store; closing it needs the check inside the
     transaction.
+  - Removing a key from `SERENDIP_API_KEYS`, even by mistake (an empty
+    or mistyped config), deletes its assignments at the next start,
+    narrowed ones included, except the last Owner at `/` (T007). Restoring
+    the key doesn't restore them: it was assigned before, so it isn't
+    migrated again.
   - `EverAssigned` scans the audit log once per API key at startup, and
     relies on role-assignment audit rows never being pruned. Any future
     audit retention must keep them.
