@@ -13,9 +13,10 @@ Last updated: 2026-10-18
 
 ## Current phase
 
-**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T008
-done and committed; next is T009** (benchmarks: decision cost per
-request, list filtering, RSS; plan.md decision 12 targets).
+**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T009
+done and committed; next is T010** (real-cluster verification on kind),
+together with T009's deferred simulated-T470 re-run (same kind cluster;
+needs the machine kept awake).
 (Resolved: the user allowed removing role assignments in the console,
 since RBAC guards it; it's the one written exception to "no delete".) Plan, decisions and
 accepted risks: `specs/017-authorization/plan.md`; task status:
@@ -46,6 +47,11 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
   inherited labelled, add assignment, Check access), permission-aware
   controls via `Guarded`; then "Access control (IAM)" laid out like
   Azure's blade, with confirmed removal of assignments made at the scope.
+- `39b14e4` T009: the first benchmark failed the list target (+8.8 ms);
+  fixed with an ownership cache in `core/policy`. Now +74 µs p99 per
+  request and +0.72 ms per 100-item list (Linux), +0.7 MiB idle.
+  p99 is measured via a `GOOS=linux` test binary run in WSL Ubuntu
+  (no Go install needed there).
 - Then T008 console Access control, T009 benchmarks, T010 real cluster,
   T011 reviews, T012 docs/ADR 0014. After 017: spec 018 (WSO2 Agent
   Manager POC, beside Serendip, may reuse our ThunderID/OpenChoreo on a
