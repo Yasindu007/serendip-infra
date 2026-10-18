@@ -114,7 +114,7 @@ var PolicyRebuildInterval = 30 * time.Second
 func newPolicyEngine(db *sql.DB, bus event.Bus) (*policy.Engine, func()) {
 	assignments := sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](db, resource.KindRoleAssignment).SetBus(bus)
 	definitions := sqlite.NewStore[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus](db, resource.KindRoleDefinition).SetBus(bus)
-	engine := policy.NewEngine(assignments, definitions, graph.NewSQLiteGraph(db).Ancestors)
+	engine := policy.NewEngine(assignments, definitions, graph.NewSQLiteGraph(db).Owners)
 	stopWatch := engine.Watch(bus)
 	ctx, cancel := context.WithCancel(context.Background())
 	go engine.Run(ctx, PolicyRebuildInterval)
@@ -239,13 +239,12 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, s
 	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
 	NewRegistryHandler(registry.NewCapabilityRegistry(capStore)).Register(apiMux)
 	NewReadinessHandler(providers).Register(apiMux)
-	g := graph.NewSQLiteGraph(db)
 	(&AuthorizationHandler{
 		engine:       engine,
 		assignments:  sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](db, resource.KindRoleAssignment).SetBus(bus),
 		definitions:  sqlite.NewStore[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus](db, resource.KindRoleDefinition).SetBus(bus),
 		principals:   sqlite.NewPrincipalRegistry(db),
-		ancestors:    g.Ancestors,
+		ancestors:    engine.Ancestors,
 		recordDenied: recordDeniedIn(db),
 		exists: func(ctx context.Context, kind resource.Kind, id string) (bool, error) {
 			return sqlite.ResourceExists(ctx, db, kind, id)

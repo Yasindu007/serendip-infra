@@ -1,0 +1,13 @@
+# Output of a PowerShell measurement script (not committed): per build and
+# run, the average of three samples 5 s apart, after 30 s idle.
+Build  Run PrivateMiB WorkingSetMiB
+-----  --- ---------- -------------
+pre017   1       15.1          23.5
+now      1       15.8            24
+pre017   2       15.1          12.8
+now      2       15.9          13.4
+pre017   3       15.2          12.7
+now      3       15.6          13.3
+
+pre017: median private 15.1 MiB, median working set 12.8 MiB
+now: median private 15.8 MiB, median working set 13.4 MiB

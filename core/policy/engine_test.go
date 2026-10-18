@@ -2,6 +2,7 @@ package policy_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -27,6 +28,8 @@ type world struct {
 	engine  *policy.Engine
 	assign  *sqlite.Store[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus]
 	defs    *sqlite.Store[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus]
+	bus     event.Bus
+	db      *sql.DB
 	counter int
 }
 
@@ -66,12 +69,12 @@ func newWorld(t testing.TB) *world {
 		}
 	}
 	bus := event.NewInProcessBus()
-	w := &world{t: t, ctx: ctx,
+	w := &world{t: t, ctx: ctx, bus: bus, db: db,
 		assign: sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](db, resource.KindRoleAssignment).SetBus(bus),
 		defs:   sqlite.NewStore[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus](db, resource.KindRoleDefinition).SetBus(bus),
 	}
 	g := graph.NewSQLiteGraph(db)
-	w.engine = policy.NewEngine(w.assign, w.defs, g.Ancestors)
+	w.engine = policy.NewEngine(w.assign, w.defs, g.Owners)
 	stop := w.engine.Watch(bus)
 	t.Cleanup(stop)
 	return w
@@ -379,7 +382,7 @@ func TestRunPicksUpOutOfBandChanges(t *testing.T) {
 	// No bus: like the break-glass command writing from another process.
 	assign := sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](db, resource.KindRoleAssignment)
 	defs := sqlite.NewStore[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus](db, resource.KindRoleDefinition)
-	engine := policy.NewEngine(assign, defs, graph.NewSQLiteGraph(db).Ancestors)
+	engine := policy.NewEngine(assign, defs, graph.NewSQLiteGraph(db).Owners)
 	read := policy.Action{Name: "serendip/components/read"}
 	if d, _ := engine.Decide(ctx, alice, read, web); d.Effect != policy.Deny {
 		t.Fatal("allowed before any assignment")
@@ -412,7 +415,7 @@ func TestBuiltInRolesAreValid(t *testing.T) {
 
 func BenchmarkDecide(b *testing.B) {
 	w := newWorld(b)
-	ctx := policy.WithAncestorCache(w.ctx)
+	ctx := w.ctx
 	for i := range 100 {
 		p := policy.Principal{Type: resource.PrincipalPerson, ID: fmt.Sprintf("sub-%d", i)}
 		w.grant(p, policy.ReaderRoleID, projB, nil)
@@ -453,4 +456,24 @@ func TestDelegateCantMintAWiderAdministrator(t *testing.T) {
 	if err := w.engine.CheckAssign(w.ctx, alice, resource.RoleAssignmentSpec{Principal: to, RoleDefinitionID: policy.ReaderRoleID, Scope: app}); err != nil {
 		t.Errorf("plain Reader: %v", err)
 	}
+}
+
+// Ownership is cached, but a resource's change event drops its entry, so
+// moving it takes effect on the next decision.
+func TestOwnershipCacheFollowsMoves(t *testing.T) {
+	w := newWorld(t)
+	w.grant(alice, policy.ReaderRoleID, projA, nil)
+	read := "serendip/components/read"
+	w.expect(check{alice, read, false, web, true}) // caches web > app > prod > projA
+	move := func(child, owner resource.Scope) {
+		t.Helper()
+		if err := graph.SyncEdges(w.ctx, w.db, graph.ResourceRef{Kind: child.Kind, ID: child.ID}, []resource.OwnerRef{{Kind: owner.Kind, ID: owner.ID}}, nil); err != nil {
+			t.Fatal(err)
+		}
+		w.bus.Publish(event.Event{Type: event.EventUpdated, Kind: child.Kind, ID: child.ID})
+	}
+	move(app, appB) // the application leaves projA for projB's tree
+	w.expect(check{alice, read, false, web, false})
+	move(app, prod)
+	w.expect(check{alice, read, false, web, true})
 }

@@ -230,7 +230,7 @@ func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 			WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", reqID)
 			return
 		}
-		ctx := policy.WithAncestorCache(r.Context())
+		ctx := r.Context()
 		switch {
 		case ru.authOnly:
 			h(w, r.WithContext(ctx))

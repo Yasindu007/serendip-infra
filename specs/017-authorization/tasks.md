@@ -203,7 +203,14 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
   - typecheck, the bundle budget, the contrast check, and the
     no-raw-HTML grep.
 
-## T009 [P] [A] — Benchmarks
+## T009 [P] [A] — Benchmarks — DONE on the dev machine 2026-10-18; simulated T470 with T010
+
+- **Notes:** the first run failed the list target (+8.8 ms); the fix is
+  the ownership cache in `core/policy`. Results and raw files:
+  `profiles/edge-1/bench/results/2026-10-18-spec017-authz/`. p99 is
+  measured on Linux (WSL2, a cross-compiled test binary) because the
+  Windows timer is too coarse. The simulated-T470 re-run is deferred to
+  T010, which needs the same kind cluster.
 
 - **Do**: Add an `api` benchmark for single-resource and 100-item list
   requests with authorization, extend the bench harness if needed, and

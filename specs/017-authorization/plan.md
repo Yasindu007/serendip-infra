@@ -396,6 +396,12 @@ tokens or passwords.
     narrowed ones included, except the last Owner at `/` (T007). Restoring
     the key doesn't restore them: it was assigned before, so it isn't
     migrated again.
+  - The policy engine caches each resource's direct owners (T009,
+    needed to meet decision 12's list target). A change event drops the
+    changed resource's entry; the 30 s tick clears everything. Ownership
+    written by another process, or by a store without a bus (the Cluster
+    and Provider stores in `cmd/serendipd` today, whose owners don't
+    change), is therefore picked up within 30 s rather than at once.
   - `EverAssigned` scans the audit log once per API key at startup, and
     relies on role-assignment audit rows never being pruned. Any future
     audit retention must keep them.

@@ -89,11 +89,24 @@ var (
 // AncestorFunc returns a resource's owners transitively, nearest first.
 type AncestorFunc func(ctx context.Context, ref graph.ResourceRef) ([]graph.ResourceRef, error)
 
+// OwnersFunc returns a resource's direct owners.
+type OwnersFunc func(ctx context.Context, ref graph.ResourceRef) ([]graph.ResourceRef, error)
+
 // Engine evaluates authorization decisions. Safe for concurrent use.
 type Engine struct {
 	assignments store.Store[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus]
 	definitions store.Store[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus]
-	ancestors   AncestorFunc
+	owners      OwnersFunc
+
+	// ownerCache holds each resource's direct owners, so a decision walks
+	// its scope chain from memory: chains share their upper levels, and
+	// a list of siblings costs one lookup each. A change event drops only
+	// the changed resource's entry (Watch): only its own owner list can
+	// have changed. ownerGen keeps a lookup that raced a change from
+	// storing what it read before it.
+	ownerMu    sync.RWMutex
+	ownerCache map[graph.ResourceRef][]graph.ResourceRef
+	ownerGen   uint64
 
 	stale atomic.Bool
 
@@ -112,23 +125,27 @@ type Engine struct {
 }
 
 // NewEngine returns an engine reading assignments and custom roles from
-// the given stores and walking ownership with ancestors. It loads lazily,
-// on the first decision.
+// the given stores, and resources' direct owners through owners. It loads
+// lazily, on the first decision. Call Watch with the bus the stores
+// publish to: the caches it keeps are only invalidated by events, Run's
+// periodic tick and Invalidate.
 func NewEngine(assignments store.Store[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus],
-	definitions store.Store[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus], ancestors AncestorFunc) *Engine {
-	e := &Engine{assignments: assignments, definitions: definitions, ancestors: ancestors}
+	definitions store.Store[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus], owners OwnersFunc) *Engine {
+	e := &Engine{assignments: assignments, definitions: definitions, owners: owners, ownerCache: map[graph.ResourceRef][]graph.ResourceRef{}}
 	e.stale.Store(true)
 	return e
 }
 
 // Watch marks the index stale whenever an assignment or a custom role
-// changes, so the next decision sees the change. It returns a function
-// that stops watching.
+// changes, and forgets cached ownership whenever any resource changes, so
+// the next decision sees the change. It returns a function that stops
+// watching.
 func (e *Engine) Watch(bus event.Bus) (stop func()) {
 	invalidate := func(event.Event) { e.stale.Store(true) }
 	stopA := bus.Subscribe(resource.KindRoleAssignment, invalidate)
 	stopD := bus.Subscribe(resource.KindRoleDefinition, invalidate)
-	return func() { stopA(); stopD() }
+	stopO := bus.Subscribe("", func(ev event.Event) { e.forgetOwnersOf(graph.ResourceRef{Kind: ev.Kind, ID: ev.ID}) })
+	return func() { stopA(); stopD(); stopO() }
 }
 
 // Run marks the index stale every interval until ctx ends, so changes made
@@ -144,12 +161,31 @@ func (e *Engine) Run(ctx context.Context, interval time.Duration) {
 			return
 		case <-t.C:
 			e.stale.Store(true)
+			e.forgetOwners()
 		}
 	}
 }
 
-// Invalidate marks the index stale.
-func (e *Engine) Invalidate() { e.stale.Store(true) }
+// Invalidate marks the index stale and forgets cached ownership.
+func (e *Engine) Invalidate() {
+	e.stale.Store(true)
+	e.forgetOwners()
+}
+
+// forgetOwnersOf drops one resource's cached owners after it changed.
+func (e *Engine) forgetOwnersOf(ref graph.ResourceRef) {
+	e.ownerMu.Lock()
+	e.ownerGen++
+	delete(e.ownerCache, ref)
+	e.ownerMu.Unlock()
+}
+
+func (e *Engine) forgetOwners() {
+	e.ownerMu.Lock()
+	e.ownerGen++
+	clear(e.ownerCache)
+	e.ownerMu.Unlock()
+}
 
 // refresh rebuilds the index from the stores if it's stale.
 func (e *Engine) refresh(ctx context.Context) error {
@@ -216,7 +252,7 @@ func (e *Engine) scopeChain(ctx context.Context, target resource.Scope) ([]resou
 	chain := []resource.Scope{}
 	if !target.IsRoot() {
 		chain = append(chain, target)
-		up, err := e.ancestorsCached(ctx, graph.ResourceRef{Kind: target.Kind, ID: target.ID})
+		up, err := e.Ancestors(ctx, graph.ResourceRef{Kind: target.Kind, ID: target.ID})
 		if err != nil {
 			return nil, err
 		}
@@ -565,38 +601,58 @@ func (e *Engine) Assignments(ctx context.Context) ([]resource.RoleAssignment, er
 	return out, nil
 }
 
-// ancestorCacheKey memoises ancestor walks for the life of one request.
-type ancestorCacheKey struct{}
+// maxOwnerCache bounds the ownership cache: far above edge-1's resource
+// count, small in memory (a few MiB at most).
+const maxOwnerCache = 50_000
 
-type ancestorCache struct {
-	mu sync.Mutex
-	m  map[graph.ResourceRef][]graph.ResourceRef
-}
-
-// WithAncestorCache returns a context in which ancestor walks are memoised,
-// so filtering a list doesn't walk the same chain once per item.
-func WithAncestorCache(ctx context.Context) context.Context {
-	return context.WithValue(ctx, ancestorCacheKey{}, &ancestorCache{m: map[graph.ResourceRef][]graph.ResourceRef{}})
-}
-
-func (e *Engine) ancestorsCached(ctx context.Context, ref graph.ResourceRef) ([]graph.ResourceRef, error) {
-	c, _ := ctx.Value(ancestorCacheKey{}).(*ancestorCache)
-	if c != nil {
-		c.mu.Lock()
-		got, ok := c.m[ref]
-		c.mu.Unlock()
-		if ok {
-			return got, nil
-		}
+// directOwners returns ref's direct owners, from the cache when it can.
+func (e *Engine) directOwners(ctx context.Context, ref graph.ResourceRef) ([]graph.ResourceRef, error) {
+	e.ownerMu.RLock()
+	got, ok := e.ownerCache[ref]
+	gen := e.ownerGen
+	e.ownerMu.RUnlock()
+	if ok {
+		return got, nil
 	}
-	up, err := e.ancestors(ctx, ref)
+	got, err := e.owners(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("policy: resolve scope of %s %s: %w", ref.Kind, ref.ID, err)
 	}
-	if c != nil {
-		c.mu.Lock()
-		c.m[ref] = up
-		c.mu.Unlock()
+	e.ownerMu.Lock()
+	if e.ownerGen == gen { // nothing changed since the read began
+		if len(e.ownerCache) >= maxOwnerCache {
+			// Probing made-up IDs caches empty lists; never let that grow
+			// past a bound on a small machine.
+			clear(e.ownerCache)
+		}
+		e.ownerCache[ref] = got
 	}
-	return up, nil
+	e.ownerMu.Unlock()
+	return got, nil
+}
+
+// Ancestors returns ref's owners transitively, nearest first (breadth
+// first), from the ownership cache. A cycle ends the walk.
+func (e *Engine) Ancestors(ctx context.Context, ref graph.ResourceRef) ([]graph.ResourceRef, error) {
+	visited := map[graph.ResourceRef]bool{ref: true}
+	frontier := []graph.ResourceRef{ref}
+	var out []graph.ResourceRef
+	for len(frontier) > 0 {
+		var next []graph.ResourceRef
+		for _, n := range frontier {
+			owners, err := e.directOwners(ctx, n)
+			if err != nil {
+				return nil, err
+			}
+			for _, o := range owners {
+				if !visited[o] {
+					visited[o] = true
+					out = append(out, o)
+					next = append(next, o)
+				}
+			}
+		}
+		frontier = next
+	}
+	return out, nil
 }
