@@ -422,3 +422,7 @@ tokens or passwords.
 - nested groups;
 - a Serendip-managed group directory;
 - Organization-level multi-tenancy.
+- Live lookups in the identity provider's directory: a person's current
+  groups in Check access, and people who haven't signed in yet in the
+  picker. Both need the management API, which the Service proxy blocks.
+  Moved to spec 018 by the user's decision; see `docs/PROGRESS.md`.

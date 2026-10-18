@@ -61,6 +61,18 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
   Manager POC, beside Serendip, may reuse our ThunderID/OpenChoreo on a
   throwaway cluster), then 019 approvals (draft in `specs/019-approvals/`,
   uncommitted, on hold).
+- **Added to spec 018's scope (user, 2026-10-18): live identity-provider
+  lookups.** Today `serendipd` can't call ThunderID's management API
+  (the Service proxy strips `Authorization`), so Check access shows a
+  person's groups as of their last sign-in, the principal picker only
+  knows people who have signed in, and console URIs on an existing
+  install need the operator tool (spec 016's option B). 018 decides how
+  `serendipd` reaches the management API, since the Agent Manager POC
+  needs it too:
+  - option A: an in-process port-forward tunnel;
+  - a small in-cluster helper holding the admin credential;
+  - a cluster-internal route.
+  It weighs privilege, code size and dependencies (rule 4 / ADR).
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
 PR #24.** Specs 002-016 are committed locally only — decided explicitly
