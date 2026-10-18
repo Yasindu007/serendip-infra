@@ -47,7 +47,7 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
     guard;
   - `go test ./core/...`; `check-imports.sh`; contract-guardian PASS.
 
-## T003 [P] — `core/policy`: built-in roles, index, evaluation
+## T003 [P] — `core/policy`: built-in roles, index, evaluation — DONE 2026-10-18 (contract-guardian PASS, go-reviewer PASS; ~4 µs per decision)
 
 - **Do**:
   - Add the built-in roles from spec.md with stable UUIDs.

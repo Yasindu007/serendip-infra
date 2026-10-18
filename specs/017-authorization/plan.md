@@ -342,6 +342,14 @@ tokens or passwords.
   the subject applies from this spec on, as documented.
 - **The console's reads multiply** (permissions per page). The endpoint
   is cached per page, and its cost is measured in T009.
+- **Each decision scans every assignment,** with no index by scope (the
+  go-reviewer note in T003). Measured at about 4 µs with 101 assignments
+  and a five-level chain. An index by scope is the first optimisation if
+  T009's list benchmarks need it.
+- **Assignment mutations must hold `Engine.LockAssignments`** across the
+  check and the store write (T003). Otherwise two concurrent removals of
+  different root Owners could both pass the last-Owner check. The API
+  handler in T006 does this.
 - **Lockout through key removal** is guarded (decision 7); break-glass is
   the backstop.
 
