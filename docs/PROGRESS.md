@@ -13,10 +13,9 @@ Last updated: 2026-10-18
 
 ## Current phase
 
-**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T010
-done and committed; next is T011** (final reviews: contract-guardian,
-go-reviewer, /security-review over the whole spec), then T012 (docs:
-`docs/architecture/authorization.md`, ADR 0014, `api/CLAUDE.md`).
+**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T011
+done and committed; next is T012** (docs: `docs/architecture/authorization.md`,
+ADR 0014, `api/CLAUDE.md`), which completes the spec.
 (Resolved: the user allowed removing role assignments in the console,
 since RBAC guards it; it's the one written exception to "no delete".) Plan, decisions and
 accepted risks: `specs/017-authorization/plan.md`; task status:
@@ -56,6 +55,13 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
   every AC observed or explicitly test-only, in
   `specs/017-authorization/verification.md`; T009's T470 run: serendipd
   36.3 MiB idle, PASS. Three console polish fixes from the real browser.
+- `1e42bc6` T011 final reviews. `/security-review` found a HIGH issue:
+  Secret path aliasing across scopes. It's fixed with per-Secret value
+  storage (Secret ID + path), path validation, immutable paths,
+  server-chosen Secret IDs, and plain-token IDs for every kind.
+  **Upgrade note:** Secret values written before this must be written
+  again. Also: T470 latency measured (PASS), the last-Owner refusal
+  audited, and 5xx responses no longer carry internal error text.
 - Then T008 console Access control, T009 benchmarks, T010 real cluster,
   T011 reviews, T012 docs/ADR 0014. After 017: spec 018 (WSO2 Agent
   Manager POC, beside Serendip, may reuse our ThunderID/OpenChoreo on a
