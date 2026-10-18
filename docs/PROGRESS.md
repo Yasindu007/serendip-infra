@@ -57,9 +57,13 @@ user's approval.** Key plan decisions:
   groups, `grant_type: client_credentials` required, the `actor_sponsor`
   audit column, and a 503 when the sponsor can't be read. A real Agent
   Manager token verifies.
-- Next is T008: the agent guardrails in `core/policy`: no
-  access-management roles, needs approval on delete, one consistent
-  sponsor per agent, `assignableToAgents` on the role view.
+- T008 DONE: agents never manage access, whatever role they hold. Owner,
+  User Access Administrator, RBAC Administrator and any custom role
+  that can change access can't be assigned to one. An agent's allowed
+  delete gets 403 `urn:serendip:problem:needs-approval` and is audited.
+  One sponsor per agent. Role views carry `assignableToAgents`.
+- Next is T009: the console (agent assignments with a sponsor picker and
+  role filter, the directory picker, live groups in Check access).
 - The scratch kind cluster `serendip-t018` is running, with
   `serendipd` stopped. Agent Manager's k3d `amp-local` is running and
   holds 8080.
