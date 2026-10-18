@@ -71,8 +71,18 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
   needs it too:
   - option A: an in-process port-forward tunnel;
   - a small in-cluster helper holding the admin credential;
-  - a cluster-internal route.
-  It weighs privilege, code size and dependencies (rule 4 / ADR).
+  - a cluster-internal route;
+  - Azure's pattern: act as the signed-in person. `serendipd` calls the
+    management API with a token issued to that admin for the management
+    scope, rather than holding a standing admin credential (as the Azure
+    portal calls Microsoft Graph as you).
+  It weighs privilege, code size and dependencies (rule 4 / ADR). It
+  should be settled once as the channel for every later
+  identity-provider feature (agent identities, Serendip-managed groups,
+  automatic console URIs, credential cleanup), so none of them stays
+  manual. Only ThunderID's management API has this problem: OpenBao's
+  header passes the proxy, and the rest is driven through the
+  Kubernetes API.
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
 PR #24.** Specs 002-016 are committed locally only — decided explicitly
