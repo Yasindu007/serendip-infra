@@ -51,9 +51,15 @@ user's approval.** Key plan decisions:
 - T006 DONE (`b9e3c3f`): `GET /v1/authorization/directory` and
   `.../principals/person/{id}/groups`. `source` is `live` or `signedIn`;
   verified with ThunderID scaled to 0 and back.
-- Next is T007: agent issuers (`SERENDIP_AGENT_ISSUERS`), the issuer
-  router, the agent principal and the `actor_sponsor` audit column.
-  `identity.Principal` gains `Kind` and `Issuer` (moved here from T005).
+- T007 DONE (`979ea44`): `SERENDIP_AGENT_ISSUERS`
+  (`alias=issuer|audience[|maxLifetime]`, fatal if malformed),
+  `oidc.IssuerRouter`, agent principals `agent:<alias>/<sub>` with no
+  groups, `grant_type: client_credentials` required, the `actor_sponsor`
+  audit column, and a 503 when the sponsor can't be read. A real Agent
+  Manager token verifies.
+- Next is T008: the agent guardrails in `core/policy`: no
+  access-management roles, needs approval on delete, one consistent
+  sponsor per agent, `assignableToAgents` on the role view.
 - The scratch kind cluster `serendip-t018` is running, with
   `serendipd` stopped. Agent Manager's k3d `amp-local` is running and
   holds 8080.
