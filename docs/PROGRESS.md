@@ -45,8 +45,15 @@ user's approval.** Key plan decisions:
 - T004 DONE (`535ecfe`): `providers/kubernetes` `DialPod`,
   `ServiceDialer`, `ReadyPod`, a stdlib WebSocket port-forward. About
   33 ms per request on kind.
-- Next is T005: `identity.Directory` plus the ThunderID directory over
-  `ServiceDialer`. The admin login is cached; set `IdleConnTimeout`.
+- T005 DONE (`6633988`): `core/identity.Directory` and the ThunderID
+  directory, read as the admin over the tunnel, with the token cached in
+  memory.
+- T006 DONE (`b9e3c3f`): `GET /v1/authorization/directory` and
+  `.../principals/person/{id}/groups`. `source` is `live` or `signedIn`;
+  verified with ThunderID scaled to 0 and back.
+- Next is T007: agent issuers (`SERENDIP_AGENT_ISSUERS`), the issuer
+  router, the agent principal and the `actor_sponsor` audit column.
+  `identity.Principal` gains `Kind` and `Issuer` (moved here from T005).
 - The scratch kind cluster `serendip-t018` is running, with
   `serendipd` stopped. Agent Manager's k3d `amp-local` is running and
   holds 8080.
