@@ -37,10 +37,14 @@ the footprint.
        `/design/resolve`.
      - **Prefixes:** `/.well-known` and `/gate`. `/gate` is the login
        page's own assets.
-   - **The T001 spike decides two paths empirically.**
-     - `/oauth2/auth/callback`: does the browser call it during login? If
-       so, it stays routed, as an exact path, and the risk is recorded.
-     - `/oauth2/par`: is it used? If not, it isn't routed.
+   - **Settled by T001** ("Spike findings"):
+     - `/oauth2/auth/callback`: the browser POSTs to it during login, so
+       it stays routed as an exact path. The risk is recorded.
+     - `/oauth2/logout` and `/oauth2/logout/callback` are routed: the
+       browser uses them to log out.
+     - `/oauth2/par` isn't used, so it isn't routed.
+     - Neither are `/oauth2/introspect`, `/oauth2/dcr/register` or
+       `/oauth2/bc-authorize`.
    - **Spec wording:** the spec listed "ThunderID's own console" among the
      routed paths. It stays **unrouted**, as it is today. It's an admin
      client, so exposing it would add surface without helping a Serendip
@@ -274,6 +278,77 @@ the footprint.
   beta in 1.31, GA in 1.38.
 - **K3s:** the stable line is v1.36.5. Our pin is v1.36.4+k3s1.
 
+## Spike findings (T001, 2026-10-18)
+
+Run on kind `serendip-t018` (kindest/node v1.34.0, the spec 017 stack
+from a fresh `serendipd`), and on a throwaway K3s `v1.36.4+k3s1`
+container. Scratch programs: a stdlib Go port-forward client, and a
+headless-Chrome driver over the DevTools protocol. Neither is kept.
+
+1. **The browser login and logout through the Gateway** use these
+   ThunderID paths:
+   - `GET /oauth2/authorize`;
+   - `/gate/*` (the page and its assets);
+   - `GET /flow/meta`;
+   - `POST /flow/execute`;
+   - `POST /oauth2/auth/callback`;
+   - `GET /oauth2/logout`;
+   - `GET /gate/signout`;
+   - `POST /oauth2/logout/callback`.
+
+   `/v1/session` was 200 after login, and logout ended back at the
+   console. `serendipd`'s own server-side calls (token, revoke, keys) go
+   through the Service proxy, not the Gateway. The public routes for
+   token, jwks, userinfo, revoke and discovery are kept for standard
+   OIDC clients. Decision 1 is amended.
+2. **What the Gateway passes today:**
+   - **Management paths are already not routed:** `/users`,
+     `/applications`, `/flows`, `/design/themes` and `/console/` are all
+     404.
+   - **But the `/oauth2` prefix reaches ThunderID** for `introspect`
+     (400, missing `client_id`), `dcr/register` (401), `par` (400) and
+     `auth/callback` (400, missing `authId`). They're protected by
+     ThunderID's own checks, but there's no reason to expose the first
+     three.
+   - **Correction to the earlier research:** the management API was
+     *not* publicly reachable. Spec 016's route already excluded it. The
+     real gap was the `/oauth2` prefix.
+3. **The port-forward transport works** on both clusters.
+   - **What was used:** the kubelet WebSocket mode, subprotocol
+     `v4.channel.k8s.io`. The server echoed it, `Sec-WebSocket-Accept`
+     verified, and each channel sent a 2-byte LE port preamble (8090).
+   - **On kind 1.34**, over the tunnel:
+     - the full admin login worked (about 300 ms, 6 connections);
+     - `GET /users` was 200.
+     - **Control:** the same token through the Service proxy got **401**
+       (`AUTH-4010`). That confirms the header is stripped there and
+       kept in the tunnel.
+   - **On K3s v1.36.4**, a header-echo pod received `Authorization:
+     Bearer …` byte for byte.
+   - **Failures look like this:**
+     - A closed port gives a message on the error channel, then a close
+       frame. The message names the pod UID and the netns path.
+     - A missing pod fails the upgrade with 404 and a Status body.
+     - Both are logged and mapped to `ErrProviderNotReady`. Neither is
+       ever returned to an API client.
+   - **RBAC:** the dialer needs `create` on `pods/portforward` in
+     `serendip-identity`, plus a way to find a ready pod.
+4. **The management API** (ThunderID 1.0.1, observed):
+   - **The token:** `expires_in` 3600, a refresh token is issued, scope
+     `openid system`, `aud` `https://localhost:8090/mcp`. `sub` is the
+     user ID (`…0030`), and `groups` is as of issue.
+   - **`GET /users?limit&filter=username eq "admin"`:**
+     `{totalResults, startIndex, count, users: [{id, ouId, type,
+     attributes: {username, name, given_name, family_name, email, sub,
+     …}, isReadOnly}], links}`. Note that `attributes.sub` is the
+     username (`admin`), **not** the token `sub`. The directory must use
+     `id`.
+   - **`GET /groups?limit`:** `{…, groups: [{id, name, description, ouId,
+     isReadOnly}]}`.
+   - **`GET /users/{id}/groups`:** `{…, groups: [{id, name, ouId}]}`. A
+     group created a moment earlier (`POST /groups`, 201) appeared
+     straight away, with no new sign-in. That's AC 2's live behaviour.
+
 ## Interfaces and types created
 
 - **`core/identity`:**
@@ -341,9 +416,10 @@ the footprint.
     echoed subprotocol.
   - **Limits:** frame sizes are bounded.
   - **Review:** go-reviewer and `/security-review` in T013.
-- **The browser may need `/oauth2/auth/callback`,** so it would stay
-  publicly routed. If so, it's recorded as an accepted risk with
-  ThunderID's own reasoning: it validates the flow's assertion.
+- **`/oauth2/auth/callback` stays publicly routed,** because the browser
+  needs it (T001). Accepted: it accepts only a flow assertion and
+  `authId` issued by ThunderID itself (an empty body got 400, "authId is
+  required").
 - **A standing admin token sits in `serendipd`'s memory** for up to an
   hour. Accepted: `serendipd` can already read the admin password, so a
   token adds nothing beyond what it already holds. It's never logged or

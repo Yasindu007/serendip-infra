@@ -7,7 +7,7 @@ Ordered. `[P]` = parallel-safe within its block, `[A]` = subagent-eligible
 Dependency sketch: T001 → T002 → T003 → (T004 ∥ T007) → T005 → T006 →
 T008 → T009 → T010 → T011 → T012 → T013 → T014.
 
-## T001 — Spike: public paths, port-forward transport, management API
+## T001 — Spike: public paths, port-forward transport, management API — DONE 2026-10-18 (plan.md "Spike findings"; all four observed, on kind 1.34 and K3s v1.36.4)
 
 - **Do**: on kind `serendip-t018`, which runs the spec 017 stack:
   1. Log in and out of the console through the Gateway, capturing every

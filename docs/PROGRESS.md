@@ -30,8 +30,8 @@ user's approval.** Key plan decisions:
   ignored.
 - Agents can't hold access-management roles, get needs-approval on
   delete, and have one sponsor each.
-- T001 confirms port-forward on K3s v1.36.4 (our pin,
-  `agent/bootstrap/install.go`) and kind 1.34.
+- T001 DONE: port-forward works on kind 1.34 and K3s v1.36.4 (our pin,
+  `agent/bootstrap/install.go`); findings in plan.md.
 
 The notes below are the research behind it.
 (Resolved: the user allowed removing role assignments in the console,
