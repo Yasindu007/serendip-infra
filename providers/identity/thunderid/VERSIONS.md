@@ -39,6 +39,16 @@ Bump the chart and image together: chart 1.0.1's `appVersion` is 1.0.1.
   The SPA also calls `/flow/meta` and `/design/resolve` (unauthenticated).
 - The chart's own `httproute` block can only route `/`, which would expose
   `/console` and the management APIs. Serendip renders its own HTTPRoute.
+- That route matches exact paths for everything under `/oauth2`, `/flow`
+  and `/design`, plus the prefixes `/.well-known` (discovery) and `/gate`
+  (the sign-in page and its assets) (spec 018 T001). A `/oauth2` prefix would also expose
+  `/oauth2/introspect`, `/oauth2/dcr/register` and `/oauth2/par`, which
+  reach ThunderID's own checks. `/oauth2/auth/callback` must stay
+  routed, because the sign-in page POSTs to it. Logout uses
+  `/oauth2/logout` and `/oauth2/logout/callback`. Management paths
+  (`/users`, `/groups`, `/agents`, `/resource-servers`, `/flows`,
+  `/design/themes`, …) are bare top-level paths, so they are never
+  matched.
 - A `system`-scoped admin token for the management API needs the `CONSOLE`
   client plus `resource=https://localhost:8090/mcp` (RFC 8707). Without it,
   authorize fails with `invalid_target`.

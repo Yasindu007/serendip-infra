@@ -48,7 +48,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
 - **Verify**: one real decoded token is recorded (signature not
   included).
 
-## T003 — Exact-path identity route
+## T003 — Exact-path identity route — DONE 2026-10-18 (contract-guardian PASS; on `serendip-t018` the existing six-prefix route was replaced by the next foundations pass, the four `/oauth2` extras and the management paths are 404, and browser login, `/v1/session` and logout work)
 
 - **Do**: replace `routePaths` with the allowlist settled in T001, using
   `Exact` matches and the two prefixes. Update `VERSIONS.md`.

@@ -15,25 +15,39 @@ import (
 // RouteName is the Serendip-owned HTTPRoute exposing the login endpoints.
 const RouteName = "serendip-identity"
 
-// routePaths are the only path prefixes routed to ThunderID: what a browser
-// login and token exchange need (decision 6, amended by T001 finding 6).
-// The admin console, management APIs, MCP and health endpoints are not
-// routed.
-var routePaths = []string{"/oauth2", "/.well-known", "/gate", "/flow/execute", "/flow/meta", "/design/resolve"}
+// routeExact are the exact paths routed to ThunderID: what a browser login
+// and logout call (specs/018-agent-manager-poc plan.md, T001 finding 1),
+// plus the standard OIDC endpoints a client uses. Everything else under
+// /oauth2 -- introspect, dynamic client registration, PAR, CIBA -- is not
+// routed, and nor are the admin console, the management APIs, MCP and
+// health endpoints.
+var routeExact = []string{
+	"/oauth2/authorize", "/oauth2/token", "/oauth2/jwks", "/oauth2/userinfo", "/oauth2/revoke",
+	"/oauth2/auth/callback", "/oauth2/logout", "/oauth2/logout/callback",
+	"/flow/execute", "/flow/meta", "/design/resolve",
+}
+
+// routePrefixes are routed whole: discovery documents, and the sign-in
+// page with its assets.
+var routePrefixes = []string{"/.well-known", "/gate"}
 
 const routePath = "/apis/gateway.networking.k8s.io/v1/namespaces/" + Namespace + "/httproutes/" + RouteName
 
 // EnsureRoute server-side-applies the HTTPRoute that attaches ThunderID's
 // login endpoints to the shared gateway ep under issuer's hostname. A
-// no-drift pass changes nothing.
+// no-drift pass changes nothing; an older route's rules are replaced, since
+// the apply owns the whole list.
 func EnsureRoute(ctx context.Context, client *kubernetes.Client, ep reconcile.GatewayEndpoint, issuer string) error {
 	u, err := url.Parse(issuer)
 	if err != nil {
 		return fmt.Errorf("thunderid: route: issuer: %w", err)
 	}
-	matches := make([]any, len(routePaths))
-	for i, p := range routePaths {
-		matches[i] = map[string]any{"path": map[string]string{"type": "PathPrefix", "value": p}}
+	matches := make([]any, 0, len(routeExact)+len(routePrefixes))
+	for _, p := range routeExact {
+		matches = append(matches, map[string]any{"path": map[string]string{"type": "Exact", "value": p}})
+	}
+	for _, p := range routePrefixes {
+		matches = append(matches, map[string]any{"path": map[string]string{"type": "PathPrefix", "value": p}})
 	}
 	spec, err := json.Marshal(map[string]any{
 		"parentRefs": []any{map[string]string{"name": ep.Name, "namespace": ep.Namespace}},

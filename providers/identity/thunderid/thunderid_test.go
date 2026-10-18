@@ -279,19 +279,41 @@ func TestEnsureRoute(t *testing.T) {
 		spec.Rules[0].BackendRefs[0].Name != ServiceName || spec.Rules[0].BackendRefs[0].Port != ServicePort {
 		t.Fatalf("rules = %+v", spec.Rules)
 	}
-	var paths []string
+	var exact, prefixes []string
 	for _, m := range spec.Rules[0].Matches {
-		if m.Path.Type != "PathPrefix" {
-			t.Errorf("match %v is not a PathPrefix", m)
+		switch m.Path.Type {
+		case "Exact":
+			exact = append(exact, m.Path.Value)
+		case "PathPrefix":
+			prefixes = append(prefixes, m.Path.Value)
+		default:
+			t.Errorf("match %v has type %q", m, m.Path.Type)
 		}
-		paths = append(paths, m.Path.Value)
 	}
-	want := []string{"/oauth2", "/.well-known", "/gate", "/flow/execute", "/flow/meta", "/design/resolve"}
-	if !reflect.DeepEqual(paths, want) {
-		t.Errorf("routed paths = %v, want exactly %v", paths, want)
+	wantExact := []string{
+		"/oauth2/authorize", "/oauth2/token", "/oauth2/jwks", "/oauth2/userinfo", "/oauth2/revoke",
+		"/oauth2/auth/callback", "/oauth2/logout", "/oauth2/logout/callback",
+		"/flow/execute", "/flow/meta", "/design/resolve",
 	}
-	for _, forbidden := range []string{"/", "/console", "/mcp", "/health", "/applications", "/users", "/auth"} {
-		if slices.Contains(paths, forbidden) {
+	if !reflect.DeepEqual(exact, wantExact) {
+		t.Errorf("exact paths = %v, want exactly %v", exact, wantExact)
+	}
+	if want := []string{"/.well-known", "/gate"}; !reflect.DeepEqual(prefixes, want) {
+		t.Errorf("prefixes = %v, want exactly %v", prefixes, want)
+	}
+	// Nothing sensitive may be reachable, by either kind of match.
+	routed := func(path string) bool {
+		if slices.Contains(exact, path) {
+			return true
+		}
+		return slices.ContainsFunc(prefixes, func(p string) bool { return path == p || strings.HasPrefix(path, p+"/") })
+	}
+	for _, forbidden := range []string{
+		"/", "/console", "/mcp", "/health/readiness", "/applications", "/users", "/groups", "/agents",
+		"/resource-servers", "/flows", "/design/themes", "/auth",
+		"/oauth2/introspect", "/oauth2/dcr/register", "/oauth2/par", "/oauth2/bc-authorize",
+	} {
+		if routed(forbidden) {
 			t.Errorf("route exposes %s", forbidden)
 		}
 	}

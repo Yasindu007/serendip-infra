@@ -10,7 +10,8 @@
 //   - EnsureAdminSecret creates the initial administrator's password once
 //     and never changes it (decision 3).
 //   - EnsureRoute applies the HTTPRoute that exposes only the paths a login
-//     needs (decision 6).
+//     needs (decision 6; exact paths since specs/018-agent-manager-poc
+//     plan.md decision 1).
 //   - CheckReady and JWKSProxyURL reach the server through the Kubernetes
 //     API's Service proxy, the same way providers/secrets/openbao does --
 //     serendipd runs outside the cluster.
