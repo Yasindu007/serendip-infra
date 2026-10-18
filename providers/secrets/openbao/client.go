@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 )
 
@@ -242,7 +244,7 @@ type kvV2ReadResponse struct {
 // shape down to just the inner data map. Returns ErrSecretNotFound on
 // a 404.
 func (c *Client) ReadSecret(ctx context.Context, mount, path string) (map[string]any, error) {
-	resp, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/v1/%s/data/%s", mount, path), nil)
+	resp, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/v1/%s/data/%s", mount, escapePath(path)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +264,7 @@ func (c *Client) ReadSecret(ctx context.Context, mount, path string) (map[string
 
 // WriteSecret PUTs data as the KV v2 secret at mount/path.
 func (c *Client) WriteSecret(ctx context.Context, mount, path string, data map[string]any) error {
-	resp, err := c.do(ctx, http.MethodPut, fmt.Sprintf("/v1/%s/data/%s", mount, path), kvV2WriteRequest{Data: data})
+	resp, err := c.do(ctx, http.MethodPut, fmt.Sprintf("/v1/%s/data/%s", mount, escapePath(path)), kvV2WriteRequest{Data: data})
 	if err != nil {
 		return err
 	}
@@ -281,7 +283,7 @@ func (c *Client) WriteSecret(ctx context.Context, mount, path string, data map[s
 // fine, mirrors providers/kubernetes.Client's Delete-on-not-found
 // callers' convention for this same case.
 func (c *Client) DeleteSecret(ctx context.Context, mount, path string) error {
-	resp, err := c.do(ctx, http.MethodDelete, fmt.Sprintf("/v1/%s/metadata/%s", mount, path), nil)
+	resp, err := c.do(ctx, http.MethodDelete, fmt.Sprintf("/v1/%s/metadata/%s", mount, escapePath(path)), nil)
 	if err != nil {
 		return err
 	}
@@ -307,4 +309,14 @@ func (c *Client) DeleteSecret(ctx context.Context, mount, path string) error {
 func unexpectedStatus(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	return fmt.Errorf("openbao: unexpected status %d: %s", resp.StatusCode, string(body))
+}
+
+// escapePath escapes each segment of a KV path for a URL, so no character
+// in it can change the request's meaning.
+func escapePath(path string) string {
+	segs := strings.Split(path, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return strings.Join(segs, "/")
 }

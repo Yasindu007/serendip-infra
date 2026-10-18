@@ -192,6 +192,20 @@ driven by `GET /v1/authorization/permissions`.
       hidden (create) or disabled with a reason (edit). They come from
       `GET /v1/authorization/permissions?kind=&id=`, cached per page.
     - Built on the existing components and tokens only (DESIGN.md).
+    - **Amended in T008 and T010** (decided with the user):
+      - "Access control (IAM)" is a page per resource, linked from its
+        page and laid out like Azure's blade (Check access, Role
+        assignments, Roles), rather than a tab.
+      - Check access is computed in the browser from the assignments at
+        the scope, the role definitions, and the person's groups as of
+        their last sign-in. Live directory lookups moved to spec 018.
+      - The console may remove a role assignment: the one written
+        exception to DESIGN.md's "no delete" rule. It needs
+        `roleAssignments/delete` and a confirmation, and an inherited
+        assignment is removed where it was made.
+      - A principal field takes a name or a subject; a known name
+        resolves to its subject, which is what's sent.
+
 12. **Performance target.** Authorization adds **p99 < 100 µs** per
     single-resource request and **< 2 ms** to a 100-item list on the dev
     machine, measured with an `api` benchmark like spec 016's
@@ -410,6 +424,29 @@ tokens or passwords.
   - Each `NewServer` starts the policy index's 30 s tick, stopped by
     `Server.Shutdown`. Tests that never shut down leave it running until
     the process exits.
+- **Secret values are stored per Secret** (T011, from `/security-review`).
+  Authorization is decided per Secret resource, but values used to live
+  at a caller-chosen path shared by the whole deployment. A Secret in one
+  project could therefore alias another project's value: read or
+  overwrite it with Secrets Officer, or destroy it with Contributor by
+  deleting the alias. Now:
+  - providers store each value under the Secret's ID and its path;
+  - paths are validated and can't change after creation;
+  - the OpenBao client escapes each path segment;
+  - a Secret's ID is always the server's (a client-chosen one is
+    dropped), and the provider escapes it as a single segment of the
+    key. The re-review found that ID `V/db` with path `pass` would
+    otherwise forge victim `V`'s key for `db/pass`.
+  - Every kind's IDs are now plain tokens (`[A-Za-z0-9._:-]{1,128}`,
+    never `.` or `..`), checked in `resource.Validate`.
+  **Upgrade note:** values written before this change are at the bare
+  path and aren't read. Write them again. A fallback to the old location
+  would reopen the alias, so there isn't one.
+- **Below the bar, recorded** (`/security-review`, T011):
+  - Role assignments at the scope of a deleted resource remain. A
+    resource re-created with the same kind and a client-chosen ID would
+    inherit them. Exploiting this needs a predictable ID to be reused.
+  - A cascade-delete 403 can name a descendant the caller can't read.
 - **Lockout through key removal** is guarded (decision 7); break-glass is
   the backstop.
 

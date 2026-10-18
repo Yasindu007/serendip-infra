@@ -13,6 +13,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/graph"
 	"github.com/serendip-infra/serendip-infra/core/policy"
 	"github.com/serendip-infra/serendip-infra/core/resource"
+	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
 
@@ -476,4 +477,32 @@ func TestOwnershipCacheFollowsMoves(t *testing.T) {
 	w.expect(check{alice, read, false, web, false})
 	move(app, prod)
 	w.expect(check{alice, read, false, web, true})
+}
+
+// failingAssignments is a store whose listing always fails, as when the
+// database is unavailable.
+type failingAssignments struct {
+	store.Store[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus]
+}
+
+func (failingAssignments) List(context.Context, store.ListOptions) ([]resource.RoleAssignment, error) {
+	return nil, errors.New("database unavailable")
+}
+
+// When the index can't be loaded, every answer refuses: a decision is a
+// Deny with the error, and the last-Owner check says "last" so nothing is
+// removed on a guess.
+func TestFailsClosedWhenTheIndexCantLoad(t *testing.T) {
+	w := newWorld(t)
+	engine := policy.NewEngine(failingAssignments{w.assign}, w.defs, graph.NewSQLiteGraph(w.db).Owners)
+	d, err := engine.Decide(w.ctx, alice, policy.Action{Name: "serendip/components/read"}, web)
+	if err == nil || d.Effect != policy.Deny {
+		t.Errorf("Decide = %+v, %v; want Deny with an error", d, err)
+	}
+	if last, err := engine.IsLastRootOwner(w.ctx, "any"); err == nil || !last {
+		t.Errorf("IsLastRootOwner = %v, %v; want true with an error", last, err)
+	}
+	if err := engine.CheckUnassign(w.ctx, alice, "any"); err == nil {
+		t.Error("CheckUnassign succeeded without an index")
+	}
 }

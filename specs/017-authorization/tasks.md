@@ -222,6 +222,12 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
 
 ## T010 — Real-cluster verification (kind) — DONE 2026-10-18 (`verification.md`)
 
+- **Notes:** one caveat (AC 11). The Add role assignment form wasn't
+  clicked through by a person in a real browser. The same request was
+  sent through the API on the cluster and the person's access changed,
+  and a UI test proves the form sends exactly that request. AC 2, 6 and 7
+  are covered by tests, not repeated on the cluster.
+
 - **Do**: On a fresh install:
   - sign in as the bootstrap admin (Owner);
   - create a second ThunderID user, plus a group if T001 allows;
@@ -233,7 +239,24 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
 - **Verify**: every acceptance criterion has observed evidence or an
   explicit "not verified, because …".
 
-## T011 — Final reviews
+## T011 — Final reviews — DONE 2026-10-18
+
+- **contract-guardian:** blocked on two honesty points, both fixed.
+  - The simulated-T470 latency was never measured; it's now measured
+    under the T470's CPU limits (+36 µs p99, +0.24 ms per list; PASS).
+  - The AC 11 caveat is now recorded here, under T010.
+  - Also done: the last-Owner refusal is audited, and plan decision 11
+    is amended.
+- **go-reviewer:** PASS. Done from its notes:
+  - no internal error text in 5xx responses;
+  - one scope-chain walker;
+  - per-scope decisions when listing assignments;
+  - fail-closed and concurrent last-Owner tests (plus a test-fixture race
+    the new test exposed).
+- **/security-review:** one HIGH finding, confirmed by an independent
+  false-positive check: Secret path aliasing across scopes. Fixed (see
+  plan.md Risks) and covered by tests. Two below-the-bar notes are
+  recorded in plan.md Risks.
 
 - **Do**: Run `contract-guardian`, `go-reviewer` and `/security-review`
   over the spec's commits.

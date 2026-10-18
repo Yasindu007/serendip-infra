@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/api"
@@ -112,11 +113,11 @@ func TestRequestIDFromContext_EmptyWhenNotSet(t *testing.T) {
 type fakeAuthn struct {
 	tokens   map[string]identity.Principal
 	notReady bool
-	calls    int
+	calls    atomic.Int32
 }
 
 func (f *fakeAuthn) Authenticate(_ context.Context, token string) (identity.Principal, error) {
-	f.calls++
+	f.calls.Add(1)
 	if f.notReady {
 		return identity.Principal{}, reconcile.ErrProviderNotReady
 	}
@@ -194,8 +195,8 @@ func TestAuthMiddleware(t *testing.T) {
 					t.Errorf("problem body leaks the verifier's reason: %s", w.Body.String())
 				}
 			}
-			if tt.wantAuthn >= 0 && tt.authn != nil && tt.authn.calls != tt.wantAuthn {
-				t.Errorf("Authenticate calls = %d, want %d", tt.authn.calls, tt.wantAuthn)
+			if tt.wantAuthn >= 0 && tt.authn != nil && int(tt.authn.calls.Load()) != tt.wantAuthn {
+				t.Errorf("Authenticate calls = %d, want %d", tt.authn.calls.Load(), tt.wantAuthn)
 			}
 		})
 	}

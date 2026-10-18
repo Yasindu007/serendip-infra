@@ -86,9 +86,6 @@ var (
 	ErrNotAssignable = fmt.Errorf("%w: the role can't be assigned at this scope", resource.ErrValidation)
 )
 
-// AncestorFunc returns a resource's owners transitively, nearest first.
-type AncestorFunc func(ctx context.Context, ref graph.ResourceRef) ([]graph.ResourceRef, error)
-
 // OwnersFunc returns a resource's direct owners.
 type OwnersFunc func(ctx context.Context, ref graph.ResourceRef) ([]graph.ResourceRef, error)
 
@@ -247,8 +244,9 @@ func (e *Engine) Role(ctx context.Context, id string) (resource.RoleDefinitionSp
 	return d.Spec, ok, nil
 }
 
-// scopeChain is the target, its ancestors nearest first, then "/".
-func (e *Engine) scopeChain(ctx context.Context, target resource.Scope) ([]resource.Scope, error) {
+// ScopeChain is the target, its ancestors nearest first, then "/": every
+// scope whose assignments apply at target.
+func (e *Engine) ScopeChain(ctx context.Context, target resource.Scope) ([]resource.Scope, error) {
 	chain := []resource.Scope{}
 	if !target.IsRoot() {
 		chain = append(chain, target)
@@ -288,7 +286,7 @@ func (e *Engine) applicable(ctx context.Context, p Principal, target resource.Sc
 	if err := e.refresh(ctx); err != nil {
 		return nil, err
 	}
-	chain, err := e.scopeChain(ctx, target)
+	chain, err := e.ScopeChain(ctx, target)
 	if err != nil {
 		return nil, err
 	}
@@ -494,7 +492,7 @@ func within(inner, outer *resource.Delegation) bool {
 }
 
 func (e *Engine) checkAssignable(ctx context.Context, role resource.RoleDefinitionSpec, at resource.Scope) error {
-	chain, err := e.scopeChain(ctx, at)
+	chain, err := e.ScopeChain(ctx, at)
 	if err != nil {
 		return err
 	}

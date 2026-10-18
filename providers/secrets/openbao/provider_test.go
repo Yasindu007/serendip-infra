@@ -11,7 +11,7 @@ import (
 
 func newTestSecret(path string) resource.Secret {
 	return resource.Secret{
-		Metadata: resource.Metadata{Name: "test-secret"},
+		Metadata: resource.Metadata{ID: "sec-1", Name: "test-secret"},
 		Spec:     resource.SecretSpec{Path: path},
 	}
 }
@@ -63,7 +63,7 @@ func TestProvider_WriteValue_HitsExpectedPathWithSpecData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteValue() = %v", err)
 	}
-	wantPath := "/v1/secret/data/myapp/db-password"
+	wantPath := "/v1/secret/data/sec-1/myapp/db-password"
 	if gotPath != wantPath {
 		t.Errorf("path = %q, want %q", gotPath, wantPath)
 	}
@@ -102,8 +102,36 @@ func TestProvider_Delete_HitsMetadataPath(t *testing.T) {
 	if err := p.Delete(context.Background(), newTestSecret("myapp/db-password")); err != nil {
 		t.Fatalf("Delete() = %v", err)
 	}
-	wantPath := "/v1/secret/metadata/myapp/db-password"
+	wantPath := "/v1/secret/metadata/sec-1/myapp/db-password"
 	if gotPath != wantPath {
 		t.Errorf("path = %q, want %q", gotPath, wantPath)
+	}
+}
+
+// Two Secrets with the same path never share a value: each is stored under
+// its own ID (spec 017 T011, the alias the security review found).
+func TestProvider_SamePathDifferentSecretsDontAlias(t *testing.T) {
+	a := newTestSecret("payments/db-password")
+	b := newTestSecret("payments/db-password")
+	b.Metadata.ID = "sec-2"
+	if storageKey(a) == storageKey(b) {
+		t.Fatalf("both Secrets store at %q", storageKey(a))
+	}
+}
+
+func TestEscapePath(t *testing.T) {
+	if got := escapePath("sec-1/a b/c?d"); got != "sec-1/a%20b/c%3Fd" {
+		t.Errorf("escapePath = %q", got)
+	}
+}
+
+// An ID with a "/" can't forge another Secret's key: ID "sec-1/db" with
+// path "pass" must not equal ID "sec-1" with path "db/pass".
+func TestProvider_IDCantForgeAKey(t *testing.T) {
+	victim := newTestSecret("db/pass")
+	forged := newTestSecret("pass")
+	forged.Metadata.ID = "sec-1/db"
+	if storageKey(victim) == storageKey(forged) {
+		t.Fatalf("a slash in the ID forged the key %q", storageKey(victim))
 	}
 }

@@ -25,12 +25,22 @@ var labelNameRE = regexp.MustCompile(`^[a-zA-Z0-9]([-a-zA-Z0-9_.]{0,61}[a-zA-Z0-
 // (the part before '/', e.g. "serendip.dev" in "serendip.dev/environment").
 var labelPrefixRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
 
+// idRE is what a resource ID may contain: server IDs are UUIDs, and any
+// other ID must be just as inert in a URL path or a storage key.
+var idRE = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+
 // Validate checks a Metadata envelope before it's persisted. It does not
 // validate kind-specific Spec fields -- that's each kind's own concern,
 // not the envelope's.
 func Validate(m Metadata) error {
 	if m.Name == "" {
 		return fmt.Errorf("%w: Name is required", ErrValidation)
+	}
+	// An ID is one path segment wherever it's used: in URLs, and in
+	// providers' storage keys. A "/" in it could address something else
+	// (spec 017 T011), so IDs are plain tokens.
+	if m.ID != "" && (!idRE.MatchString(m.ID) || m.ID == "." || m.ID == "..") {
+		return fmt.Errorf("%w: invalid ID %q: use letters, digits, '.', '_', '-' or ':' (at most 128)", ErrValidation, m.ID)
 	}
 	for key, value := range m.Labels {
 		if err := validateLabelKey(key); err != nil {

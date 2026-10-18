@@ -40,6 +40,11 @@ const conditionReachable = "Reachable"
 // SecretReconciler's own WriteValue/ReadValue/DeleteWithValue methods
 // (below), driven directly by api/, not by Reconcile or the engine's
 // resync loop -- see those methods' doc comments for why.
+//
+// Each Secret's value is its own: a provider stores it under the Secret's
+// identity (Metadata.ID) as well as its Path, so two Secrets with the same
+// Path never share a value. Authorization is decided per Secret resource,
+// and a shared value would let one Secret reach another's (spec 017 T011).
 type SecretsProvider interface {
 	// Exists reports whether a value currently exists at sec's Path.
 	Exists(ctx context.Context, sec resource.Secret) (bool, error)

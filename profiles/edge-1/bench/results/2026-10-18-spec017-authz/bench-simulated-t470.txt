@@ -1,0 +1,12 @@
+BenchmarkAuthorization/get/without-2         	   81328	     37698 ns/op	        27.00 p50-µs	       159.0 p99-µs	   11051 B/op	     118 allocs/op
+BenchmarkAuthorization/get/without-2         	  109334	     35024 ns/op	        27.00 p50-µs	       143.0 p99-µs	   11049 B/op	     118 allocs/op
+BenchmarkAuthorization/get/without-2         	  102673	     37368 ns/op	        28.00 p50-µs	       161.0 p99-µs	   11052 B/op	     118 allocs/op
+BenchmarkAuthorization/get/with-2            	   80756	     46849 ns/op	        36.00 p50-µs	       195.0 p99-µs	   13638 B/op	     156 allocs/op
+BenchmarkAuthorization/get/with-2            	   69405	     47574 ns/op	        36.00 p50-µs	       187.0 p99-µs	   13634 B/op	     156 allocs/op
+BenchmarkAuthorization/get/with-2            	   84045	     50553 ns/op	        36.00 p50-µs	       224.0 p99-µs	   13637 B/op	     156 allocs/op
+BenchmarkAuthorization/list100/without-2     	    3933	   1004539 ns/op	       841.0 p50-µs	      2339 p99-µs	  337250 B/op	    5179 allocs/op
+BenchmarkAuthorization/list100/without-2     	    3940	   1004366 ns/op	       830.0 p50-µs	      2427 p99-µs	  336843 B/op	    5179 allocs/op
+BenchmarkAuthorization/list100/without-2     	    3513	    953501 ns/op	       795.0 p50-µs	      2105 p99-µs	  336876 B/op	    5179 allocs/op
+BenchmarkAuthorization/list100/with-2        	    2704	   1173483 ns/op	      1009 p50-µs	      2513 p99-µs	  476220 B/op	    6401 allocs/op
+BenchmarkAuthorization/list100/with-2        	    3160	   1209743 ns/op	      1021 p50-µs	      2582 p99-µs	  477166 B/op	    6402 allocs/op
+BenchmarkAuthorization/list100/with-2        	    3234	   1222221 ns/op	      1048 p50-µs	      2593 p99-µs	  477402 B/op	    6402 allocs/op

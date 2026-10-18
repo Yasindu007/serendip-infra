@@ -1,6 +1,11 @@
 package resource
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+	"unicode"
+)
 
 // KindSecret is a reference to a secret value held by the Secrets
 // capability's provider (spec 008's OpenBao foundation; spec 009 builds
@@ -27,6 +32,32 @@ const KindSecret Kind = "Secret"
 // not a per-Secret choice.
 type SecretSpec struct {
 	Path string `json:"path"`
+}
+
+// MaxSecretPathLen bounds a Secret's path.
+const MaxSecretPathLen = 256
+
+// ValidateSecretSpec checks a Secret's path: slash-separated segments, none
+// empty or "." or "..", and none of the characters that change a URL's
+// meaning (?, #, %). The path names the value within its own Secret only:
+// providers store each value under the Secret's identity, so a path can
+// never reach another Secret's value (spec 017 T011).
+func ValidateSecretSpec(s SecretSpec) error {
+	if s.Path == "" || len(s.Path) > MaxSecretPathLen {
+		return fmt.Errorf("%w: secret path must be 1 to %d characters", ErrValidation, MaxSecretPathLen)
+	}
+	if strings.ContainsAny(s.Path, "?#%\\") {
+		return fmt.Errorf("%w: secret path %q contains ?, #, %% or a backslash", ErrValidation, s.Path)
+	}
+	for _, seg := range strings.Split(s.Path, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("%w: secret path %q has an empty, \".\" or \"..\" segment", ErrValidation, s.Path)
+		}
+		if strings.IndexFunc(seg, unicode.IsControl) >= 0 {
+			return fmt.Errorf("%w: secret path %q contains a control character", ErrValidation, s.Path)
+		}
+	}
+	return nil
 }
 
 // SecretStatus carries one Condition, Type "Reachable" -- True when a

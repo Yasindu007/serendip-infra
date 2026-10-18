@@ -26,23 +26,27 @@ func newFakeSecretsProvider() *fakeSecretsProvider {
 	return &fakeSecretsProvider{values: map[string]map[string]any{}}
 }
 
+// key follows reconcile.SecretsProvider's contract: a value belongs to
+// one Secret, by its ID as well as its Path.
+func key(sec resource.Secret) string { return sec.Metadata.ID + "/" + sec.Spec.Path }
+
 func (f *fakeSecretsProvider) Exists(ctx context.Context, sec resource.Secret) (bool, error) {
-	_, ok := f.values[sec.Spec.Path]
+	_, ok := f.values[key(sec)]
 	return ok, nil
 }
 
 func (f *fakeSecretsProvider) WriteValue(ctx context.Context, sec resource.Secret, value map[string]any) error {
-	f.values[sec.Spec.Path] = value
+	f.values[key(sec)] = value
 	return nil
 }
 
 func (f *fakeSecretsProvider) ReadValue(ctx context.Context, sec resource.Secret) (map[string]any, error) {
-	return f.values[sec.Spec.Path], nil
+	return f.values[key(sec)], nil
 }
 
 func (f *fakeSecretsProvider) Delete(ctx context.Context, sec resource.Secret) error {
 	f.deleteCalls++
-	delete(f.values, sec.Spec.Path)
+	delete(f.values, key(sec))
 	return nil
 }
 

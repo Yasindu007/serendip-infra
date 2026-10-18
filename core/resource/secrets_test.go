@@ -1,7 +1,9 @@
 package resource_test
 
 import (
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -81,5 +83,20 @@ func TestSecretStatus_OnlyKnownFieldsBesidesConditions(t *testing.T) {
 	}
 	if typ.Field(1).Name != "LastSyncedAt" {
 		t.Errorf("SecretStatus's second field = %q, want %q", typ.Field(1).Name, "LastSyncedAt")
+	}
+}
+
+func TestValidateSecretSpec(t *testing.T) {
+	good := []string{"db-password", "myapp/db-password", "a/b/c", "team.x/key_1"}
+	bad := []string{"", "/abs", "trailing/", "a//b", "a/../b", "..", ".", "a/./b", "a?b", "a#b", "a%2Fb", "a\\b", "a\nb", strings.Repeat("a", resource.MaxSecretPathLen+1)}
+	for _, p := range good {
+		if err := resource.ValidateSecretSpec(resource.SecretSpec{Path: p}); err != nil {
+			t.Errorf("%q: %v", p, err)
+		}
+	}
+	for _, p := range bad {
+		if err := resource.ValidateSecretSpec(resource.SecretSpec{Path: p}); !errors.Is(err, resource.ErrValidation) {
+			t.Errorf("%q: err = %v, want ErrValidation", p, err)
+		}
 	}
 }

@@ -58,7 +58,7 @@ otherwise.
 | 9 Fail closed | `TestEveryRouteHasARule` enumerates every registered route (all have rules; the table has no stale entries), and `TestUnmappedRouteFailsAtStartup`. |
 | 10 Audit | **From the live database** (read-only): refused mutations are rows with no before or after, the person's subject, and `deny: missing <action> at <scope>`. Examples: a Component create, a Component update, a role assignment, and a Secret delete by `t017-reader`. **Allowed mutations** carry `allow: Owner (<assignment>) at /`. 7 role-assignment changes are audited; interfaces `bootstrap`, `http` and `reconcile`. Refused reads aren't audited, by design. |
 | 11 Console | **Captures:** 36, at 1440 and 390 px, light and dark, for the reader and the admin. **The reader:** Applications lists only `t017-a`, with no "Create application"; on the Component, "Edit component" is disabled with "Your roles here don't allow changing this component."; on its Access control page, "Your roles here don't include assigning roles." and no Remove. **The admin:** Access control (IAM) for `t017-a` shows the inherited Owner, Secrets Officer and API-key assignments ("Inherited from the whole platform"), the reader's own assignment ("This scope") with the only Remove button, the Add form with its API request, and the Roles list. **Adding a Reader assignment** was done with the same request the console sends (the console's request equality is a UI test). The reader's access changed accordingly. **Not done by a person:** clicking through the Add form in a browser. |
-| 12 Footprint | **Every test passes:** `go test -race ./...` and 68 UI tests. **T009, dev machine:** +74 µs p99 per request and +0.72 ms per 100-item list (Linux), +0.7 MiB idle. **Simulated T470** (`profiles/edge-1/bench/results/2026-10-18-spec017-simulated-t470/run1`): `serendipd` idle 36.3 MiB and 0.01% CPU, rule 4 **PASS** (spec 016: 34.5 MiB); 3 polling console tabs at 1.32 requests/s, 0 errors, 0.08% CPU, 38.2 MiB; fits 16 GB comfortably; cold start 257 s, warm restart 37 s. |
+| 12 Footprint | **Every test passes:** `go test -race ./...` and 69 UI tests. **T009, dev machine:** +74 µs p99 per request and +0.72 ms per 100-item list (Linux), +0.7 MiB idle. **Latency on the simulated T470:** +36 µs p99 per request and +0.24 ms p99 per 100-item list, measured in T011 with the same CPU limits (`profiles/edge-1/bench/results/2026-10-18-spec017-authz/summary.md`); both PASS. **Simulated T470 footprint** (`profiles/edge-1/bench/results/2026-10-18-spec017-simulated-t470/run1`): `serendipd` idle 36.3 MiB and 0.01% CPU, rule 4 **PASS** (spec 016: 34.5 MiB); 3 polling console tabs at 1.32 requests/s, 0 errors, 0.08% CPU, 38.2 MiB; fits 16 GB comfortably; cold start 257 s, warm restart 37 s. |
 
 ## Spec 016's checks, re-run
 
@@ -74,3 +74,20 @@ otherwise.
 - **Logs:** none of the three `serendipd` logs contains a JWT, an
   `access_token` or `refresh_token`, `serendip_session=`, or a test
   user's password.
+
+## After T011: upgrade notes
+
+The `/security-review` fix changes where Secret values live (`plan.md`
+Risks, "Secret values are stored per Secret"):
+
+- **Moved values.** Values written before it, at the bare path in OpenBao,
+  aren't read any more; write them again through
+  `POST /v1/secrets/{id}/value`. There's deliberately no fallback to the
+  old location, since that would reopen the alias.
+- **IDs and paths.** Resource IDs are now plain tokens. A resource stored
+  earlier with an unusual client-chosen ID (none exist in the repository's
+  own flows) couldn't be updated. Paths that the new validator rejects
+  can't be updated either.
+- **Not re-verified on a cluster.** The real-cluster checks above were
+  made before this fix. It's covered by provider, API and validation
+  tests, including the aliasing attack end to end.

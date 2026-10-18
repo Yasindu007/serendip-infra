@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/core/policy"
@@ -269,4 +270,47 @@ func TestAuthzAPI_ServerChosenIDs(t *testing.T) {
 	}
 	w.expect("tok-reader", "DELETE", authzPath+"roleAssignments/no-such-id", nil, http.StatusForbidden)
 	w.expect("tok-owner", "GET", authzPath+"roleAssignments/no-such-id", nil, http.StatusNotFound)
+}
+
+// Two Owners removing each other's root Owner assignment at the same time
+// must leave exactly one: the check and the write happen under one lock.
+func TestAuthzAPI_ConcurrentRemovalsKeepAnOwner(t *testing.T) {
+	var ownerA, ownerB string
+	w := newAuthzWorld(t, func(w *authzWorld) {
+		ownerA = grant(w.t, w.db, resource.PrincipalPerson, "sub-owner", policy.OwnerRoleID, resource.RootScope)
+		ownerB = grant(w.t, w.db, resource.PrincipalPerson, "sub-admin", policy.OwnerRoleID, resource.RootScope)
+	})
+	// The migrated API key is a third root Owner; remove it first so two
+	// remain.
+	var key string
+	if err := w.db.QueryRow(`SELECT id FROM resources WHERE kind = 'RoleAssignment' AND json_extract(spec, '$.principal.id') = 'ci'`).Scan(&key); err != nil {
+		t.Fatal(err)
+	}
+	w.expect("tok-owner", "DELETE", authzPath+"roleAssignments/"+key, nil, http.StatusNoContent)
+
+	codes := make(chan int, 2)
+	var wg sync.WaitGroup
+	for _, c := range []struct{ token, target string }{{"tok-owner", ownerB}, {"tok-admin", ownerA}} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes <- w.do(c.token, "DELETE", authzPath+"roleAssignments/"+c.target, nil).Code
+		}()
+	}
+	wg.Wait()
+	close(codes)
+	var got []int
+	for c := range codes {
+		got = append(got, c)
+	}
+	slices.Sort(got)
+	// One removal wins; the other is refused, either as the last Owner
+	// (409) or because its caller just lost Owner (403).
+	if got[0] != http.StatusNoContent || (got[1] != http.StatusConflict && got[1] != http.StatusForbidden) {
+		t.Errorf("concurrent removals answered %v, want one 204 and one refusal", got)
+	}
+	var owners int
+	if err := w.db.QueryRow(`SELECT COUNT(*) FROM resources WHERE kind = 'RoleAssignment' AND json_extract(spec, '$.roleDefinitionId') = ? AND json_extract(spec, '$.scope.kind') IS NULL`, policy.OwnerRoleID).Scan(&owners); err != nil || owners != 1 {
+		t.Errorf("%d Owners at / remain (%v), want exactly 1", owners, err)
+	}
 }

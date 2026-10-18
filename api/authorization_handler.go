@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
-	"github.com/serendip-infra/serendip-infra/core/graph"
 	"github.com/serendip-infra/serendip-infra/core/policy"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
@@ -29,7 +28,6 @@ type AuthorizationHandler struct {
 	definitions  store.Store[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus]
 	principals   *sqlite.PrincipalRegistry
 	exists       func(ctx context.Context, kind resource.Kind, id string) (bool, error)
-	ancestors    policy.AncestorFunc
 	recordDenied dbForAudit
 }
 
@@ -201,12 +199,13 @@ func (h *AuthorizationHandler) listAssignments(w http.ResponseWriter, r *http.Re
 			WriteProblem(w, http.StatusForbidden, "forbidden", fmt.Sprintf("missing %s at %s", read.Name, at), audit.RequestIDFrom(ctx))
 			return
 		}
-		if chain, err = h.scopeChain(ctx, at); err != nil {
+		if chain, err = h.engine.ScopeChain(ctx, at); err != nil {
 			writeStoreErr(w, r, err)
 			return
 		}
 	}
 	out := []assignmentView{}
+	readable := map[resource.Scope]bool{} // one decision per distinct scope
 	for _, a := range all {
 		p := a.Spec.Principal
 		if (q.Has("principalType") && string(p.Type) != q.Get("principalType")) || (q.Has("principalId") && p.ID != q.Get("principalId")) {
@@ -220,32 +219,20 @@ func (h *AuthorizationHandler) listAssignments(w http.ResponseWriter, r *http.Re
 			out = append(out, assignmentView{RoleAssignment: a, Inherited: i > 0})
 			continue
 		}
-		ok, err := allowedAt(ctx, read, a.Spec.Scope)
-		if err != nil {
-			writeStoreErr(w, r, err)
-			return
+		ok, seen := readable[a.Spec.Scope]
+		if !seen {
+			var err error
+			if ok, err = allowedAt(ctx, read, a.Spec.Scope); err != nil {
+				writeStoreErr(w, r, err)
+				return
+			}
+			readable[a.Spec.Scope] = ok
 		}
 		if ok {
 			out = append(out, assignmentView{RoleAssignment: a})
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-// scopeChain is at, its ancestors nearest first, then "/".
-func (h *AuthorizationHandler) scopeChain(ctx context.Context, at resource.Scope) ([]resource.Scope, error) {
-	chain := []resource.Scope{at}
-	if !at.IsRoot() {
-		up, err := h.ancestors(ctx, graph.ResourceRef{Kind: at.Kind, ID: at.ID})
-		if err != nil {
-			return nil, err
-		}
-		for _, u := range up {
-			chain = append(chain, resource.Scope{Kind: u.Kind, ID: u.ID})
-		}
-		chain = append(chain, resource.RootScope)
-	}
-	return chain, nil
 }
 
 func (h *AuthorizationHandler) getAssignment(w http.ResponseWriter, r *http.Request) {
@@ -440,6 +427,11 @@ func (h *AuthorizationHandler) refuse(w http.ResponseWriter, r *http.Request, id
 	ctx := r.Context()
 	switch {
 	case errors.Is(err, policy.ErrLastOwner):
+		// A state refusal, not a missing permission, but an attempt to
+		// remove the last Owner is worth a row all the same.
+		if aerr := h.recordDenied(ctx, resource.KindRoleAssignment, id, "deny: "+err.Error()); aerr != nil {
+			log.Printf("api: audit a refused role assignment change (request %s): %v", audit.RequestIDFrom(ctx), aerr)
+		}
 		conflict(w, r, err.Error())
 	case errors.Is(err, policy.ErrForbidden):
 		if aerr := h.recordDenied(ctx, resource.KindRoleAssignment, id, "deny: "+err.Error()); aerr != nil {
@@ -455,7 +447,16 @@ func conflict(w http.ResponseWriter, r *http.Request, detail string) {
 	WriteProblem(w, http.StatusConflict, "conflict", detail, audit.RequestIDFrom(r.Context()))
 }
 
+// writeStoreErr maps an error to its problem response. A server-side
+// failure is logged and answered generically: its text can carry store or
+// policy internals.
 func writeStoreErr(w http.ResponseWriter, r *http.Request, err error) {
 	status, title := MapStoreError(err)
-	WriteProblem(w, status, title, err.Error(), audit.RequestIDFrom(r.Context()))
+	reqID := audit.RequestIDFrom(r.Context())
+	if status >= http.StatusInternalServerError {
+		log.Printf("api: %s %s failed (request %s): %v", r.Method, r.URL.Path, reqID, err)
+		WriteProblem(w, status, title, "the request couldn't be completed; retry later, quoting the request ID", reqID)
+		return
+	}
+	WriteProblem(w, status, title, err.Error(), reqID)
 }

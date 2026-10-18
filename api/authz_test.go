@@ -523,3 +523,79 @@ func TestAuthz_RemovedAPIKeysLoseTheirAssignments(t *testing.T) {
 		t.Errorf("with a person Owner: %v, want none", got)
 	}
 }
+
+// A Secret can't alias another Secret's value by naming the same path: the
+// security review's finding (spec 017 T011). Mallory, Secrets Officer on
+// her own application only, creates a Secret with the victim's path; its
+// value is her own, empty one, and deleting it leaves the victim's intact.
+func TestAuthz_SecretPathsDontAliasAcrossScopes(t *testing.T) {
+	w := newAuthzWorld(t, func(w *authzWorld) {
+		w.grant("tok-owner", policy.SecretsOfficerRoleID, "/")
+		w.grant("tok-mixed", policy.SecretsOfficerRoleID, "devapp")
+		w.grant("tok-contrib", policy.ContributorRoleID, "devapp")
+	})
+	victim := "/v1/secrets/" + w.id["secret"]
+	w.expect("tok-owner", "POST", victim+"/value", map[string]any{"data": map[string]any{"password": "victim-value"}}, http.StatusOK)
+	// The victim Secret's path, from the fixture.
+	st := w.do("tok-owner", "GET", victim, nil)
+	var sec resource.Secret
+	if err := json.Unmarshal(st.Body.Bytes(), &sec); err != nil {
+		t.Fatal(err)
+	}
+	alias := map[string]any{"metadata": map[string]any{"name": "alias", "ownerRefs": []resource.OwnerRef{{Kind: resource.KindApplication, ID: w.id["devapp"]}}},
+		"spec": map[string]any{"path": sec.Spec.Path}}
+	got := w.do("tok-mixed", "POST", "/v1/secrets", alias)
+	if got.Code != http.StatusCreated {
+		t.Fatalf("create alias: %d %s", got.Code, got.Body)
+	}
+	var created resource.Secret
+	_ = json.Unmarshal(got.Body.Bytes(), &created)
+	read := w.do("tok-mixed", "GET", "/v1/secrets/"+created.Metadata.ID+"/value", nil)
+	if strings.Contains(read.Body.String(), "victim-value") {
+		t.Fatalf("the alias read the victim's value: %s", read.Body)
+	}
+	w.expect("tok-mixed", "POST", "/v1/secrets/"+created.Metadata.ID+"/value", map[string]any{"data": map[string]any{"password": "overwritten"}}, http.StatusOK)
+	// A Contributor creating and deleting an alias destroys nothing either.
+	got = w.do("tok-contrib", "POST", "/v1/secrets", map[string]any{"metadata": map[string]any{"name": "alias2", "ownerRefs": []resource.OwnerRef{{Kind: resource.KindApplication, ID: w.id["devapp"]}}},
+		"spec": map[string]any{"path": sec.Spec.Path}})
+	var alias2 resource.Secret
+	_ = json.Unmarshal(got.Body.Bytes(), &alias2)
+	w.expect("tok-contrib", "DELETE", "/v1/secrets/"+alias2.Metadata.ID, nil, http.StatusNoContent)
+
+	// Nor can a chosen ID: "<victim id>/<first path segment>" with the rest
+	// of the path would land on the victim's key if IDs were taken as sent.
+	segs := strings.SplitN(sec.Spec.Path, "/", 2)
+	forged := map[string]any{"metadata": map[string]any{"id": w.id["secret"] + "/" + segs[0], "name": "forged",
+		"ownerRefs": []resource.OwnerRef{{Kind: resource.KindApplication, ID: w.id["devapp"]}}}, "spec": map[string]any{"path": segs[len(segs)-1]}}
+	got = w.do("tok-mixed", "POST", "/v1/secrets", forged)
+	var f resource.Secret
+	_ = json.Unmarshal(got.Body.Bytes(), &f)
+	if got.Code == http.StatusCreated && strings.Contains(f.Metadata.ID, "/") {
+		t.Fatalf("a client-chosen ID was kept: %q", f.Metadata.ID)
+	}
+	if got.Code == http.StatusCreated {
+		if r := w.do("tok-mixed", "GET", "/v1/secrets/"+f.Metadata.ID+"/value", nil); strings.Contains(r.Body.String(), "victim-value") {
+			t.Fatalf("a forged ID read the victim's value")
+		}
+	}
+
+	after := w.do("tok-owner", "GET", victim+"/value", nil)
+	if after.Code != http.StatusOK || !strings.Contains(after.Body.String(), "victim-value") {
+		t.Errorf("the victim's value after the aliases: %d %s", after.Code, after.Body)
+	}
+}
+
+func TestAuthz_SecretPathsAreValidatedAndFixed(t *testing.T) {
+	w := newAuthzWorld(t, func(w *authzWorld) { w.grant("tok-owner", policy.OwnerRoleID, "/") })
+	for _, bad := range []string{"", "/abs", "a//b", "a/../b", "./a", "a/b?x", "a#b", "a%2Fb", "a\\b"} {
+		got := w.do("tok-owner", "POST", "/v1/secrets", map[string]any{"metadata": map[string]any{"name": "bad"}, "spec": map[string]any{"path": bad}})
+		if got.Code != http.StatusBadRequest {
+			t.Errorf("path %q: %d, want 400", bad, got.Code)
+		}
+	}
+	full := "/v1/secrets/" + w.id["secret"]
+	cur := w.current(full, "")
+	cur["spec"].(map[string]any)["path"] = "somewhere/else"
+	w.expect("tok-owner", "PUT", full, cur, http.StatusBadRequest)
+	w.put("tok-owner", "/v1/secrets", "secret", "", http.StatusOK) // unchanged path is fine
+}

@@ -165,6 +165,8 @@ func migrateAPIKeys(engine *policy.Engine, db *sql.DB, bus event.Bus, apiKeys ma
 		}
 		log.Printf("api: API key %q had no role assignment; it is now Owner at \"/\" (%s)", actor, apiKeyMigration)
 	}
+	// Belt and braces: the store's events have already marked the index
+	// stale.
 	engine.Invalidate()
 }
 
@@ -244,7 +246,6 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, s
 		assignments:  sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](db, resource.KindRoleAssignment).SetBus(bus),
 		definitions:  sqlite.NewStore[resource.RoleDefinitionSpec, resource.RoleDefinitionStatus](db, resource.KindRoleDefinition).SetBus(bus),
 		principals:   sqlite.NewPrincipalRegistry(db),
-		ancestors:    engine.Ancestors,
 		recordDenied: recordDeniedIn(db),
 		exists: func(ctx context.Context, kind resource.Kind, id string) (bool, error) {
 			return sqlite.ResourceExists(ctx, db, kind, id)

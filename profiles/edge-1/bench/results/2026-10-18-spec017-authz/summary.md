@@ -2,7 +2,8 @@
 
 Targets are from `specs/017-authorization/plan.md` decision 12.
 
-**Verdict: PASS on all three.** The first measurement **failed** the
+**Verdict: PASS on the dev machine and on the simulated T470** (see
+the end). The first measurement **failed** the
 list target, by about 4.4×. The fix is described below, and both runs
 are recorded.
 
@@ -31,8 +32,8 @@ are recorded.
 
 | Request | p50 without → with | p99 without → with | p99 added | Target | Verdict |
 |---|---|---|---|---|---|
-| One Component | 28 → 38 µs | 159–170 → 219–238 µs | ~67 µs | < 100 µs | PASS |
-| 100-item list | 796–841 µs → 1.04–1.09 ms | 2.16–2.30 → 2.62–3.59 ms | ~0.82 ms (median) | < 2 ms | PASS |
+| One Component | 28 → 38 µs | 159–170 → 219–238 µs | 74 µs (medians 163 → 237) | < 100 µs | PASS |
+| 100-item list | 796–841 µs → 1.04–1.09 ms | 2.16–2.30 → 2.62–3.59 ms | 0.72 ms (medians 2.26 → 2.98) | < 2 ms | PASS |
 
 The single-request p99 has less margin than the mean (+12 µs) suggests.
 The tail is mostly GC and scheduler noise on 4 vCPU, so it should be
@@ -58,7 +59,7 @@ samples 5 s apart. Each build was run three times; medians are shown.
 | Spec 017 | 15.8 MiB | 13.4 MiB |
 | **Growth** | **+0.7 MiB** | **+0.6 MiB** |
 
-The target is < 5 MiB: **PASS**. The spec 017 binary also embeds the
+Raw samples: `rss-windows.txt`. The target is < 5 MiB: **PASS**. The spec 017 binary also embeds the
 built console, which the older one served as "not built", so the true
 authorization cost is slightly lower still. The binary grew from 19.1 MB
 to 20.2 MB.
@@ -68,7 +69,8 @@ to 20.2 MB.
 The first version walked a resource's ownership chain with one SQLite
 query per level, for every decision. Its per-request cache only
 remembered whole chains by their starting resource, so 100 sibling
-Components still cost about 500 queries:
+Components still cost about 500 queries. These figures are quoted from
+that run's console output; it wasn't saved to a file:
 
 | Windows, first version | Without | With | Added | Target |
 |---|---|---|---|---|
@@ -90,9 +92,26 @@ The fix is in `core/policy` (`Engine.Ancestors`):
 - **Test:** `TestOwnershipCacheFollowsMoves` checks that moving an
   Application out of a Project takes effect on the next decision.
 
-## Not yet measured
+## Simulated T470 (`bench-simulated-t470.txt`, `../2026-10-18-spec017-simulated-t470/`)
 
-**The simulated-T470 re-run** (plan.md decision 12: "re-measured on the
-simulated T470") needs the kind cluster from `kind-t470-setup.sh`. It's
-planned together with T010's real-cluster verification, which needs the
-same cluster. Until then, the T470 verdict is open.
+Plan decision 12 asks for every target to be re-measured on the
+simulated T470:
+
+- **Per-request and list latency.** The same test binary
+  (`GOOS=linux`) ran in a container with the T470 simulation's exact CPU
+  limits (`docker run --cpus 2 --cpuset-cpus 0-3`, the `kindest/node`
+  image). That is what `kind-t470-setup.sh` applies to the kind node.
+  The benchmark needs no cluster. This was added in T011, after the
+  contract review noted that only idle memory had been re-measured on
+  the T470. Results, 3 runs × 3 s, medians:
+
+  | Request | p99 without → with | p99 added | Mean added | Target | Verdict |
+  |---|---|---|---|---|---|
+  | One Component | 159 → 195 µs | 36 µs | ~10 µs | < 100 µs | PASS |
+  | 100-item list | 2.34 → 2.58 ms | 0.24 ms | ~0.21 ms | < 2 ms | PASS |
+
+- **Idle memory:** the T470 footprint run (T010's cluster) had
+  `serendipd` at 36.3 MiB and 0.01% CPU idle, up from 34.5 MiB in spec
+  016: **+1.8 MiB** against the < 5 MiB target, **PASS**. It includes
+  the console's own growth since spec 016. Three polling console tabs ran
+  at 1.32 requests/s with 0 errors.

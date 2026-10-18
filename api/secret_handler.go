@@ -26,10 +26,10 @@ type SecretHandler struct {
 	reconciler *reconcile.SecretReconciler
 }
 
-// NewSecretHandler returns a handler for the Secret kind. The four
-// plain-CRUD routes (Create/Get/List/Update) delegate to an embedded
-// *ResourceHandler -- reuse, not reimplementation, since those really
-// are plain Spec/Status CRUD, nothing provider-specific.
+// NewSecretHandler returns a handler for the Secret kind. Get and List
+// delegate to an embedded *ResourceHandler. Create and Update are its own,
+// to validate the path and keep it fixed (spec 017 T011); Delete is its
+// own, to remove the value too.
 func NewSecretHandler(s store.Store[resource.SecretSpec, resource.SecretStatus], r *reconcile.SecretReconciler) *SecretHandler {
 	return &SecretHandler{
 		ResourceHandler: NewResourceHandler[resource.SecretSpec, resource.SecretStatus](s, "secrets"),
@@ -50,6 +50,56 @@ func (h *SecretHandler) Register(mux Mux) {
 	mux.HandleFunc("DELETE /v1/secrets/{id}", h.Delete)
 	mux.HandleFunc("POST /v1/secrets/{id}/value", h.WriteValue)
 	mux.HandleFunc("GET /v1/secrets/{id}/value", h.ReadValue)
+}
+
+// Create validates the path before storing the Secret.
+func (h *SecretHandler) Create(w http.ResponseWriter, r *http.Request) {
+	var sec resource.Secret
+	if !decodeBody(w, r, &sec) {
+		return
+	}
+	if err := resource.ValidateSecretSpec(sec.Spec); err != nil {
+		h.writeStoreError(w, r, err)
+		return
+	}
+	// The server names a Secret: its ID is part of where its value is
+	// stored, so a client-chosen one could aim at another Secret's value.
+	sec.Metadata.ID = ""
+	created, err := h.store.Create(r.Context(), sec)
+	if err != nil {
+		h.writeStoreError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, created)
+}
+
+// Update validates the path and refuses to change it: the value is stored
+// under the Secret's identity and path, so a new path would orphan it.
+func (h *SecretHandler) Update(w http.ResponseWriter, r *http.Request) {
+	var sec resource.Secret
+	if !decodeBody(w, r, &sec) {
+		return
+	}
+	sec.Metadata.ID = r.PathValue("id")
+	if err := resource.ValidateSecretSpec(sec.Spec); err != nil {
+		h.writeStoreError(w, r, err)
+		return
+	}
+	current, err := h.store.Get(r.Context(), sec.Metadata.ID)
+	if err != nil {
+		h.writeStoreError(w, r, err)
+		return
+	}
+	if current.Spec.Path != sec.Spec.Path {
+		h.writeError(w, r, http.StatusBadRequest, "validation failed", "a Secret's path can't change; create a new Secret instead")
+		return
+	}
+	updated, err := h.store.Update(r.Context(), sec)
+	if err != nil {
+		h.writeStoreError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }
 
 // Delete shadows the embedded ResourceHandler's store-only Delete --

@@ -158,3 +158,16 @@ func TestMetadata_JSONTags_AreLowerCamelCase(t *testing.T) {
 		t.Errorf("round-tripped Metadata = %+v, want Name=acme ID=org-1", roundTripped.Metadata)
 	}
 }
+
+func TestValidate_IDs(t *testing.T) {
+	for _, id := range []string{"", "01a14e12-3c40-7364-8548-db0d1f8e9918", "node-1", "a.b_c:d"} {
+		if err := resource.Validate(resource.Metadata{Name: "x", ID: id}); err != nil {
+			t.Errorf("ID %q: %v", id, err)
+		}
+	}
+	for _, id := range []string{"a/b", ".", "..", "a b", "a%2F", "a?b", strings.Repeat("a", 129)} {
+		if err := resource.Validate(resource.Metadata{Name: "x", ID: id}); !errors.Is(err, resource.ErrValidation) {
+			t.Errorf("ID %q: err = %v, want ErrValidation", id, err)
+		}
+	}
+}
