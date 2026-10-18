@@ -13,9 +13,9 @@ Last updated: 2026-10-18
 
 ## Current phase
 
-**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T005
-done and committed; next is T006** (the authorization endpoints: role
-definitions, role assignments, permissions). Plan, decisions and
+**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T006
+done and committed; next is T007** (bootstrap administrator, removed-key
+cleanup, break-glass). Plan, decisions and
 accepted risks: `specs/017-authorization/plan.md`; task status:
 `tasks.md`. Committed so far:
 - `0d82624` T001 spike: ThunderID subjects and groups.
@@ -31,9 +31,11 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
   never had an assignment become Owner at `/`.
   - Reviews caught and we fixed: an unreadable-body bypass, cascade
     deletes and owner removal escaping checks, revoked keys regranted.
-- **For T006:** the assignment handlers must hold
-  `Engine.LockAssignments` across check + write, use
-  `CheckAssign`/`CheckUnassign`, and close AC 2's role-assignment half.
+- `0272efd` T006 `/v1/authorization`: role definitions (custom create
+  and delete), role assignments (list with inherited, create, delete),
+  `permissions?scope=`, `principals` (gated on assigning somewhere).
+  Reviews closed a delegation escalation (decision 10's "no minting wider
+  administrators") and client-chosen IDs.
 - **For T007:** bootstrap administrator (Owner + Secrets Officer at `/`,
   subject `01900000-0000-7000-8000-000000000030`), removed-key cleanup,
   `serendipd break-glass grant-owner`. API-key migration already landed
