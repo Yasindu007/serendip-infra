@@ -163,7 +163,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
 - **Verify**: the agent path's added cost is under 100 µs p99 per request,
   and `serendipd` still passes rule 4 (AC 11).
 
-## T011 — Real-cluster verification (primary setup)
+## T011 — Real-cluster verification (primary setup) — DONE 2026-10-18 (AC 1-3 and 5-8 observed with a real Agent Manager token and a real browser; AC 4 waits for the T014 ADR; AC 6 edge cases test-only, with reasons; `verification.md`)
 
 - **Do**:
   - Configure `SERENDIP_AGENT_ISSUERS` with T002's issuer.

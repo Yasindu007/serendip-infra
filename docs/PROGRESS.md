@@ -70,7 +70,16 @@ user's approval.** Key plan decisions:
   (Linux p99 435 against 424 µs; simulated T470 +56 µs). The directory
   takes about 7 ms warm and 39 ms on a new tunnel. Idle memory +0.2 MiB.
   See `profiles/edge-1/bench/results/2026-10-18-spec018-agents/`.
-- Next is T011, the real-cluster run. T011 needs
+- T011 DONE (`specs/018-agent-manager-poc/verification.md`). Every AC
+  except 4, 9 and 10 was observed live: the real agent token, guardrails
+  and audit with sponsor, live groups, directory picker, channel-down
+  fallback, and the console in a real browser. Setup: `serendipd` on
+  :8088 with `SERENDIP_AGENT_ISSUERS`, and the hosts entry
+  `127.0.0.1 default-idp.amp.localhost`, which the user added and can
+  remove after 018.
+- Next is T012: the reuse variant (Agent Manager on our ThunderID and
+  OpenChoreo, community-modules PR #679) on a throwaway cluster, plus a
+  footprint measurement. T011 needs
   the user to add a hosts entry for `default-idp.amp.localhost`, and
   `serendipd` on `:8088` with its console URIs registered by the
   operator tool.
