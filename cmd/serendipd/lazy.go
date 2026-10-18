@@ -49,6 +49,40 @@ func (l *lazyAuthenticator) Authenticate(ctx context.Context, token string) (ide
 	return a.Authenticate(ctx, token)
 }
 
+// lazyDirectory answers reconcile.ErrProviderNotReady until identity setup
+// has handed it the provider's directory, so callers fall back to the
+// principals they have seen sign in (specs/018-agent-manager-poc plan.md
+// decision 5).
+type lazyDirectory struct {
+	lazy[identity.Directory]
+}
+
+var _ identity.Directory = (*lazyDirectory)(nil)
+
+func (l *lazyDirectory) People(ctx context.Context, query string) (identity.DirectoryResult, error) {
+	d, err := l.get()
+	if err != nil {
+		return identity.DirectoryResult{}, err
+	}
+	return d.People(ctx, query)
+}
+
+func (l *lazyDirectory) Groups(ctx context.Context, query string) (identity.DirectoryResult, error) {
+	d, err := l.get()
+	if err != nil {
+		return identity.DirectoryResult{}, err
+	}
+	return d.Groups(ctx, query)
+}
+
+func (l *lazyDirectory) GroupsOf(ctx context.Context, subject string) ([]string, error) {
+	d, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return d.GroupsOf(ctx, subject)
+}
+
 type lazyStorage struct {
 	lazy[reconcile.StorageProvider]
 }

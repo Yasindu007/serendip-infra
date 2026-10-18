@@ -75,7 +75,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
 - **Verify**: `go test -race ./providers/kubernetes/...`; go-reviewer;
   contract-guardian.
 
-## T005 — `identity.Directory` and the ThunderID directory
+## T005 — `identity.Directory` and the ThunderID directory — DONE 2026-10-18 (contract-guardian PASS; go-reviewer findings fixed. Live on kind: "identity directory reachable through the API server's port-forward (2 groups)". `identity.Principal` Kind/Issuer moved to T007, where they're first used)
 
 - **Do**:
   - Add `Kind`, `Issuer` and `Directory` to `core/identity`.

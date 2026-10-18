@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 )
@@ -152,7 +153,7 @@ func UpdateClient(ctx context.Context, baseURL string, hc *http.Client, issuer, 
 }
 
 func ensureClient(ctx context.Context, base string, hc *http.Client, issuer, password, redirectURI, postLogoutURI string) error {
-	token, err := managementToken(ctx, base, hc, issuer, password)
+	token, _, err := managementToken(ctx, base, hc, issuer, password)
 	if err != nil {
 		return err
 	}
@@ -238,12 +239,13 @@ func addURI(cfg map[string]any, key, uri string) bool {
 
 // managementToken logs in as the administrator through the console client,
 // driving the same steps ThunderID's own sign-in page does: authorize, the
-// credentials flow, the flow callback, then the code exchange with PKCE.
-// Errors never include the password, code or token.
-func managementToken(ctx context.Context, base string, hc *http.Client, issuer, password string) (string, error) {
+// credentials flow, the flow callback, then the code exchange with PKCE. It
+// returns the token and how long it lasts (expires_in; zero when the
+// provider doesn't say). Errors never include the password, code or token.
+func managementToken(ctx context.Context, base string, hc *http.Client, issuer, password string) (string, time.Duration, error) {
 	verifier, challenge, err := pkcePair()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	redirect := strings.TrimSuffix(issuer, "/") + "/console"
 	q := url.Values{
@@ -253,27 +255,27 @@ func managementToken(ctx context.Context, base string, hc *http.Client, issuer, 
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/oauth2/authorize?"+q.Encode(), nil)
 	if err != nil {
-		return "", fmt.Errorf("thunderid: management login: %w", err)
+		return "", 0, fmt.Errorf("thunderid: management login: %w", err)
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("thunderid: management login: authorize: %w", err)
+		return "", 0, fmt.Errorf("thunderid: management login: authorize: %w", err)
 	}
 	resp.Body.Close()
 	loc, err := url.Parse(resp.Header.Get("Location"))
 	if resp.StatusCode != http.StatusFound || err != nil {
-		return "", fmt.Errorf("thunderid: management login: authorize: %s", resp.Status)
+		return "", 0, fmt.Errorf("thunderid: management login: authorize: %s", resp.Status)
 	}
 	execID, authID := loc.Query().Get("executionId"), loc.Query().Get("authId")
 	if execID == "" || authID == "" {
-		return "", errors.New("thunderid: management login: authorize did not start a flow")
+		return "", 0, errors.New("thunderid: management login: authorize did not start a flow")
 	}
 
 	var step struct {
 		ChallengeToken string `json:"challengeToken"`
 	}
 	if err := callJSON(ctx, hc, http.MethodPost, base+"/flow/execute", "", map[string]any{"executionId": execID}, &step); err != nil {
-		return "", fmt.Errorf("thunderid: management login: start flow: %w", err)
+		return "", 0, fmt.Errorf("thunderid: management login: start flow: %w", err)
 	}
 	var done struct {
 		Assertion  string `json:"assertion"`
@@ -283,20 +285,20 @@ func managementToken(ctx context.Context, base string, hc *http.Client, issuer, 
 		"executionId": execID, "challengeToken": step.ChallengeToken, "action": credentialsAction,
 		"inputs": map[string]string{"username": AdminUsername, "password": password},
 	}, &done); err != nil {
-		return "", fmt.Errorf("thunderid: management login: credentials: %w", err)
+		return "", 0, fmt.Errorf("thunderid: management login: credentials: %w", err)
 	}
 	if done.Assertion == "" {
-		return "", fmt.Errorf("thunderid: management login: credentials not accepted (flow status %q)", done.FlowStatus)
+		return "", 0, fmt.Errorf("thunderid: management login: credentials not accepted (flow status %q)", done.FlowStatus)
 	}
 	var cb struct {
 		RedirectURI string `json:"redirect_uri"`
 	}
 	if err := callJSON(ctx, hc, http.MethodPost, base+"/oauth2/auth/callback", "", map[string]string{"assertion": done.Assertion, "authId": authID}, &cb); err != nil {
-		return "", fmt.Errorf("thunderid: management login: callback: %w", err)
+		return "", 0, fmt.Errorf("thunderid: management login: callback: %w", err)
 	}
 	back, err := url.Parse(cb.RedirectURI)
 	if err != nil || back.Query().Get("code") == "" {
-		return "", errors.New("thunderid: management login: no authorization code")
+		return "", 0, errors.New("thunderid: management login: no authorization code")
 	}
 
 	form := url.Values{
@@ -305,22 +307,32 @@ func managementToken(ctx context.Context, base string, hc *http.Client, issuer, 
 	}
 	treq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/oauth2/token", strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", fmt.Errorf("thunderid: management login: %w", err)
+		return "", 0, fmt.Errorf("thunderid: management login: %w", err)
 	}
 	treq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	tresp, err := hc.Do(treq)
 	if err != nil {
-		return "", fmt.Errorf("thunderid: management login: token: %w", err)
+		return "", 0, fmt.Errorf("thunderid: management login: token: %w", err)
 	}
 	defer tresp.Body.Close()
 	var tok struct {
 		AccessToken string `json:"access_token"`
+		ExpiresIn   int64  `json:"expires_in"`
 	}
 	if tresp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(tresp.Body, maxManagementBody)).Decode(&tok) != nil || tok.AccessToken == "" {
-		return "", fmt.Errorf("thunderid: management login: token: %s", tresp.Status)
+		return "", 0, fmt.Errorf("thunderid: management login: token: %s", tresp.Status)
 	}
-	return tok.AccessToken, nil
+	return tok.AccessToken, time.Duration(tok.ExpiresIn) * time.Second, nil
 }
+
+// statusError is a non-2xx answer from the management API. It carries the
+// status only, never the body.
+type statusError struct {
+	method, path, status string
+	code                 int
+}
+
+func (e *statusError) Error() string { return fmt.Sprintf("%s %s: %s", e.method, e.path, e.status) }
 
 func pkcePair() (verifier, challenge string, err error) {
 	b := make([]byte, 32)
@@ -361,7 +373,10 @@ func callJSON(ctx context.Context, hc *http.Client, method, target, bearer strin
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("%s %s: %s", method, req.URL.Path, resp.Status)
+		// Drain a little so the connection (a port-forward tunnel, for the
+		// directory) can be reused.
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return &statusError{method: method, path: req.URL.Path, status: resp.Status, code: resp.StatusCode}
 	}
 	if out == nil {
 		return nil

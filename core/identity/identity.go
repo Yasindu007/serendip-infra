@@ -87,3 +87,42 @@ const ActorPrefix = "person:"
 func Actor(p Principal) string {
 	return ActorPrefix + p.Name
 }
+
+// DirectoryEntry is one person or group in the identity provider's
+// directory. For a person, ID is the subject their tokens carry and Name
+// is the name they sign in with. For a group, ID and Name are both the
+// group's name, since that is what tokens list and what role assignments
+// name.
+type DirectoryEntry struct {
+	ID   string
+	Name string
+}
+
+// DirectoryResult is one search's answer. Truncated says the provider
+// holds more than was searched or returned, so a missing entry may still
+// exist.
+type DirectoryResult struct {
+	Items     []DirectoryEntry
+	Truncated bool
+}
+
+// Directory reads the identity provider's people and groups as they are
+// now, rather than as they were when someone last signed in. Every method
+// returns an error wrapping reconcile.ErrProviderNotReady when the
+// provider can't be reached, so callers can fall back to what they already
+// know; such an error may name provider internals, so it is logged, never
+// shown to an API client.
+type Directory interface {
+	// People returns the people whose name, display name or email
+	// contains query, ignoring case; an empty query matches everyone.
+	People(ctx context.Context, query string) (DirectoryResult, error)
+	// Groups returns the groups whose name contains query, ignoring case.
+	Groups(ctx context.Context, query string) (DirectoryResult, error)
+	// GroupsOf returns the names of the groups subject belongs to
+	// directly, or ErrUnknownSubject.
+	GroupsOf(ctx context.Context, subject string) ([]string, error)
+}
+
+// ErrUnknownSubject is returned by Directory.GroupsOf for a subject the
+// provider doesn't hold.
+var ErrUnknownSubject = errors.New("identity: no such subject in the directory")
