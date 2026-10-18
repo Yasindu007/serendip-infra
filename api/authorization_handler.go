@@ -51,17 +51,25 @@ func (h *AuthorizationHandler) Register(mux Mux) {
 }
 
 // roleDefinitionView is a role definition as the API shows it: built-in
-// roles are marked, and can't be changed or deleted.
+// roles are marked, and can't be changed or deleted. AssignableToAgents is
+// policy.AgentMayHold's answer, so clients offer agents only the roles the
+// server will accept, without restating the rule (spec 018).
 type roleDefinitionView struct {
 	resource.RoleDefinition
-	BuiltIn bool `json:"builtIn"`
+	BuiltIn            bool `json:"builtIn"`
+	AssignableToAgents bool `json:"assignableToAgents"`
 }
 
 func builtInView(id string, spec resource.RoleDefinitionSpec) roleDefinitionView {
 	return roleDefinitionView{
-		RoleDefinition: resource.RoleDefinition{Metadata: resource.Metadata{ID: id, Name: spec.RoleName, Kind: resource.KindRoleDefinition}, Spec: spec},
-		BuiltIn:        true,
+		RoleDefinition:     resource.RoleDefinition{Metadata: resource.Metadata{ID: id, Name: spec.RoleName, Kind: resource.KindRoleDefinition}, Spec: spec},
+		BuiltIn:            true,
+		AssignableToAgents: policy.AgentMayHold(spec),
 	}
+}
+
+func customView(d resource.RoleDefinition) roleDefinitionView {
+	return roleDefinitionView{RoleDefinition: d, AssignableToAgents: policy.AgentMayHold(d.Spec)}
 }
 
 func (h *AuthorizationHandler) listDefinitions(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +84,7 @@ func (h *AuthorizationHandler) listDefinitions(w http.ResponseWriter, r *http.Re
 		return
 	}
 	for _, d := range custom {
-		out = append(out, roleDefinitionView{RoleDefinition: d})
+		out = append(out, customView(d))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -92,7 +100,7 @@ func (h *AuthorizationHandler) getDefinition(w http.ResponseWriter, r *http.Requ
 		writeStoreErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, roleDefinitionView{RoleDefinition: d})
+	writeJSON(w, http.StatusOK, customView(d))
 }
 
 func (h *AuthorizationHandler) createDefinition(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +149,7 @@ func (h *AuthorizationHandler) createDefinition(w http.ResponseWriter, r *http.R
 		writeStoreErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, roleDefinitionView{RoleDefinition: created})
+	writeJSON(w, http.StatusCreated, customView(created))
 }
 
 func (h *AuthorizationHandler) deleteDefinition(w http.ResponseWriter, r *http.Request) {

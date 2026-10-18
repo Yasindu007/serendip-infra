@@ -122,7 +122,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
   lifetime over the maximum, missing `iat`, groups ignored.
 - **Verify**: `go test -race ./...`; contract-guardian; go-reviewer.
 
-## T008 — Agent guardrails in `core/policy` and the API
+## T008 — Agent guardrails in `core/policy` and the API — DONE 2026-10-18 (contract-guardian PASS: every route for changing access and every delete route an agent can reach covered; go-reviewer findings fixed: authority checked before the guardrail so no sponsor leaks, `EffectivePermissions` agrees with `Decide` for agents, data-plane deletes count too, and a test pins every DELETE route to a `…/delete` action)
 
 - **Do**:
   - Add `AgentMayHold`.

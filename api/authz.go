@@ -520,7 +520,15 @@ func (a *authorizer) deny(w http.ResponseWriter, r *http.Request, ru rule, c che
 			log.Printf("api: audit a refused %s %s (request %s): %v", r.Method, r.URL.Path, reqID, err)
 		}
 	}
-	WriteProblem(w, http.StatusForbidden, "forbidden", fmt.Sprintf("missing %s at %s", act.Name, target), reqID)
+	switch {
+	case d.Effect == policy.NeedsApproval:
+		writeProblemType(w, ProblemNeedsApproval, http.StatusForbidden, "approval required",
+			fmt.Sprintf("%s at %s needs an approval (%s); approvals aren't available yet, so nothing was changed", act.Name, target, d.Reason), reqID)
+	case d.Reason != "":
+		WriteProblem(w, http.StatusForbidden, "forbidden", fmt.Sprintf("%s at %s: %s", act.Name, target, d.Reason), reqID)
+	default:
+		WriteProblem(w, http.StatusForbidden, "forbidden", fmt.Sprintf("missing %s at %s", act.Name, target), reqID)
+	}
 }
 
 func (a *authorizer) fail(w http.ResponseWriter, r *http.Request, err error) {

@@ -21,9 +21,19 @@ type Problem struct {
 
 // WriteProblem writes an RFC 7807 problem+json response.
 func WriteProblem(w http.ResponseWriter, status int, title, detail, requestID string) {
+	writeProblemType(w, "", status, title, detail, requestID)
+}
+
+// ProblemNeedsApproval is the problem type of a request a role allows but
+// that may only happen through an approval (spec 018: an agent's delete).
+// Clients tell it apart from a plain 403 by this type.
+const ProblemNeedsApproval = "urn:serendip:problem:needs-approval"
+
+func writeProblemType(w http.ResponseWriter, typ string, status int, title, detail, requestID string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(Problem{
+		Type:     typ,
 		Title:    title,
 		Status:   status,
 		Detail:   detail,

@@ -2,10 +2,12 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/policy"
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -102,5 +104,91 @@ func TestAgents_RolesSponsorAndAudit(t *testing.T) {
 	got := w.do("tok-admin", http.MethodGet, authzPath+"principals?type=agent", nil)
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"am-dev/agent-1"`) {
 		t.Errorf("agents in the principal list: %d %s", got.Code, got.Body)
+	}
+}
+
+func TestAgents_Guardrails(t *testing.T) {
+	withAgentTokens(t)
+	w := newAuthzWorld(t, func(w *authzWorld) {
+		grantAgent(t, w, "am-dev/agent-1", policy.ContributorRoleID, "projA", "sub-owner")
+		w.grant("tok-owner", policy.OwnerRoleID, "/")
+	})
+
+	// A delete its role allows needs an approval, and nothing is deleted.
+	got := w.do("tok-agent", http.MethodDelete, "/v1/components/"+w.id["web"], nil)
+	var prob struct {
+		Type, Title, Detail string
+	}
+	_ = json.Unmarshal(got.Body.Bytes(), &prob)
+	if got.Code != http.StatusForbidden || prob.Type != api.ProblemNeedsApproval || !strings.Contains(prob.Detail, "needs an approval") {
+		t.Errorf("agent delete: %d %s", got.Code, got.Body)
+	}
+	w.expect("tok-owner", http.MethodGet, "/v1/components/"+w.id["web"], nil, http.StatusOK)
+	var decision string
+	if err := w.db.QueryRow(`SELECT policy_decision FROM audit_log WHERE actor = 'agent:am-dev/agent-1' AND resource_id = ?`, w.id["web"]).Scan(&decision); err != nil ||
+		!strings.HasPrefix(decision, "needsApproval: serendip/components/delete") {
+		t.Errorf("audited decision = %q (%v)", decision, err)
+	}
+	// A cascade delete is a delete too.
+	got = w.do("tok-agent", http.MethodDelete, "/v1/applications/"+w.id["app"]+"?cascade=true", nil)
+	if got.Code != http.StatusForbidden || !strings.Contains(got.Body.String(), api.ProblemNeedsApproval) {
+		t.Errorf("agent cascade delete: %d %s", got.Code, got.Body)
+	}
+	// A person with the same role just deletes.
+	w.expect("tok-owner", http.MethodDelete, "/v1/components/"+w.id["devweb"], nil, http.StatusNoContent)
+
+	// Access management is refused to agents even if a role allowed it.
+	body := map[string]any{"spec": map[string]any{
+		"principal": map[string]any{"type": "person", "id": "sub-reader"}, "roleDefinitionId": policy.ReaderRoleID,
+		"scope": map[string]any{"kind": "Project", "id": w.id["projA"]},
+	}}
+	got = w.do("tok-agent", http.MethodPost, authzPath+"roleAssignments", body)
+	if got.Code != http.StatusForbidden || !strings.Contains(got.Body.String(), "an agent can't change role assignments or role definitions") {
+		t.Errorf("agent assigning: %d %s", got.Code, got.Body)
+	}
+
+	// Roles that manage access can't be given to an agent, by anyone.
+	agentBody := func(role, sponsor string) map[string]any {
+		return map[string]any{"spec": map[string]any{
+			"principal":        map[string]any{"type": "agent", "id": "am-dev/agent-9", "sponsor": map[string]any{"type": "person", "id": sponsor}},
+			"roleDefinitionId": role, "scope": map[string]any{"kind": "Project", "id": w.id["projA"]},
+		}}
+	}
+	for _, role := range []string{policy.OwnerRoleID, policy.UserAccessAdministratorRoleID, policy.RBACAdministratorRoleID} {
+		w.expect("tok-owner", http.MethodPost, authzPath+"roleAssignments", agentBody(role, "sub-owner"), http.StatusBadRequest)
+	}
+	w.expect("tok-owner", http.MethodPost, authzPath+"roleAssignments", agentBody(policy.ReaderRoleID, "sub-owner"), http.StatusCreated)
+	// ...and every assignment for an agent names the same sponsor.
+	w.expect("tok-owner", http.MethodPost, authzPath+"roleAssignments", agentBody(policy.ContributorRoleID, "sub-reader"), http.StatusBadRequest)
+
+	// The role list says which roles an agent may hold.
+	var defs []struct {
+		Metadata           resource.Metadata `json:"metadata"`
+		AssignableToAgents bool              `json:"assignableToAgents"`
+	}
+	got = w.do("tok-owner", http.MethodGet, authzPath+"roleDefinitions", nil)
+	if err := json.Unmarshal(got.Body.Bytes(), &defs); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range defs {
+		if want := policy.AgentMayHold(policy.BuiltInRoles()[d.Metadata.ID]); d.AssignableToAgents != want {
+			t.Errorf("%s assignableToAgents = %v, want %v", d.Metadata.Name, d.AssignableToAgents, want)
+		}
+	}
+	// A custom role is judged the same way.
+	for name, actions := range map[string][]string{"writer-of-all": {"*/write"}, "restarter": {"serendip/components/read"}} {
+		got = w.do("tok-owner", http.MethodPost, authzPath+"roleDefinitions", map[string]any{"spec": map[string]any{
+			"roleName": name, "assignableScopes": []any{map[string]any{"kind": "Project", "id": w.id["projA"]}},
+			"permissions": []any{map[string]any{"actions": actions}},
+		}})
+		var created struct {
+			AssignableToAgents bool `json:"assignableToAgents"`
+		}
+		if err := json.Unmarshal(got.Body.Bytes(), &created); err != nil || got.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", name, got.Code, got.Body)
+		}
+		if want := name == "restarter"; created.AssignableToAgents != want {
+			t.Errorf("custom role %s assignableToAgents = %v, want %v", name, created.AssignableToAgents, want)
+		}
 	}
 }
