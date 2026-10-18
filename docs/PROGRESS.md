@@ -62,8 +62,14 @@ user's approval.** Key plan decisions:
   that can change access can't be assigned to one. An agent's allowed
   delete gets 403 `urn:serendip:problem:needs-approval` and is audited.
   One sponsor per agent. Role views carry `assignableToAgents`.
-- Next is T009: the console (agent assignments with a sponsor picker and
-  role filter, the directory picker, live groups in Check access).
+- T009 DONE: the console offers Agent as a principal type, with a
+  required sponsor and only `assignableToAgents` roles. The pickers
+  search the live directory, saying when they fall back to sign-ins.
+  Check access reads a person's groups live, says so, and handles 404.
+- Next is T010 (benchmarks), then T011, the real-cluster run. T011 needs
+  the user to add a hosts entry for `default-idp.amp.localhost`, and
+  `serendipd` on `:8088` with its console URIs registered by the
+  operator tool.
 - The scratch kind cluster `serendip-t018` is running, with
   `serendipd` stopped. Agent Manager's k3d `amp-local` is running and
   holds 8080.
