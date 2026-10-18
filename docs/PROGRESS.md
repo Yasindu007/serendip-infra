@@ -38,10 +38,18 @@ user's approval.** Key plan decisions:
   The real token: `sub` = agent ID, `aud` = identifier, 3600 s,
   `grant_type` claim, no groups or owner. Any agent gets a
   Serendip-audience token, so Serendip's assignments alone decide. The
-  owner is `amp-system-client`, so the sponsor lives in Serendip. kind
-  `serendip-t018` is stopped (`docker start serendip-t018-control-plane`).
-  Next is T003. T011 needs `serendipd` on `:8088` (Agent Manager holds
-  8080) and a hosts entry for `default-idp.amp.localhost` (ask the user).
+  owner is `amp-system-client`, so the sponsor lives in Serendip.
+  T011 needs `serendipd` on `:8088` (Agent Manager holds 8080) and a
+  hosts entry for `default-idp.amp.localhost` (ask the user).
+- T003 DONE (`9f5ae68`): the exact-path identity route, verified live.
+- T004 DONE (`535ecfe`): `providers/kubernetes` `DialPod`,
+  `ServiceDialer`, `ReadyPod`, a stdlib WebSocket port-forward. About
+  33 ms per request on kind.
+- Next is T005: `identity.Directory` plus the ThunderID directory over
+  `ServiceDialer`. The admin login is cached; set `IdleConnTimeout`.
+- The scratch kind cluster `serendip-t018` is running, with
+  `serendipd` stopped. Agent Manager's k3d `amp-local` is running and
+  holds 8080.
 
 The notes below are the research behind it.
 (Resolved: the user allowed removing role assignments in the console,
