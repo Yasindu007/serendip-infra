@@ -15,9 +15,25 @@ Last updated: 2026-10-18
 
 **Spec 017 (Authorization, Azure-RBAC style) — COMPLETE** (T001-T012,
 2026-10-18). Model and enforcement: `docs/architecture/authorization.md`,
-ADR 0014. Evidence: `specs/017-authorization/verification.md`. Next is
-spec 018 (WSO2 Agent Manager POC), which must also settle the identity
-provider management channel (the note below).
+ADR 0014. Evidence: `specs/017-authorization/verification.md`.
+
+**Spec 018 (agent identities, WSO2 Agent Manager POC, and the
+identity-provider management channel): spec.md approved and committed
+(`b773818`). plan.md and tasks.md (T001–T014) drafted, awaiting the
+user's approval.** Key plan decisions:
+- The public identity route becomes an exact-path allowlist. Today the
+  `/oauth2` prefix exposes introspect, DCR and auth/callback.
+- The channel is an in-process port-forward (kubelet WebSocket
+  `v4.channel.k8s.io`, stdlib) plus `serendipd`'s own admin login.
+  Delegated mode was rejected.
+- `SERENDIP_AGENT_ISSUERS` with an issuer router; agent groups are
+  ignored.
+- Agents can't hold access-management roles, get needs-approval on
+  delete, and have one sponsor each.
+- T001 confirms port-forward on K3s v1.36.4 (our pin,
+  `agent/bootstrap/install.go`) and kind 1.34.
+
+The notes below are the research behind it.
 (Resolved: the user allowed removing role assignments in the console,
 since RBAC guards it; it's the one written exception to "no delete".) Plan, decisions and
 accepted risks: `specs/017-authorization/plan.md`; task status:
