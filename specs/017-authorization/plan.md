@@ -254,6 +254,35 @@ T001 confirms them empirically before code depends on them.
      which is how an agent can be told apart, and `owner` maps naturally to
      the sponsor.
 
+## Spike findings (T001, 2026-10-18)
+
+**Setup.** A fresh kind cluster with the spec 016 stack. The bootstrap
+`serendip` client's token attributes were `username, email, name, groups`
+(T004's change, made early). A scratch driver ran ThunderID's sign-in flow
+and the management API over a port-forward. It printed claims only, never
+tokens or passwords.
+
+1. **The bootstrap admin's `sub` is fixed:**
+   `01900000-0000-7000-8000-000000000030`. This is a second install
+   showing the same value as spec 015's spike, and it's the literal ID in
+   the bootstrap resources. Decision 7 stands as written.
+2. **Groups arrive in the access token as names, transitively.**
+   - Admin: `["Administrators"]`.
+   - A user in `platform2`, where `eng2` contains `platform2`:
+     `["eng2","platform2"]`.
+   - A user in no group: **no claim at all**, so absent means empty.
+   - **ID tokens never carry `groups`**, even with the attribute in
+     `idToken.userAttributes`. Authorization therefore reads groups from
+     the **access token**, which is what the verifier already checks.
+3. **Groups and members are created through ThunderID's management API**
+   (`POST /groups` with `members` of type `user` or `group`): 201 each
+   time. A later login reflects them.
+4. **Existing installs need no reinstall.** Removing `groups` from the
+   client's attributes through the management API (PUT, 200) dropped the
+   claim on the next login, and adding it back restored it. That confirms
+   the operator tool's approach (decision 9), and that the allow-list the
+   flow reads is the API's `token.accessToken.userConfig.attributes`.
+
 ## Interfaces and types created
 
 - `core/resource`:

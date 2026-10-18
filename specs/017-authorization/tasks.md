@@ -7,7 +7,7 @@ Ordered. `[P]` = parallel-safe within its block, `[A]` = subagent-eligible
 Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 →
 (T008 ∥ T009) → T010 → T011 → T012.
 
-## T001 — Spike: ThunderID subjects and groups on a live install
+## T001 — Spike: ThunderID subjects and groups on a live install — DONE 2026-10-18 (plan.md "Spike findings"; all four confirmed)
 
 - **Do**: On a kind cluster with the spec 016 stack, confirm the upstream
   facts in plan.md empirically:
