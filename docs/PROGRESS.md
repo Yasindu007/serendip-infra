@@ -1224,7 +1224,25 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
 3. **Other candidates:**
    - Secret injection into Components, plus a write-only Secrets screen;
    - an MCP server (the AI side of constitution 7);
-   - disabling Traefik to serve on 80/443 (needs a migration story).
+   - disabling Traefik to serve on 80/443 (needs a migration story);
+   - **Serendip as the only writer of platform objects** (added by the
+     user, 2026-10-18). Kubernetes RBAC gives only `serendipd` write on
+     OpenChoreo's CRs. A built-in `ValidatingAdmissionPolicy` rejects
+     changes by anyone else, so `kubectl` and other tools can't go around
+     Serendip's RBAC, audit and approvals; reconciliation stays the
+     backstop. Small, with no new component. Note that OpenChoreo runs
+     with `security.enabled=false`, so its own API has no auth and must
+     stay cluster-internal.
+   - **A developer portal** (added by the user, 2026-10-18). This is
+     either Backstage as a pure client of Serendip's API (our plugins call
+     `/v1` with the signed-in person's token, never a shared service
+     token), or Backstage-style features built into the Serendip console.
+     Shipping OpenChoreo's Backstage as-is is ruled out: it would bypass
+     Serendip, and OpenChoreo's API has no auth. The risks of using
+     Backstage itself: the npm supply chain against ADR 0012, a confused
+     deputy, its opt-in permissions, the Scaffolder's sandbox and SSRF
+     history, catalog/TechDocs SSRF and XSS, another login surface, and a
+     few hundred MiB (rule 4). It needs an ADR. After spec 019.
 4. **Watch ADR 0006:** no ThunderID release since 2026-08-25. If none
    lands by about 2026-11-15, run the re-check.
 5. **specs 002-016 are still unpushed by deliberate choice** (the user
