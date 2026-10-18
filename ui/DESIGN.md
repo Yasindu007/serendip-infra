@@ -75,6 +75,8 @@ guessed at.
 | `SafeLink` | Links API-supplied URLs only when they are `http(s)`; otherwise plain text. |
 | `ApiEquivalent` | The request a screen sends (method, path, JSON body), never headers or credentials. On every form and detail page. |
 | `TextField` | Label, hint and error tied to one input with `aria-describedby`. |
+| `SelectField` | `TextField` for a fixed set of choices. |
+| `Guarded` | An action the caller may take, or the same action disabled with the reason beneath (spec 017). Disabled while the caller's permissions are still loading, never offered on a guess. |
 | `Banner`, `Notice` | Page-wide and inline notices (warn or danger). |
 | `EmptyState`, `LoadingState`, `ErrorState` | Every screen's non-happy states. `ErrorState` shows the request ID. |
 | `Icon` | Eight Lucide stroke icons, inline SVG, `aria-hidden`. |
@@ -99,7 +101,13 @@ guessed at.
   placeholder statistics. A feature that isn't built is labelled "not
   available yet".
 - **No delete action anywhere** until approval objects exist
-  (constitution 5).
+  (constitution 5). That includes removing a role assignment: the Access
+  control page shows the `DELETE` request instead.
+- **Permission-aware controls** (spec 017): an action the caller can't
+  take is hidden when it creates something, and disabled with a reason
+  (`Guarded`) when it changes something that's on screen. The decision
+  comes from `GET /v1/authorization/permissions`; the server still
+  decides every request.
 - **Monospace for real data only:** image references, IDs, condition
   reasons, API text.
 - **Motion:** only the progress spinner, and none under

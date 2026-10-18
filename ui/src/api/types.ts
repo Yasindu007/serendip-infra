@@ -97,3 +97,61 @@ export interface Problem {
   detail?: string;
   instance?: string;
 }
+
+// Authorization (spec 017): Azure-style roles at scopes.
+
+/** "/" (the zero value: no kind, no id) or one resource. */
+export interface Scope {
+  kind?: string;
+  id?: string;
+}
+
+export interface Permission {
+  actions?: string[];
+  notActions?: string[];
+  dataActions?: string[];
+  notDataActions?: string[];
+}
+
+export interface RoleDefinitionSpec {
+  roleName: string;
+  description?: string;
+  permissions: Permission[];
+  assignableScopes?: Scope[];
+}
+
+/** GET /v1/authorization/roleDefinitions: built-ins are marked. */
+export type RoleDefinition = Resource<RoleDefinitionSpec, BaseStatus> & { builtIn: boolean };
+
+export type PrincipalType = "person" | "group" | "apiKey" | "agent";
+
+export interface PrincipalRef {
+  type: PrincipalType;
+  id: string;
+}
+
+export interface RoleAssignmentSpec {
+  principal: PrincipalRef;
+  roleDefinitionId: string;
+  scope: Scope;
+  description?: string;
+}
+
+/** Listed at a scope, an assignment made higher up is marked inherited. */
+export type RoleAssignment = Resource<RoleAssignmentSpec, BaseStatus> & { inherited?: boolean };
+
+/** GET /v1/authorization/permissions?scope= */
+export interface PermissionsView {
+  scope: string;
+  permissions: Permission[];
+}
+
+/** GET /v1/authorization/principals */
+export interface KnownPrincipal {
+  type: PrincipalType;
+  id: string;
+  displayName?: string;
+  groups?: string[];
+  firstSeen: string;
+  lastSeen: string;
+}

@@ -1,0 +1,322 @@
+import { useState, type FormEvent } from "react";
+import { apiFetch, apiList, ApiError, isShown, NetworkError } from "../api/client";
+import type { KnownPrincipal, PrincipalType, RoleAssignment, RoleDefinition, Scope } from "../api/types";
+import { ApiEquivalent } from "../components/ApiEquivalent";
+import { SelectField, TextField } from "../components/Field";
+import { RequestError } from "../components/RequestError";
+import { PageHeader } from "../components/Shell";
+import { EmptyState, LoadingState, Notice } from "../components/States";
+import { usePermissions } from "../hooks/usePermissions";
+import { usePoll, useNow } from "../hooks/usePoll";
+import { assignRoles, scopeParam } from "../lib/permissions";
+import { FormFailure } from "./Applications";
+import { UpdatedLine } from "./common";
+
+const principalTypes: Array<{ value: PrincipalType; label: string }> = [
+  { value: "person", label: "Person" },
+  { value: "group", label: "Group" },
+  { value: "apiKey", label: "API key" },
+];
+
+const typeLabel = (t: string) => principalTypes.find((p) => p.value === t)?.label ?? t;
+
+/** "the whole platform" or "Project 01a1…": where an assignment applies. */
+export function describeScope(s: Scope): string {
+  return s.kind && s.id ? `${s.kind} ${s.id}` : "the whole platform";
+}
+
+/**
+ * AccessControl is Azure's IAM blade for one scope (spec 017 plan.md
+ * decision 11): who has which role here, including what's inherited from
+ * above and where from; adding an assignment when the caller may; and
+ * checking what a principal can do here.
+ */
+export function AccessControl({ scope, name, crumbs }: { scope: Scope; name?: string; crumbs?: Array<{ label: string; to: string }> }) {
+  const now = useNow();
+  const param = scopeParam(scope);
+  const assignments = usePoll(
+    (s) => apiList<RoleAssignment>(`/v1/authorization/roleAssignments?scope=${encodeURIComponent(param)}`, s),
+    15_000,
+    `assignments-${param}`,
+  );
+  const roles = usePoll((s) => apiList<RoleDefinition>("/v1/authorization/roleDefinitions", s), 60_000, "role-definitions");
+  const access = usePermissions(scope);
+  const canAssign = access.can(assignRoles);
+  // The directory is only for callers who can assign somewhere; others get
+  // 403 and see subjects instead of names.
+  const principals = usePoll((s) => apiList<KnownPrincipal>("/v1/authorization/principals", s), 60_000, "principals");
+
+  const roleName = (id: string) => roles.data?.find((r) => r.metadata.id === id)?.spec.roleName ?? id;
+  const who = (type: string, id: string) => principals.data?.find((p) => p.type === type && p.id === id)?.displayName;
+
+  return (
+    <>
+      <PageHeader {...(crumbs ? { crumbs } : {})} title={`Access control${name ? `: ${name}` : ""}`} meta={<UpdatedLine at={assignments.updatedAt} now={now} />} />
+      <p>
+        Roles assigned here apply to {describeScope(scope)} and everything it owns. Roles assigned higher up apply here too, and a role
+        assigned lower down never takes access away.
+      </p>
+
+      <section className="section" aria-labelledby="ac-assignments">
+        <h2 id="ac-assignments" className="section-title">
+          Role assignments
+        </h2>
+        {assignments.error ? (
+          <RequestError error={assignments.error} what="role assignments" />
+        ) : !assignments.data ? (
+          <LoadingState what="role assignments" />
+        ) : assignments.data.length === 0 ? (
+          <EmptyState title="No role assignments apply here">Only Owners at the whole platform can act here until someone is assigned a role.</EmptyState>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">Principal</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Assigned at</th>
+                  <th scope="col">Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assignments.data.map((a) => {
+                  const p = a.spec.principal;
+                  const display = who(p.type, p.id);
+                  return (
+                    <tr key={a.metadata.id}>
+                      <td>
+                        {display ?? <span className="mono">{p.id}</span>}
+                        {display && (
+                          <>
+                            {" "}
+                            <span className="mono field-hint">{p.id}</span>
+                          </>
+                        )}
+                      </td>
+                      <td>{typeLabel(p.type)}</td>
+                      <td>{roleName(a.spec.roleDefinitionId)}</td>
+                      <td>{a.inherited ? `Inherited from ${describeScope(a.spec.scope)}` : "This scope"}</td>
+                      <td>{a.spec.description ?? ""}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="field-hint">
+          The console doesn't remove access until approval objects exist (constitution 5). An Owner can remove an assignment through the
+          API:
+        </p>
+        <ApiEquivalent request={{ method: "DELETE", path: "/v1/authorization/roleAssignments/{assignment id}" }} />
+      </section>
+
+      <section className="section" aria-labelledby="ac-add">
+        <h2 id="ac-add" className="section-title">
+          Add a role assignment
+        </h2>
+        {canAssign ? (
+          <AddAssignment scope={scope} roles={roles.data ?? []} principals={principals.data ?? []} onAdded={assignments.refresh} />
+        ) : (
+          <p>{canAssign === undefined ? "Checking whether you can assign roles here…" : "Your roles here don't include assigning roles."}</p>
+        )}
+      </section>
+
+      <section className="section" aria-labelledby="ac-check">
+        <h2 id="ac-check" className="section-title">
+          Check access
+        </h2>
+        <CheckAccess assignments={assignments.data ?? []} roles={roles.data ?? []} principals={principals.data ?? []} />
+      </section>
+    </>
+  );
+}
+
+function AddAssignment({ scope, roles, principals, onAdded }: { scope: Scope; roles: RoleDefinition[]; principals: KnownPrincipal[]; onAdded: () => void }) {
+  const [type, setType] = useState<PrincipalType>("person");
+  const [id, setId] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const [description, setDescription] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<ApiError | NetworkError>();
+  const [added, setAdded] = useState<string>();
+
+  const role = roleId || roles[0]?.metadata.id || "";
+  const idError = touched && id.trim() === "" ? "Enter who gets the role." : undefined;
+  const body = {
+    metadata: {},
+    spec: { principal: { type, id: id.trim() }, roleDefinitionId: role, scope, ...(description ? { description } : {}) },
+  };
+  const suggestions = principals.filter((p) => p.type === type);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setTouched(true);
+    if (id.trim() === "" || role === "") return;
+    setBusy(true);
+    setFailure(undefined);
+    setAdded(undefined);
+    try {
+      await apiFetch<RoleAssignment>("POST", "/v1/authorization/roleAssignments", body);
+      setAdded(`${roles.find((r) => r.metadata.id === role)?.spec.roleName ?? "The role"} assigned to ${id.trim()}.`);
+      setId("");
+      setDescription("");
+      setTouched(false);
+      onAdded();
+    } catch (err) {
+      if (isShown(err)) setFailure(err);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <form className="form" onSubmit={submit} noValidate aria-label="Add a role assignment">
+      <SelectField id="ra-type" label="Principal type" value={type} onChange={(e) => setType(e.target.value as PrincipalType)} options={principalTypes} />
+      <TextField
+        id="ra-principal"
+        label={type === "person" ? "Person (subject)" : type === "group" ? "Group name" : "API key name"}
+        hint={
+          type === "person"
+            ? "The person's subject at the identity provider. People who have signed in are suggested."
+            : type === "group"
+              ? "The group's name as the identity provider sends it."
+              : "The key's name in SERENDIP_API_KEYS."
+        }
+        mono
+        list="ra-suggestions"
+        value={id}
+        onChange={(e) => setId(e.target.value)}
+        onBlur={() => setTouched(true)}
+        {...(idError ? { error: idError } : {})}
+        required
+      />
+      <datalist id="ra-suggestions">
+        {suggestions.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.displayName ?? p.id}
+          </option>
+        ))}
+      </datalist>
+      <SelectField
+        id="ra-role"
+        label="Role"
+        value={role}
+        onChange={(e) => setRoleId(e.target.value)}
+        options={roles.map((r) => ({ value: r.metadata.id, label: r.builtIn ? r.spec.roleName : `${r.spec.roleName} (custom)` }))}
+      />
+      <TextField id="ra-description" label="Description" hint="Why they need it. Recorded with the assignment." value={description} onChange={(e) => setDescription(e.target.value)} />
+      {failure && <FormFailure error={failure} />}
+      {added && (
+        <p role="status" className="field-hint">
+          {added}
+        </p>
+      )}
+      <div className="form-actions">
+        <button className="button button--primary" type="submit" disabled={busy || roles.length === 0}>
+          {busy ? "Assigning…" : "Assign role"}
+        </button>
+      </div>
+      <ApiEquivalent request={{ method: "POST", path: "/v1/authorization/roleAssignments", body }} />
+    </form>
+  );
+}
+
+/**
+ * CheckAccess shows what one principal can do here: the assignments that
+ * apply to it, directly or, for a person, through the groups they had at
+ * their last sign-in, and what each role allows.
+ */
+function CheckAccess({ assignments, roles, principals }: { assignments: RoleAssignment[]; roles: RoleDefinition[]; principals: KnownPrincipal[] }) {
+  const [type, setType] = useState<PrincipalType>("person");
+  const [id, setId] = useState("");
+  const [checked, setChecked] = useState<{ type: PrincipalType; id: string }>();
+
+  const groups = checked?.type === "person" ? (principals.find((p) => p.type === "person" && p.id === checked.id)?.groups ?? []) : [];
+  const applying = checked
+    ? assignments.filter((a) => {
+        const p = a.spec.principal;
+        return (p.type === checked.type && p.id === checked.id) || (p.type === "group" && groups.includes(p.id));
+      })
+    : [];
+
+  return (
+    <>
+      <form
+        className="form"
+        aria-label="Check access"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (id.trim()) setChecked({ type, id: id.trim() });
+        }}
+      >
+        <SelectField id="ca-type" label="Principal type" value={type} onChange={(e) => setType(e.target.value as PrincipalType)} options={principalTypes} />
+        <TextField id="ca-principal" label="Principal" mono list="ca-suggestions" value={id} onChange={(e) => setId(e.target.value)} />
+        <datalist id="ca-suggestions">
+          {principals
+            .filter((p) => p.type === type)
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.displayName ?? p.id}
+              </option>
+            ))}
+        </datalist>
+        <div className="form-actions">
+          <button className="button" type="submit">
+            Check access
+          </button>
+        </div>
+      </form>
+      {checked &&
+        (applying.length === 0 ? (
+          <EmptyState title="No access here">
+            No role assignment applies to {checked.id} at this scope{checked.type === "person" ? ", directly or through a group they're known to be in" : ""}.
+          </EmptyState>
+        ) : (
+          <>
+            {checked.type === "person" && (
+              <Notice>
+                Group memberships are as of {checked.id}'s last sign-in{groups.length ? `: ${groups.join(", ")}` : " (none known)"}. Roles add up.
+              </Notice>
+            )}
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Role</th>
+                    <th scope="col">Through</th>
+                    <th scope="col">Assigned at</th>
+                    <th scope="col">Actions</th>
+                    <th scope="col">Data actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {applying.map((a) => {
+                    const role = roles.find((r) => r.metadata.id === a.spec.roleDefinitionId);
+                    const perms = role?.spec.permissions ?? [];
+                    const list = (pick: (p: (typeof perms)[number]) => [string[] | undefined, string[] | undefined]) =>
+                      perms
+                        .flatMap((p) => {
+                          const [yes, no] = pick(p);
+                          return [...(yes ?? []), ...(no ?? []).map((n) => `not ${n}`)];
+                        })
+                        .join(", ") || "None";
+                    return (
+                      <tr key={a.metadata.id}>
+                        <td>{role?.spec.roleName ?? a.spec.roleDefinitionId}</td>
+                        <td>{a.spec.principal.type === "group" && checked.type !== "group" ? `Group ${a.spec.principal.id}` : "Direct"}</td>
+                        <td>{a.inherited ? `Inherited from ${describeScope(a.spec.scope)}` : "This scope"}</td>
+                        <td className="mono">{list((p) => [p.actions, p.notActions])}</td>
+                        <td className="mono">{list((p) => [p.dataActions, p.notDataActions])}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ))}
+    </>
+  );
+}

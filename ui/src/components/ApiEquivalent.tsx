@@ -3,7 +3,7 @@
 // path and JSON body are shown; headers (and so credentials) never are.
 
 export interface ApiRequest {
-  method: "GET" | "POST" | "PUT";
+  method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   body?: unknown;
 }

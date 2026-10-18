@@ -5,6 +5,8 @@ import { PageHeader } from "../components/Shell";
 import { EmptyState, LoadingState } from "../components/States";
 import { StatusText } from "../components/Status";
 import { usePoll, useNow } from "../hooks/usePoll";
+import { accessPath } from "../lib/permissions";
+import { Link } from "../lib/router";
 import { formatAge } from "../lib/time";
 import { nodeCountSentence } from "../lib/topology";
 import { UpdatedLine } from "./common";
@@ -16,7 +18,15 @@ export function Overview() {
 
   return (
     <>
-      <PageHeader title="Overview" meta={<UpdatedLine at={readiness.updatedAt} now={now} />} />
+      <PageHeader
+        title="Overview"
+        actions={
+          <Link className="button" to={accessPath({})}>
+            Access control
+          </Link>
+        }
+        meta={<UpdatedLine at={readiness.updatedAt} now={now} />}
+      />
 
       <section className="section" aria-labelledby="ov-topology">
         <h2 id="ov-topology" className="section-title">

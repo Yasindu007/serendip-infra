@@ -174,7 +174,21 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
   - **break-glass:** writes the assignment with an audit row marked
     `break-glass`, and a running server picks it up within 30 s.
 
-## T008 [P] — Console: Access control, Check access, permission-aware controls
+## T008 [P] — Console: Access control, Check access, permission-aware controls — DONE 2026-10-18
+
+- **Notes (deviations from decision 11, for review):**
+  - **No remove control.** DESIGN.md's checked rule "no delete action
+    anywhere until approval objects exist" covers removing an assignment
+    too, so the page shows the `DELETE` request instead. Whether revoking
+    access counts as "destructive" under constitution 5 is the user's
+    call; the API already supports it.
+  - **A page, not a tab:** `/access?scope=…`, linked from Overview,
+    Application and Component pages. There's no tab component, and a page
+    keeps the existing design system unchanged.
+  - **Check access is computed in the browser** from the assignments at
+    the scope, the role definitions and the person's groups at their last
+    sign-in. The API has no "someone else's effective permissions"
+    endpoint; the page says where group membership comes from.
 
 - **Do**: plan.md decision 11, using only the existing design system.
 - **Files**: `ui/src/{api,screens,components}` and tests.

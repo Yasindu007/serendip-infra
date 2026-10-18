@@ -8,7 +8,9 @@ import { RequestError } from "../components/RequestError";
 import { PageHeader } from "../components/Shell";
 import { EmptyState, LoadingState, Notice } from "../components/States";
 import { ReadyStatus } from "../components/Status";
+import { usePermissions } from "../hooks/usePermissions";
 import { usePoll, useNow } from "../hooks/usePoll";
+import { accessPath, action } from "../lib/permissions";
 import { Link, navigate } from "../lib/router";
 import { formatAge } from "../lib/time";
 import { dnsLabelError, UpdatedLine } from "./common";
@@ -16,14 +18,18 @@ import { dnsLabelError, UpdatedLine } from "./common";
 export function ApplicationList() {
   const now = useNow();
   const apps = usePoll((s) => apiList<Application>("/v1/applications", s), 15_000, "applications");
+  // An application has no owner, so creating one is decided at "/".
+  const canCreate = usePermissions({}).can(action("Application", "write"));
   return (
     <>
       <PageHeader
         title="Applications"
         actions={
-          <Link className="button button--primary" to="/applications/new">
-            Create application
-          </Link>
+          canCreate && (
+            <Link className="button button--primary" to="/applications/new">
+              Create application
+            </Link>
+          )
         }
         meta={<UpdatedLine at={apps.updatedAt} now={now} />}
       />
@@ -144,6 +150,8 @@ export function ApplicationDetail({ id }: { id: string }) {
   const now = useNow();
   const app = usePoll((s) => apiFetch<Application>("GET", `/v1/applications/${encodeURIComponent(id)}`, undefined, s), 5_000, `app-${id}`);
   const comps = usePoll((s) => apiList<Component>(`/v1/components?ownerId=${encodeURIComponent(id)}`, s), 5_000, `app-comps-${id}`);
+  const scope = { kind: "Application", id };
+  const canCreate = usePermissions(scope).can(action("Component", "write"));
 
   if (app.error) return <RequestError error={app.error} what="application" action={<Link to="/applications">Back to applications</Link>} />;
   if (!app.data) return <LoadingState what="the application" />;
@@ -160,9 +168,16 @@ export function ApplicationDetail({ id }: { id: string }) {
           </span>
         }
         actions={
-          <Link className="button button--primary" to={`/applications/${encodeURIComponent(id)}/components/new`}>
-            Create component
-          </Link>
+          <>
+            <Link className="button" to={accessPath(scope)}>
+              Access control
+            </Link>
+            {canCreate && (
+              <Link className="button button--primary" to={`/applications/${encodeURIComponent(id)}/components/new`}>
+                Create component
+              </Link>
+            )}
+          </>
         }
         meta={<UpdatedLine at={app.updatedAt} now={now} />}
       />

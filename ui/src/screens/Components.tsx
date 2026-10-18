@@ -4,13 +4,16 @@ import type { Application, Component } from "../api/types";
 import { ApiEquivalent, type ApiRequest } from "../components/ApiEquivalent";
 import { ConditionsTable, KeyValueList, SafeLink } from "../components/Data";
 import { TextField } from "../components/Field";
+import { Guarded } from "../components/Guarded";
 import { Icon } from "../components/Icon";
 import { ReconciliationPath } from "../components/ReconciliationPath";
 import { RequestError } from "../components/RequestError";
 import { PageHeader } from "../components/Shell";
 import { EmptyState, LoadingState, Notice } from "../components/States";
 import { ReadyStatus } from "../components/Status";
+import { usePermissions } from "../hooks/usePermissions";
 import { usePoll, useNow } from "../hooks/usePoll";
+import { accessPath, action } from "../lib/permissions";
 import { fromSpec, toSpec, validate, type ComponentFormState, type FormErrors } from "../lib/componentForm";
 import { Link, navigate } from "../lib/router";
 import { componentStages, exposedPorts } from "../lib/stages";
@@ -24,6 +27,8 @@ export function ComponentDetail({ appId, id }: { appId: string; id: string }) {
   const now = useNow();
   const comp = usePoll((s) => apiFetch<Component>("GET", `/v1/components/${encodeURIComponent(id)}`, undefined, s), 5_000, `comp-${id}`);
   const app = usePoll((s) => apiFetch<Application>("GET", `/v1/applications/${encodeURIComponent(appId)}`, undefined, s), 5_000, `comp-app-${appId}`);
+  const scope = { kind: "Component", id };
+  const canEdit = usePermissions(scope).can(action("Component", "write"));
 
   if (comp.error) return <RequestError error={comp.error} what="component" action={<Link to={appPath(appId)}>Back to the application</Link>} />;
   if (!comp.data) return <LoadingState what="the component" />;
@@ -54,9 +59,14 @@ export function ComponentDetail({ appId, id }: { appId: string; id: string }) {
                 </span>
               </SafeLink>
             )}
-            <Link className="button button--primary" to={`${compPath(appId, id)}/edit`}>
-              Edit component
+            <Link className="button" to={accessPath(scope)}>
+              Access control
             </Link>
+            <Guarded allowed={canEdit} label="Edit component" reason="Your roles here don't allow changing this component.">
+              <Link className="button button--primary" to={`${compPath(appId, id)}/edit`}>
+                Edit component
+              </Link>
+            </Guarded>
           </>
         }
         meta={<UpdatedLine at={comp.updatedAt} now={now} />}

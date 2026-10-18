@@ -377,6 +377,15 @@
   cursor: not-allowed;
 }
 
+/* Guarded: a disabled action with its reason beneath (spec 017). */
+.guarded {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  max-width: 280px;
+}
+
 .field {
   display: flex;
   flex-direction: column;

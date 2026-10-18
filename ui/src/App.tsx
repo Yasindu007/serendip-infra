@@ -9,6 +9,8 @@ import { match, useLocation } from "./lib/router";
 import { isSingleNode, topologySentence } from "./lib/topology";
 import { ApplicationDetail, ApplicationList, NewApplication } from "./screens/Applications";
 import { ComponentDetail, ComponentForm, NotFound } from "./screens/Components";
+import { parseScopeParam } from "./lib/permissions";
+import { AccessPage } from "./screens/AccessPage";
 import { Overview } from "./screens/Overview";
 import { SignIn } from "./screens/SignIn";
 
@@ -57,7 +59,7 @@ export function App() {
 
   return (
     <SignedIn path={path} actor={session.info.actor} onSignOut={handleSignOut}>
-      <Routes path={path} />
+      <Routes path={path} query={query} />
     </SignedIn>
   );
 }
@@ -72,9 +74,13 @@ function SignedIn({ path, actor, onSignOut, children }: { path: string; actor: s
   );
 }
 
-function Routes({ path }: { path: string }) {
+function Routes({ path, query }: { path: string; query: URLSearchParams }) {
   let p: Record<string, string> | null;
   if (path === "/") return <Overview />;
+  if (path === "/access") {
+    const scope = parseScopeParam(query.get("scope"));
+    return scope ? <AccessPage scope={scope} /> : <NotFound />;
+  }
   if (path === "/applications") return <ApplicationList />;
   if (path === "/applications/new") return <NewApplication />;
   if ((p = match("/applications/:app/components/new", path))) return <ComponentForm appId={p.app!} />;
