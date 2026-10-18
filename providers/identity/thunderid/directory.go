@@ -18,7 +18,8 @@ import (
 
 // The directory reads ThunderID's management API through a port-forward
 // (kubernetes.Client.ServiceDialer), the one channel that keeps the
-// Authorization header (specs/018-agent-manager-poc plan.md decisions 2-4),
+// Authorization header (ADR 0015; specs/018-agent-manager-poc plan.md
+// decisions 2-4),
 // as the bootstrap administrator: serendipd already deploys ThunderID and
 // holds that password, so this adds no privilege. Only reads are made.
 

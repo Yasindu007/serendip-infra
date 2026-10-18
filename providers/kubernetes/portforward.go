@@ -20,8 +20,8 @@ import (
 // (v4.channel.k8s.io), which the API server passes through unchanged. It
 // lets serendipd, running outside the cluster, open a TCP connection to a
 // pod port with every byte intact -- unlike the Service proxy, which
-// strips the Authorization header (specs/018-agent-manager-poc plan.md
-// decision 2 and T001 finding 3).
+// strips the Authorization header (ADR 0015; specs/018-agent-manager-poc
+// plan.md decision 2 and T001 finding 3).
 //
 // Each message is one byte of channel index followed by payload. For the
 // single forwarded port, channel 0 carries data both ways and channel 1

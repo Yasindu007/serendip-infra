@@ -373,8 +373,10 @@ func TestDialPod_ServerMessages(t *testing.T) {
 
 func TestDialPod_CloseSendsCloseFrame(t *testing.T) {
 	gotClose := make(chan bool, 1)
+	// The server sends nothing first: data the client never reads makes
+	// Windows reset the connection on close, which can discard the close
+	// frame before the server reads it.
 	f := &fakeAPI{session: func(p *wsPeer) {
-		p.send(0, preamble(80))
 		op, _ := p.read()
 		gotClose <- op == opClose
 	}}

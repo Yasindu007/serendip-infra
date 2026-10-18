@@ -121,6 +121,31 @@ for example
   the provider assembles the URL from those reported parts (default ports
   omitted); `invokeURL` is used if present.
 
+### The identity provider's route (specs 015 and 018)
+
+The identity provider's login endpoints share the Gateway under their own
+hostname (`identity.<SERENDIP_GATEWAY_HOST>`). The HTTPRoute
+`serendip-identity` (`providers/identity/thunderid/route.go`) is an
+**allowlist**:
+
+- **Exact paths:**
+  - under `/oauth2`: `authorize`, `token`, `jwks`, `userinfo`, `revoke`,
+    `auth/callback` (the sign-in page posts to it), `logout` and
+    `logout/callback`;
+  - `/flow/execute`, `/flow/meta` and `/design/resolve`.
+- **Prefixes:** `/.well-known` (discovery) and `/gate` (the sign-in page).
+
+Spec 018 T001 found that an `/oauth2` prefix had also exposed
+`/oauth2/introspect`, `/oauth2/dcr/register` and `/oauth2/par`, so the
+route matches exact paths since T003. The management API (`/users`,
+`/groups`, `/applications`, …) and ThunderID's admin console were never
+routed, and still aren't.
+
+- **An existing install's route is replaced** on the next foundations
+  pass, because server-side apply owns the rule list.
+- **`serendipd` doesn't use this route** for its own management calls.
+  It uses a port-forward (ADR 0015).
+
 ## Exposing a Component port
 
 `ComponentPort.Expose bool` (default false, so spec 011 Components are

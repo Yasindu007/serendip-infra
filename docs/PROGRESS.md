@@ -9,190 +9,85 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never).
 
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 
 ## Current phase
 
-**Spec 017 (Authorization, Azure-RBAC style) — COMPLETE** (T001-T012,
+**Spec 018 (agent identities, a WSO2 Agent Manager POC, and the
+identity-provider management channel): COMPLETE** (T001–T014,
+2026-10-19). The spec, plan and tasks are in `specs/018-agent-manager-poc/`.
+Evidence: `verification.md` (live run), `findings.md` (POC findings and
+recommendation), and the benches in
+`profiles/edge-1/bench/results/2026-10-18-spec018-agents/` and
+`…/2026-10-19-spec018-reuse/`. ADR 0015 records the channel. The docs are
+`identity.md` (live directory, agent identities), `authorization.md`
+(agent guardrails) and `gateway.md` (exact-path identity route).
+
+What it built:
+- **The public identity route is an exact-path allowlist.** T001 found
+  the `/oauth2` prefix exposed introspect, DCR and PAR.
+- **The management channel** (ADR 0015) is a stdlib in-process
+  port-forward, using the kubelet WebSocket protocol `v4.channel.k8s.io`
+  (`providers/kubernetes`), plus `serendipd`'s own admin login. It's
+  read-only so far.
+  - It feeds `core/identity.Directory`.
+  - The API: `GET /v1/authorization/directory`, and
+    `GET /v1/authorization/principals/person/{id}/groups`, which answers
+    `source: live` or `signedIn` and falls back after 10 s.
+  - The console's pickers and Check access use it live.
+- **Agent issuers:**
+  - configured in `SERENDIP_AGENT_ISSUERS`
+    (`alias=issuer|audience[|maxLifetime]`, fatal if malformed);
+  - `oidc.IssuerRouter` routes by exact `iss`;
+  - agent tokens must carry `grant_type: client_credentials` and `iat`,
+    live at most 1 h by default, and have their groups ignored;
+  - the principal is `agent:<alias>/<sub>`, and `actor_sponsor` is in
+    audit.
+- **Agent guardrails:**
+  - no access-management roles or actions, ever;
+  - an allowed delete gets 403 `urn:serendip:problem:needs-approval`;
+  - one sponsor per agent;
+  - `assignableToAgents` on role views.
+- **The POC:** Agent Manager 1.0.0 runs beside Serendip; its environment
+  ThunderID is the agent issuer. It works end to end with real tokens.
+  - The reuse variant fails PR #679's own preflight 7 times on edge-1, so
+    it's recorded, not built.
+  - Edge-1 uses 1.32 GiB, against Agent Manager's 5.13 GiB.
+  - The recommendation is to keep it beside Serendip, not in edge-1, for
+    now.
+- **Cost:** an agent request costs about the same as a person's (+56 µs
+  p99 on the simulated T470). The directory takes about 7 ms warm.
+  `serendipd` is +0.2 MiB idle and 31.5 MiB on the T470 (rule 4: PASS).
+- **Reviews (T013):** contract-guardian, go-reviewer and
+  /security-review (nothing at confidence 8 or above) passed. One process
+  slip: `ebef37e` was committed before its contract-guardian run, which
+  ran post-hoc and passed.
+
+Leftovers on this machine (scratch only, all reversible):
+- **Stopped containers:** `amp-local` (Agent Manager's k3d) and
+  `serendip-t018` (kind). `docker start` resumes them.
+- **The hosts-file line** `127.0.0.1 default-idp.amp.localhost` was added
+  by the user and can be removed.
+- **Test resources in ThunderID on `serendip-t018`:** the agents
+  `serendip-ext` and `serendip-norole`, and `t011-*` items. They're
+  harmless.
+
+**Spec 017 (Authorization, Azure-RBAC style): COMPLETE** (T001–T012,
 2026-10-18). Model and enforcement: `docs/architecture/authorization.md`,
-ADR 0014. Evidence: `specs/017-authorization/verification.md`.
+ADR 0014. Evidence: `specs/017-authorization/verification.md`. Upgrade
+note from T011: Secret values written before the per-Secret value
+storage fix must be written again.
 
-**Spec 018 (agent identities, WSO2 Agent Manager POC, and the
-identity-provider management channel): spec.md approved and committed
-(`b773818`). plan.md and tasks.md (T001–T014) drafted, awaiting the
-user's approval.** Key plan decisions:
-- The public identity route becomes an exact-path allowlist. Today the
-  `/oauth2` prefix exposes introspect, DCR and auth/callback.
-- The channel is an in-process port-forward (kubelet WebSocket
-  `v4.channel.k8s.io`, stdlib) plus `serendipd`'s own admin login.
-  Delegated mode was rejected.
-- `SERENDIP_AGENT_ISSUERS` with an issuer router; agent groups are
-  ignored.
-- Agents can't hold access-management roles, get needs-approval on
-  delete, and have one sponsor each.
-- T001 DONE: port-forward works on kind 1.34 and K3s v1.36.4 (our pin,
-  `agent/bootstrap/install.go`); findings in plan.md.
-- T002 DONE: an Agent Manager 1.0.0 quick start (k3d `amp-local`, 5.1 GiB
-  at idle) is still running, with agents `serendip-ext` (Reader role on
-  resource server `https://serendip.local/api`) and `serendip-norole`.
-  The real token: `sub` = agent ID, `aud` = identifier, 3600 s,
-  `grant_type` claim, no groups or owner. Any agent gets a
-  Serendip-audience token, so Serendip's assignments alone decide. The
-  owner is `amp-system-client`, so the sponsor lives in Serendip.
-  T011 needs `serendipd` on `:8088` (Agent Manager holds 8080) and a
-  hosts entry for `default-idp.amp.localhost` (ask the user).
-- T003 DONE (`9f5ae68`): the exact-path identity route, verified live.
-- T004 DONE (`535ecfe`): `providers/kubernetes` `DialPod`,
-  `ServiceDialer`, `ReadyPod`, a stdlib WebSocket port-forward. About
-  33 ms per request on kind.
-- T005 DONE (`6633988`): `core/identity.Directory` and the ThunderID
-  directory, read as the admin over the tunnel, with the token cached in
-  memory.
-- T006 DONE (`b9e3c3f`): `GET /v1/authorization/directory` and
-  `.../principals/person/{id}/groups`. `source` is `live` or `signedIn`;
-  verified with ThunderID scaled to 0 and back.
-- T007 DONE (`979ea44`): `SERENDIP_AGENT_ISSUERS`
-  (`alias=issuer|audience[|maxLifetime]`, fatal if malformed),
-  `oidc.IssuerRouter`, agent principals `agent:<alias>/<sub>` with no
-  groups, `grant_type: client_credentials` required, the `actor_sponsor`
-  audit column, and a 503 when the sponsor can't be read. A real Agent
-  Manager token verifies.
-- T008 DONE: agents never manage access, whatever role they hold. Owner,
-  User Access Administrator, RBAC Administrator and any custom role
-  that can change access can't be assigned to one. An agent's allowed
-  delete gets 403 `urn:serendip:problem:needs-approval` and is audited.
-  One sponsor per agent. Role views carry `assignableToAgents`.
-- T009 DONE: the console offers Agent as a principal type, with a
-  required sponsor and only `assignableToAgents` roles. The pickers
-  search the live directory, saying when they fall back to sign-ins.
-  Check access reads a person's groups live, says so, and handles 404.
-- T010 DONE (PASS): an agent request costs the same as a person's
-  (Linux p99 435 against 424 µs; simulated T470 +56 µs). The directory
-  takes about 7 ms warm and 39 ms on a new tunnel. Idle memory +0.2 MiB.
-  See `profiles/edge-1/bench/results/2026-10-18-spec018-agents/`.
-- T011 DONE (`specs/018-agent-manager-poc/verification.md`). Every AC
-  except 4, 9 and 10 was observed live: the real agent token, guardrails
-  and audit with sponsor, live groups, directory picker, channel-down
-  fallback, and the console in a real browser. Setup: `serendipd` on
-  :8088 with `SERENDIP_AGENT_ISSUERS`, and the hosts entry
-  `127.0.0.1 default-idp.amp.localhost`, which the user added and can
-  remove after 018.
-- T012 DONE: PR #679's own read-only preflight fails 7 checks on edge-1.
-  It needs the workflow and observability planes, OpenSearch, a
-  ClusterSecretStore, the `thunder` release name and a ClusterDataPlane
-  gateway, plus OpenChoreo auth on. So it isn't a reuse, and is recorded
-  rather than fixed. Footprint: edge-1 is 1.32 GiB on the simulated T470
-  (every group PASS against spec 017), Agent Manager's quick start
-  5.13 GiB. `specs/018-agent-manager-poc/findings.md` is written. The
-  `amp-local` and `serendip-t018` clusters are stopped (`docker start`
-  to resume).
-- Next are T013 (final reviews: contract-guardian, go-reviewer,
-  /security-review) and T014 (ADR 0015 and the doc updates). T011 needs
-  the user to add a hosts entry for `default-idp.amp.localhost`, and
-  `serendipd` on `:8088` with its console URIs registered by the
-  operator tool.
-- The scratch kind cluster `serendip-t018` is running, with
-  `serendipd` stopped. Agent Manager's k3d `amp-local` is running and
-  holds 8080.
+**Next: spec 019 (Approvals),** drafted earlier in `specs/019-approvals/`
+(uncommitted, on hold until 017 and 018 were done). Rework it on top of
+017's roles and 018's `NeedsApproval`:
+- roles decide, and an approval is the exception;
+- an agent can never approve its own request;
+- every destructive action still produces an Approval object
+  (constitution 5).
 
-The notes below are the research behind it.
-(Resolved: the user allowed removing role assignments in the console,
-since RBAC guards it; it's the one written exception to "no delete".) Plan, decisions and
-accepted risks: `specs/017-authorization/plan.md`; task status:
-`tasks.md`. Committed so far:
-- `0d82624` T001 spike: ThunderID subjects and groups.
-- `43fb525` T002 role definition and assignment resources, scope ancestry.
-- `cf5aeaf` T003 `core/policy`: built-in roles, evaluation (~4 µs per
-  decision), delegation, last-Owner guard, `LockAssignments`.
-- `a0ba669` T004 subject and groups on the principal, audit
-  `actor_subject`, known-principals registry, ThunderID `groups` token
-  attribute (`UpdateClient`, operator tool now optional `--public-url`).
-- `7d96f00` T005 enforcement on every `/v1` route: route table +
-  authorizing mux (panics on an unmapped route), list/graph filtering,
-  403 shape, `policy_decision` and denied-mutation audit, API keys that
-  never had an assignment become Owner at `/`.
-  - Reviews caught and we fixed: an unreadable-body bypass, cascade
-    deletes and owner removal escaping checks, revoked keys regranted.
-- `0272efd` T006 `/v1/authorization`: role definitions (custom create
-  and delete), role assignments (list with inherited, create, delete),
-  `permissions?scope=`, `principals` (gated on assigning somewhere).
-  Reviews closed a delegation escalation (decision 10's "no minting wider
-  administrators") and client-chosen IDs.
-- `9053421` T007 bootstrap administrator (Owner + Secrets Officer at
-  `/`, per role, only if never held; `thunderid.AdminSubject`),
-  removed-key cleanup (keeps the last Owner), `serendipd break-glass
-  grant-owner`. Decision 7's bootstrap condition was amended (plan.md).
-- `40e245a` T008 console: `/access?scope=` page (assignments with
-  inherited labelled, add assignment, Check access), permission-aware
-  controls via `Guarded`; then "Access control (IAM)" laid out like
-  Azure's blade, with confirmed removal of assignments made at the scope.
-- `39b14e4` T009: the first benchmark failed the list target (+8.8 ms);
-  fixed with an ownership cache in `core/policy`. Now +74 µs p99 per
-  request and +0.72 ms per 100-item list (Linux), +0.7 MiB idle.
-  p99 is measured via a `GOOS=linux` test binary run in WSL Ubuntu
-  (no Go install needed there).
-- `5f86a2e`, `8fe7120` T010 on kind `serendip-t017` (simulated T470):
-  every AC observed or explicitly test-only, in
-  `specs/017-authorization/verification.md`; T009's T470 run: serendipd
-  36.3 MiB idle, PASS. Three console polish fixes from the real browser.
-- `1e42bc6` T011 final reviews. `/security-review` found a HIGH issue:
-  Secret path aliasing across scopes. It's fixed with per-Secret value
-  storage (Secret ID + path), path validation, immutable paths,
-  server-chosen Secret IDs, and plain-token IDs for every kind.
-  **Upgrade note:** Secret values written before this must be written
-  again. Also: T470 latency measured (PASS), the last-Owner refusal
-  audited, and 5xx responses no longer carry internal error text.
-- Then T008 console Access control, T009 benchmarks, T010 real cluster,
-  T011 reviews, T012 docs/ADR 0014. After 017: spec 018 (WSO2 Agent
-  Manager POC, beside Serendip, may reuse our ThunderID/OpenChoreo on a
-  throwaway cluster), then 019 approvals (draft in `specs/019-approvals/`,
-  uncommitted, on hold).
-- **Added to spec 018's scope (user, 2026-10-18): live identity-provider
-  lookups.** Today `serendipd` can't call ThunderID's management API
-  (the Service proxy strips `Authorization`), so Check access shows a
-  person's groups as of their last sign-in, the principal picker only
-  knows people who have signed in, and console URIs on an existing
-  install need the operator tool (spec 016's option B). 018 decides how
-  `serendipd` reaches the management API, since the Agent Manager POC
-  needs it too:
-  - option A: an in-process port-forward tunnel;
-  - a small in-cluster helper holding the admin credential;
-  - a cluster-internal route;
-  - Azure's pattern: act as the signed-in person. `serendipd` calls the
-    management API with a token issued to that admin for the management
-    scope, rather than holding a standing admin credential (as the Azure
-    portal calls Microsoft Graph as you).
-  It weighs privilege, code size and dependencies (rule 4 / ADR). It
-  should be settled once as the channel for every later
-  identity-provider feature (agent identities, Serendip-managed groups,
-  automatic console URIs, credential cleanup), so none of them stays
-  manual. Only ThunderID's management API has this problem: OpenBao's
-  header passes the proxy, and the rest is driven through the
-  Kubernetes API.
-- **Research for that decision (oss-researcher, 2026-10-18; ThunderID
-  1.0.1, from source and issues, not yet tested on a cluster):**
-  - **Delegated mode is likely feasible.** Nothing restricts `system`
-    scope to ThunderID's own CONSOLE client. `serendip` asking for
-    `scope=openid system` and `resource=https://localhost:8090/mcp` should
-    give an admin a management token from their own roles. Refresh
-    re-evaluates roles, and token exchange can only narrow. *Spike it
-    first.*
-  - **Workload identity is mechanically feasible but all-or-nothing.** A
-    confidential `client_credentials` app with a role granting `system`
-    works (there's a precedent in openndx PR #633). But 1.0.1 has only the
-    one coarse `system` permission, so a "narrow" machine identity would
-    really be a full-admin secret. Finer permissions exist in code
-    (`system:user:view`, …) but aren't grantable yet.
-  - **Connection: the management API shares ThunderID's one port with
-    OIDC.** So the public Gateway route (which keeps `Authorization`)
-    already reaches it, and a separate tunnel isn't needed. **That also
-    means the management API is publicly reachable today**, protected
-    only by its bearer-token check. 018 should restrict the public route
-    to the login paths (`/oauth2`, `/.well-known`, `/flow`, `/auth`,
-    `/console`) and give management a restricted route.
-  - **Decided (user, 2026-10-18):** the Gateway restriction is folded
-    into spec 018, not done sooner. In 018, do it before or together
-    with any feature that relies on the management channel.
+The user's direction is in memory (`authorization_model_direction`).
+Other candidates are in "Next up" below.
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
 PR #24.** Specs 002-016 are committed locally only — decided explicitly

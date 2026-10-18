@@ -83,5 +83,6 @@ are in `specs/017-authorization/plan.md`.
 - **Deferred:** deny assignments, ABAC conditions and PIM (eligible,
   time-bound roles) are out of scope. PIM-style elevation belongs with
   approvals (spec 019).
-- **Live directory lookups**, such as someone's current groups, wait for
-  spec 018's decision on reaching the identity provider's management API.
+- **Live directory lookups**, such as someone's current groups, were
+  deferred to spec 018, which added them for the pickers and Check access
+  (ADR 0015). Evaluation still reads groups from the token.

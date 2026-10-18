@@ -419,8 +419,8 @@ func Allows(perms []resource.Permission, a Action) bool {
 	return false
 }
 
-// CheckAssign decides whether caller may create assignment spec (plan.md
-// decision 10). The caller needs roleAssignments/write at the assignment's
+// CheckAssign decides whether caller may create assignment spec
+// (specs/017-authorization plan.md decision 10). The caller needs roleAssignments/write at the assignment's
 // scope. If every assignment granting that carries a delegation, the role
 // and principal type must be on one of those delegations' allow-lists, and
 // the caller may not assign to themselves. The role must exist and, for a

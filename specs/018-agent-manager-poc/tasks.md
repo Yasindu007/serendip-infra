@@ -189,14 +189,14 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
 - **Verify**: AC 9 holds: it works with measured numbers, or the report
   records exactly why it doesn't.
 
-## T013 — Final reviews — DONE 2026-10-19 (contract-guardian PASS; /security-review on 44fc021..HEAD found nothing at confidence 8 or above; go-reviewer had no blockers, and these are fixed: bodies drained so tunnels are reused, a 10 s directory deadline that falls back to sign-ins, short quoted API-server errors on the port-forward paths, wrapped pod-list errors, one issuer comparison helper, `AuthMiddleware` documented as having no sponsor lookup, and a seam test from a real signed agent token through the router, middleware, policy and audit. Left as is: fallback log volume when not ready, frame-copy allocations, warm-up goroutine contexts)
+## T013 — Final reviews — DONE 2026-10-19 (contract-guardian PASS on the spec as a whole; the follow-up fix commit `ebef37e` was committed before its contract-guardian run, which then ran post-hoc and passed, and also found a flaky close-frame test, fixed in T014; /security-review on 44fc021..HEAD found nothing at confidence 8 or above; go-reviewer had no blockers, and these are fixed: bodies drained so tunnels are reused, a 10 s directory deadline that falls back to sign-ins, short quoted API-server errors on the port-forward paths, wrapped pod-list errors, one issuer comparison helper, `AuthMiddleware` documented as having no sponsor lookup, and a seam test from a real signed agent token through the router, middleware, policy and audit. Left as is: fallback log volume when not ready, frame-copy allocations, warm-up goroutine contexts)
 
 - **Do**: contract-guardian over `core/` and `providers/`, go-reviewer
   over the whole diff, and `/security-review`. Fix what they find.
 - **Verify**: all three PASS, or each finding is fixed or accepted in
   plan.md "Risks".
 
-## T014 — Docs [A]
+## T014 — Docs [A] — DONE 2026-10-19 (ADR 0015; identity.md, authorization.md, gateway.md, api/CLAUDE.md; providers/kubernetes/VERSIONS.md (new) and the thunderid VERSIONS.md; findings.md; docs-keeper drift check)
 
 - **Do**:
   - ADR 0015 (the management channel: transport plus credential, the

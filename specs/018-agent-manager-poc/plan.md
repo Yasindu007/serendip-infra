@@ -460,12 +460,22 @@ prints admin passwords, so it stays in the scratchpad.
   - `SponsorOf`.
 - **`core/audit`:** `WithSponsor`, `SponsorFrom`.
 - **`providers/kubernetes`:**
-  - `PortForwardDialer` (a `DialContext` for a pod port), on top of a
-    minimal `wsConn`;
-  - `ReadyPod(ctx, ns, service)`.
+  - `DialPod(ctx, ns, pod, port)` and `ServiceDialer(ns, service, port)`
+    (a `DialContext` for a Service's ready pod), on top of a minimal
+    `wsConn`;
+  - `ReadyPod(ctx, ns, service, port)`, which returns the pod and the
+    container port the Service port targets.
 - **`providers/identity/oidc`:**
-  - `Config.Kind`, `Config.MaxLifetime` and `Config.IgnoreGroups`;
-  - `IssuerRouter`.
+  - `Config.Kind`, `Config.IssuerAlias` and `Config.MaxLifetime`. An
+    agent's groups are always ignored, so there's no separate flag;
+  - `IssuerRouter` (`NewIssuerRouter`);
+  - `ValidIssuerAlias`, `DefaultAgentTokenLifetime` and
+    `MaxAgentTokenLifetime`.
+  - **As built,** also:
+    - `core/identity.AgentID` and `ErrUnknownSubject`;
+    - `api.WithDirectory` and `api.ProblemNeedsApproval`;
+    - `core/policy.ErrAgentGuardrail`;
+    - `cmd/serendipd` `lazyDirectory`.
 - **`providers/identity/thunderid`:** `Directory`, which holds an
   `http.Client` over the dialer plus a cached admin token.
 - **`api`:** the directory and live-groups handlers, the `needs-approval`

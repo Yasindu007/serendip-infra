@@ -185,9 +185,9 @@ The install:
     gateway NodePort) invalidates tokens issued under the old one.
   - `serendipd` fetches keys through the Kubernetes Service proxy, so the
     host doesn't need to resolve `*.localhost`. Browsers do.
-- **Exposed through the shared gateway**: only the login paths (`/oauth2`,
-  `/.well-known`, `/gate`, `/flow/execute`, `/flow/meta`,
-  `/design/resolve`). The admin console, the management APIs, MCP and
+- **Exposed through the shared gateway**: only the login paths, as an
+  allowlist of exact `/oauth2`, `/flow` and `/design` paths plus the
+  `/.well-known` and `/gate` prefixes (`gateway.md`). The admin console, the management APIs, MCP and
   health are not routed.
   - The foundations loop re-creates the route if it's deleted.
 
@@ -311,8 +311,9 @@ cookie would then cross a network in clear.
   once they are.
 - **An install that predates the console, or after changing
   `SERENDIP_PUBLIC_URL`: a one-time step by an operator.** `serendipd`
-  can't make this change itself, because the Kubernetes Service proxy it
-  uses strips the `Authorization` header the management API needs. Until
+  doesn't make this change itself yet. The Service proxy strips the
+  `Authorization` header the management API needs, and spec 018's
+  channel (ADR 0015) is so far used only for reads. Until
   the step is done, the console reports the identity provider as
   unavailable and `serendipd` logs the missing URIs. API keys and bearer
   tokens are unaffected. The steps:
@@ -336,7 +337,8 @@ cookie would then cross a network in clear.
   - Within one re-ensure interval, `serendipd` logs `console login
     enabled`.
 
-  An automatic version (an in-process tunnel) is deferred to the HTTPS
+  Since spec 018, `serendipd` has a channel that could make this change
+  itself (ADR 0015). Using it for the console URIs is left to the HTTPS
   spec, which changes the public URL anyway.
 
 ### Limits
@@ -371,13 +373,104 @@ subject (`actor_subject`).
 - **Known principals.** `serendipd` records each person and API key that
   authenticates, and each of a person's groups, at most once a minute per
   unchanged principal. This is what the console offers when assigning a
-  role, and what Check access uses for someone else's groups.
-  - It's a snapshot from sign-ins, not a live directory: the management
-    API isn't reachable through the Kubernetes Service proxy (spec 016),
-    and spec 018 decides how `serendipd` reaches it.
+  role, and the fallback for Check access when the live directory can't be
+  read.
+  - It's a snapshot from sign-ins. Since spec 018, the live directory
+    below is asked first, and this snapshot is the fallback.
 - **The bootstrap administrator's subject** is ThunderID's fixed
   bootstrap user ID (`thunderid.AdminSubject`), made Owner and Secrets
   Officer at `/` on first start.
+
+## The live directory (spec 018)
+
+`core/identity.Directory` reads the identity provider's people and groups
+as they are now. Its three methods:
+- `People(query)`;
+- `Groups(query)`;
+- `GroupsOf(subject)`, a person's direct groups.
+
+It answers `reconcile.ErrProviderNotReady` when it can't, and
+`ErrUnknownSubject` for someone the provider doesn't hold.
+
+- **How `serendipd` reaches ThunderID** (ADR 0015):
+  - through a port-forward over the Kubernetes API
+    (`providers/kubernetes` `ServiceDialer`, the kubelet's
+    `v4.channel.k8s.io` WebSocket protocol), which keeps the
+    `Authorization` header the Service proxy strips;
+  - logged in as the bootstrap administrator. The password is read from
+    its Secret per login and the token is kept in memory only.
+  - Only reads are made.
+- **Search:** ThunderID 1.0.1 filters by exact match only. So a search
+  pages through at most 1,000 entries and returns at most 50 substring
+  matches, with `truncated` set when it stopped early.
+  - A person's entry uses ThunderID's user `id`, which is the token `sub`.
+    It doesn't use `attributes.sub`, which holds the username.
+- **The API:**
+  - `GET /v1/authorization/directory?type=person|group&q=` and
+    `GET /v1/authorization/principals/person/{id}/groups`.
+  - Both are gated like `/principals`: the caller must be able to assign
+    roles somewhere.
+  - Each answer carries `source`: `live`, or `signedIn` when the directory
+    couldn't be read within 10 s and the known-principals snapshot
+    answered instead.
+  - A person the provider doesn't hold is a 404.
+  - Errors are logged in short form, never returned, since they can name
+    pod internals.
+- **The console:**
+  - the Person and Group pickers search as you type;
+  - Check access shows a person's live groups, labelled;
+  - both say when they fall back to sign-ins.
+- **Cost** (spec 018 T010):
+  - about 7 ms per read on a warm tunnel;
+  - about 39 ms when a new tunnel opens (idle ones close at 30 s);
+  - about 300 ms for the admin login, which is cached.
+
+## Agent identities (spec 018)
+
+An AI agent has its own identity from a **trusted agent issuer**, an
+OIDC provider other than the human one. The first is WSO2 Agent Manager's
+ThunderID, run beside Serendip (`specs/018-agent-manager-poc/findings.md`).
+
+- **Configuration:** `SERENDIP_AGENT_ISSUERS`, comma-separated
+  `alias=issuer|audience[|maxLifetime]`, for example
+  `am-dev=http://default-idp.amp.localhost:8080|https://serendip.local/api`.
+  - **A malformed entry stops startup.** So do a duplicate alias or
+    issuer, and an issuer that is also the human issuer. The collision is
+    checked again at identity setup, comparing URLs without a trailing
+    slash.
+  - **The alias** is 1–32 characters of a–z, 0–9 and `-`.
+  - **The lifetime** defaults to 1 h and is capped at 24 h.
+  - The issuer's discovery document and keys must be reachable from
+    `serendipd` by name. In the POC on Windows that needed a hosts entry,
+    because Go doesn't resolve `*.localhost` subdomains there.
+- **Routing:** `oidc.IssuerRouter` reads a token's `iss` without trusting
+  it, only to pick the verifier for exactly that issuer. That verifier
+  then checks everything, and no other verifier is ever tried.
+- **Agent tokens must:**
+  - say `grant_type: client_credentials`, so a person's login token from
+    the same issuer is refused;
+  - carry `iat`;
+  - live at most the maximum lifetime, plus 30 s of leeway;
+  - carry the exact audience;
+  - have a printable `sub` of at most 256 bytes.
+
+  Their groups are ignored: group names belong to their issuer.
+- **In the other direction,** the human verifier refuses a
+  `client_credentials` token, because a machine is never a person.
+- **The principal and the audit actor:**
+  - The principal is `agent` with ID `<alias>/<sub>`, so the same `sub`
+    from two issuers is two agents.
+  - The audit actor is `agent:<alias>/<sub>`. API keys may use neither
+    `agent:` nor `person:`.
+  - Every audit row also records the agent's sponsor in `actor_sponsor`.
+    If the sponsor can't be read, the request gets 503 rather than being
+    recorded without one.
+- **What a valid token grants: nothing.** Every agent in the issuer can
+  get a token for Serendip's audience. Only role assignments give access,
+  and agents have their own guardrails (`authorization.md`).
+- **Not done:** on-behalf-of delegation (an agent acting for a person),
+  managing agent issuers through the API, and creating agents from
+  Serendip.
 
 ## Open questions
 

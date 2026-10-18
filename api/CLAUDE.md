@@ -25,10 +25,22 @@
     a client-supplied `metadata.id` is dropped.
   - A 5xx answer never carries internal error text (`writeStoreErr`).
   - The model: `docs/architecture/authorization.md`, ADR 0014.
+  - Agents (spec 018): `core/policy` denies them access management and
+    answers `NeedsApproval` for their deletes. `deny()` turns that into a
+    403 with `ProblemNeedsApproval`, and every DELETE route must check an
+    action ending in `/delete` (`deleteactions_test.go`).
+  - Directory reads (`directory.go`) are gated like `/principals`
+    (`mayListPrincipals`). They read the optional `identity.Directory`
+    (`WithDirectory`) under a 10 s deadline, then fall back to the
+    principal registry with `source: signedIn`. Never put a directory
+    error in a response: it can name pod internals.
 - Actor resolution happens in `AuthMiddleware` (`middleware.go`, spec 015):
   - the static `SERENDIP_API_KEYS` token->actor map first;
   - then the Identity capability's `core/identity.Authenticator`, which
-    yields a `person:<name>` actor.
+    yields a `person:<name>` actor, or, from a trusted agent issuer
+    (spec 018), an `agent:<alias>/<sub>` actor with its sponsor in the
+    audit context (`audit.WithSponsor`; 503 if the sponsor can't be
+    read).
 
   Outcomes: an invalid token gets 401 with a generic message, and
   `reconcile.ErrProviderNotReady` gets 503. A nil authenticator means API

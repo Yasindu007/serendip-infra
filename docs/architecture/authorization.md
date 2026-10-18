@@ -38,7 +38,7 @@ scope            = "/" or one resource; applies to everything that resource owns
 | `person` | the identity provider's subject (`sub`) | OIDC access token, or the console session |
 | `group` | the group's name | the access token's `groups` claim |
 | `apiKey` | the key's actor name | `SERENDIP_API_KEYS` |
-| `agent` | reserved for spec 018 | must carry a person sponsor |
+| `agent` | `<issuer alias>/<sub>` | a token from a trusted agent issuer (spec 018, `identity.md`); must carry a person sponsor |
 
 A person's groups come from **their current access token** at every
 request. A group change applies when their next token is issued (their
@@ -135,6 +135,50 @@ Keeping it fast and current:
   the write, so two concurrent removals can't both pass the last-Owner
   check.
 
+## Agents (spec 018)
+
+Constitution 5 holds AI to more than roles do. For a principal of type
+`agent`, `core/policy` (`agents.go`) adds the following. People and API
+keys are unaffected.
+
+- **Never authority over access.**
+  - **At evaluation:** `Decide` denies an agent `roleAssignments/write`
+    and `/delete`, and `roleDefinitions/write` and `/delete`, whatever
+    its roles say.
+  - **For delegation:** `checkDelegated` refuses an agent caller
+    outright.
+  - **At assignment:** `CheckAssign` refuses to give an agent a role whose
+    permissions grant any of those four actions, wildcards included
+    (`AgentMayHold`). That means Owner, User Access Administrator, RBAC
+    Administrator and such custom roles; the refusal is a 400 "agent
+    guardrail". Agents can hold Contributor, Reader, Secrets Officer and
+    Secrets User.
+  - **Elsewhere:** `GrantedAnywhere` and `EffectivePermissions` agree, so
+    an agent can't read the directory, and the permissions API doesn't
+    claim rights it lacks.
+- **Deletes need an approval.** Any `…/delete` action an agent's roles
+  allow, control or data plane, cascade included, returns `NeedsApproval`.
+  - The API answers 403 with problem type
+    `urn:serendip:problem:needs-approval` and title "approval required",
+    and nothing changes.
+  - The refusal is audited as `needsApproval: <action> at <scope>, allowed
+    by <role> (<assignment>) at <scope>: an agent's delete needs an
+    approval`.
+  - Spec 019 turns it into a real approval request, which an agent can
+    never approve itself.
+  - A test pins every DELETE route to an action ending in `/delete`.
+- **One sponsor per agent.** Every assignment for an agent names the same
+  person sponsor. A different one is refused, after the caller's own
+  authority is checked, so nothing about the agent leaks to a caller who
+  couldn't assign anyway.
+  - The engine indexes sponsors at reload (`SponsorOf`).
+- **No groups.** Agent tokens' group claims are never read, so a group
+  assignment never applies to an agent.
+- **The role view** carries `assignableToAgents`, worked out by
+  `AgentMayHold`, so clients offer only the roles the server accepts.
+- **Measured cost** (spec 018 T010): an agent request costs the same as a
+  person's on Linux, and adds +56 µs p99 on the simulated T470.
+
 ## Audit
 
 Every mutation's audit row carries the subject of the person behind it
@@ -198,6 +242,7 @@ Recorded in `specs/017-authorization/plan.md` Risks:
 - **Re-created resources:** assignments at the scope of a deleted
   resource remain, and a resource re-created with the same ID would
   inherit them.
-- **The identity provider's directory isn't readable live:** Check access
-  and the principal picker work from sign-in snapshots. Spec 018 settles
-  how `serendipd` reaches the identity provider's management API.
+- **Directory reads are for callers who can assign roles somewhere,**
+  even at a single project. Such a caller can read the whole directory,
+  including any person's groups, the same as with `/principals`. Spec 018
+  made the directory live (`identity.md`, ADR 0015).
