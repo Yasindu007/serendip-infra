@@ -227,7 +227,7 @@ describe("access control", () => {
     fireEvent.change(within(form).getByLabelText("Principal"), { target: { value: "ann" } });
     fireEvent.click(within(form).getByRole("button", { name: "Check access" }));
     expect(await screen.findByText("Group platform")).toBeTruthy();
-    expect(screen.getByText(/as of ann's last sign-in: platform/)).toBeTruthy();
+    expect(screen.getByRole("status", { name: "" }).textContent).toMatch(/At their last sign-in \(.+\) they were in platform\./);
     expect(screen.getByText("Direct")).toBeTruthy();
   });
 

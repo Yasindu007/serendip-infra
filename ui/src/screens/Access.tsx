@@ -9,6 +9,7 @@ import { EmptyState, LoadingState, Notice } from "../components/States";
 import { usePermissions } from "../hooks/usePermissions";
 import { usePoll, useNow } from "../hooks/usePoll";
 import { assignRoles, removeRoles, scopeParam } from "../lib/permissions";
+import { formatAge } from "../lib/time";
 import { FormFailure } from "./Applications";
 import { UpdatedLine } from "./common";
 
@@ -376,7 +377,9 @@ function CheckAccess({ assignments, roles, principals }: { assignments: RoleAssi
   const resolved = resolvePrincipal(principals, type, id);
   const who = checked ? (checked.name ?? checked.id) : "";
 
-  const groups = checked?.type === "person" ? (principals.find((p) => p.type === "person" && p.id === checked.id)?.groups ?? []) : [];
+  const now = useNow();
+  const known = checked?.type === "person" ? principals.find((p) => p.type === "person" && p.id === checked.id) : undefined;
+  const groups = known?.groups ?? [];
   const applying = checked
     ? assignments.filter((a) => {
         const p = a.spec.principal;
@@ -404,6 +407,18 @@ function CheckAccess({ assignments, roles, principals }: { assignments: RoleAssi
           </button>
         </div>
       </form>
+      {checked?.type === "person" && (
+        <p className="field-hint" role="status">
+          {known ? (
+            <>
+              Groups come from {who}'s sign-ins. At their last sign-in (<time dateTime={known.lastSeen}>{formatAge(known.lastSeen, now)}</time>) they were
+              in {groups.length ? groups.join(", ") : "no groups"}. A change to their groups shows here after they next sign in.
+            </>
+          ) : (
+            <>{who} hasn't signed in to Serendip yet, so their groups aren't known: only roles assigned to them directly are shown.</>
+          )}
+        </p>
+      )}
       {checked &&
         (applying.length === 0 ? (
           <EmptyState title="No access here">
@@ -411,11 +426,7 @@ function CheckAccess({ assignments, roles, principals }: { assignments: RoleAssi
           </EmptyState>
         ) : (
           <>
-            {checked.type === "person" && (
-              <Notice>
-                Group memberships are as of {who}'s last sign-in{groups.length ? `: ${groups.join(", ")}` : " (none known)"}. Roles add up.
-              </Notice>
-            )}
+            <p>They can do anything any of these roles allows here.</p>
             <div className="table-wrap">
               <table className="table">
                 <thead>
