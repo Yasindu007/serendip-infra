@@ -1,0 +1,38 @@
+Checking the cluster in context 'kind-serendip-t012'. Nothing is changed.
+
+=== OpenChoreo ===
+  OK    OpenChoreo control-plane 1.3.1
+  OK    OpenChoreo data-plane 1.3.1
+  FAIL  OpenChoreo workflow-plane release openchoreo-workflow-plane not found in openchoreo-workflow-plane
+  FAIL  OpenChoreo observability-plane release openchoreo-observability-plane not found in openchoreo-observability-plane
+  FAIL  ThunderID release thunder not found in serendip-identity
+  FAIL  The default ClusterSecretStore is missing
+  FAIL  Module observability-logs-opensearch is not installed
+  FAIL  Module observability-tracing-opensearch is not installed
+
+=== Data plane gateway ===
+  FAIL  The default ClusterDataPlane has no external gateway
+
+=== Agent Manager's namespace default ===
+  WARN  Namespace default is not labelled as an OpenChoreo namespace yet; Step 6 labels it
+  OK    Namespace default holds no other products' components
+
+=== Shared components ===
+  OK    The WSO2 API Platform Gateway Operator is not installed yet
+  OK    Agent Sandbox is not installed yet
+
+=== Resources Agent Manager creates ===
+  OK    None of the resources the charts create exist yet
+  OK    No other workflow uses the build templates Agent Manager ships
+
+=== Environments in default ===
+  OK    No environments yet; Step 6 creates the default environment
+
+=== Shared settings ===
+  WARN  Step 2 enables OpenChoreo's secret API with a control plane upgrade, which restarts the OpenChoreo API
+  WARN  Step 2 points the tracing collector at a merged copy of its configuration and raises tail sampling to 500 spans per second for all traces
+        Later upgrades of observability-tracing-opensearch must keep opentelemetry-collector.configMap.existingName.
+        Thunder's default resource server was not checked: set THUNDER_ADMIN_TOKEN, or OPENCHOREO_SYSTEM_APP_SECRET, to include it.
+
+=== Result ===
+  7 check(s) failed and 3 warning(s). Resolve the failures before installing.

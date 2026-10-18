@@ -176,7 +176,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
 - **Verify**: every AC 1–8 is observed, or explicitly marked test-only
   with the reason.
 
-## T012 — Reuse variant and footprint [A for the measurement write-up]
+## T012 — Reuse variant and footprint [A for the measurement write-up] — DONE 2026-10-19 (AC 9 answered with "exactly why it doesn't": PR #679's own preflight has 7 hard failures on edge-1, so it isn't a reuse; our stack is 1.32 GiB against Agent Manager's 5.13 GiB. Throwaway cluster deleted; `findings.md`, `profiles/edge-1/bench/results/2026-10-19-spec018-reuse/`)
 
 - **Do**:
   - On a fresh throwaway kind cluster with our stack, apply PR #679's

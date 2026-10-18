@@ -77,9 +77,17 @@ user's approval.** Key plan decisions:
   :8088 with `SERENDIP_AGENT_ISSUERS`, and the hosts entry
   `127.0.0.1 default-idp.amp.localhost`, which the user added and can
   remove after 018.
-- Next is T012: the reuse variant (Agent Manager on our ThunderID and
-  OpenChoreo, community-modules PR #679) on a throwaway cluster, plus a
-  footprint measurement. T011 needs
+- T012 DONE: PR #679's own read-only preflight fails 7 checks on edge-1.
+  It needs the workflow and observability planes, OpenSearch, a
+  ClusterSecretStore, the `thunder` release name and a ClusterDataPlane
+  gateway, plus OpenChoreo auth on. So it isn't a reuse, and is recorded
+  rather than fixed. Footprint: edge-1 is 1.32 GiB on the simulated T470
+  (every group PASS against spec 017), Agent Manager's quick start
+  5.13 GiB. `specs/018-agent-manager-poc/findings.md` is written. The
+  `amp-local` and `serendip-t018` clusters are stopped (`docker start`
+  to resume).
+- Next are T013 (final reviews: contract-guardian, go-reviewer,
+  /security-review) and T014 (ADR 0015 and the doc updates). T011 needs
   the user to add a hosts entry for `default-idp.amp.localhost`, and
   `serendipd` on `:8088` with its console URIs registered by the
   operator tool.
