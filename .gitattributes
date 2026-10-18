@@ -1,0 +1,9 @@
+# Line endings: LF everywhere, whatever the machine's core.autocrlf says.
+# Go tooling (gofmt) and the shell scripts require LF; without this, a
+# Windows checkout with autocrlf=true reports every file as modified.
+* text=auto eol=lf
+
+# Binary files are never converted.
+*.png binary
+*.woff binary
+*.woff2 binary
