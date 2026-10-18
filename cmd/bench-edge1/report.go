@@ -109,10 +109,37 @@ type Result struct {
 	PlatformSamples []Sample       `json:"platformSamples"`
 	WorkloadSamples []Sample       `json:"workloadSamples"`
 	Serendipd       ProcessStats   `json:"serendipd"`
-	Rule4           Rule4          `json:"rule4"`
-	Headroom        Headroom       `json:"headroom"`
-	Timings         Timings        `json:"timings"`
-	Findings        []string       `json:"findings,omitempty"`
+	// SerendipdWorkload is serendipd with the light workload deployed and
+	// nobody polling: the baseline for Polling.
+	SerendipdWorkload ProcessStats `json:"serendipdWorkload"`
+	Polling           *Polling     `json:"polling,omitempty"`
+	Rule4             Rule4        `json:"rule4"`
+	Headroom          Headroom     `json:"headroom"`
+	Timings           Timings      `json:"timings"`
+	Findings          []string     `json:"findings,omitempty"`
+}
+
+// Polling is serendipd while simulated web-console tabs poll a Component
+// page (specs/016-ui-mvp T009). Its CPU is judged against the same 5%
+// budget as idle: a few open tabs must not push the control plane past
+// what rule 4 allows when nobody is looking.
+type Polling struct {
+	Clients           int          `json:"clients"`
+	Requests          int64        `json:"requests"`
+	Errors            int64        `json:"errors"`
+	RequestsPerSecond float64      `json:"requestsPerSecond"`
+	Serendipd         ProcessStats `json:"serendipd"`
+	CPUPercent        float64      `json:"cpuPercent"`
+	CPUPass           bool         `json:"cpuPass"`
+	RSSPass           bool         `json:"rssPass"`
+}
+
+func (p *Polling) check(capacityCores float64) {
+	if capacityCores > 0 {
+		p.CPUPercent = p.Serendipd.CPUMillicores.Mean / (capacityCores * 1000) * 100
+	}
+	p.CPUPass = capacityCores > 0 && p.CPUPercent < controlPlaneCPUBudgetPct && p.Errors == 0
+	p.RSSPass = p.Serendipd.RSSMiB.Mean > 0 && p.Serendipd.RSSMiB.Mean < controlPlaneRSSBudgetMiB
 }
 
 func checkRule4(p ProcessStats, capacityCores float64) Rule4 {
@@ -271,6 +298,15 @@ func renderSummary(r Result) string {
 
 	if len(r.WorkloadSamples) > 0 || len(r.Workload.Groups) > 0 {
 		writeGroupTable(&b, fmt.Sprintf("With %d light Components deployed", r.Components), r.Workload)
+	}
+
+	if p := r.Polling; p != nil {
+		fmt.Fprintf(&b, "\n### serendipd with %d web-console tabs polling\n\n", p.Clients)
+		fmt.Fprintf(&b, "%d requests (%.2f/s), %d errors.\n\n| | No tabs | %d tabs |\n|---|---|---|\n| RSS mean (MiB) | %.1f | %.1f |\n| CPU mean (millicores) | %.1f | %.1f |\n\n",
+			p.Requests, p.RequestsPerSecond, p.Errors, p.Clients,
+			r.SerendipdWorkload.RSSMiB.Mean, p.Serendipd.RSSMiB.Mean, r.SerendipdWorkload.CPUMillicores.Mean, p.Serendipd.CPUMillicores.Mean)
+		fmt.Fprintf(&b, "- CPU %.2f%% of %.1f cores (budget < %d%%, no request errors): **%s**\n- RSS %.1f MiB (budget < %d MiB): **%s**\n\n",
+			p.CPUPercent, r.Rule4.CapacityCores, controlPlaneCPUBudgetPct, passFail(p.CPUPass), p.Serendipd.RSSMiB.Mean, controlPlaneRSSBudgetMiB, passFail(p.RSSPass))
 	}
 
 	h := r.Headroom

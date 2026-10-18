@@ -115,12 +115,12 @@ func (consoleAuthn) Authenticate(_ context.Context, token string) (identity.Prin
 	return identity.Principal{}, identity.ErrInvalidCredential
 }
 
-func newConsole(t *testing.T) (http.Handler, *clock, *fakeLogin, *api.Sessions) {
+func newConsole(t testing.TB) (http.Handler, *clock, *fakeLogin, *api.Sessions) {
 	t.Helper()
 	return newConsoleWith(t, consoleAuthn{})
 }
 
-func newConsoleWith(t *testing.T, authn identity.Authenticator) (http.Handler, *clock, *fakeLogin, *api.Sessions) {
+func newConsoleWith(t testing.TB, authn identity.Authenticator) (http.Handler, *clock, *fakeLogin, *api.Sessions) {
 	t.Helper()
 	clk := &clock{t: time.Unix(1_800_000_000, 0)}
 	fl := &fakeLogin{clk: clk}
@@ -164,7 +164,7 @@ func cookieFrom(w *httptest.ResponseRecorder, name string) *http.Cookie {
 }
 
 // startLogin runs /auth/login and returns the state and pre-login cookie.
-func startLogin(t *testing.T, h http.Handler, ret string) (string, *http.Cookie) {
+func startLogin(t testing.TB, h http.Handler, ret string) (string, *http.Cookie) {
 	t.Helper()
 	w := serve(h, req("GET", "/auth/login?return="+url.QueryEscape(ret), nil))
 	if w.Code != http.StatusFound {
@@ -187,7 +187,7 @@ func callback(h http.Handler, state, code string, ck *http.Cookie) *httptest.Res
 }
 
 // signIn performs a whole login and returns the session cookie.
-func signIn(t *testing.T, h http.Handler) *http.Cookie {
+func signIn(t testing.TB, h http.Handler) *http.Cookie {
 	t.Helper()
 	state, ck := startLogin(t, h, "/applications")
 	w := callback(h, state, "c1", ck)

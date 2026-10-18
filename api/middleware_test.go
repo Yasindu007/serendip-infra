@@ -18,7 +18,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
 
-func newTestDB(t *testing.T) *sql.DB {
+func newTestDB(t testing.TB) *sql.DB {
 	t.Helper()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "test.db")

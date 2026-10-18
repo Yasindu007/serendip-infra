@@ -39,7 +39,7 @@ func main() {
 type options struct {
 	serendipd, kubeconfig, out, addr, image string
 	settle, interval                        time.Duration
-	samples, components                     int
+	samples, components, pollClients        int
 	sim                                     Simulation
 	notSimulated                            string
 }
@@ -56,6 +56,7 @@ func parseFlags(args []string) (options, error) {
 	fs.DurationVar(&o.interval, "interval", 10*time.Second, "time between samples")
 	fs.IntVar(&o.samples, "samples", 12, "samples per phase")
 	fs.IntVar(&o.components, "components", 3, "light-workload Components to deploy (exposed through the gateway)")
+	fs.IntVar(&o.pollClients, "poll-clients", 3, "simulated web-console tabs polling a Component page during the polling phase (0 skips it)")
 	fs.Float64Var(&o.sim.CPUs, "sim-cpus", 0, "CPU quota applied to simulate reference hardware (marks the run as a simulation)")
 	fs.StringVar(&o.sim.CPUSet, "sim-cpuset", "", "cpuset applied to simulate reference hardware (marks the run as a simulation)")
 	fs.StringVar(&o.sim.Note, "sim-note", "", "free-text description of the simulation")
@@ -171,6 +172,9 @@ func run(args []string) error {
 		capacity = parseCPUQuantity(node.CPUCap)
 	}
 	res.Rule4 = checkRule4(res.Serendipd, capacity)
+	if res.Polling != nil {
+		res.Polling.check(capacity)
+	}
 	if len(res.WorkloadSamples) > 0 {
 		platformMiB := res.Platform.NodeMemoryMiB.Mean + res.Serendipd.RSSMiB.Mean
 		res.Headroom = headroom(platformMiB, workloadDeltaMiB(res.Platform, res.Workload, o.components))
@@ -218,12 +222,42 @@ func measure(ctx context.Context, o options, cl *cluster, nodeName string, d *da
 	if err := sleep(ctx, o.settle); err != nil {
 		return err
 	}
-	workloadSamples, _, err := samplePhase(ctx, cl, nodeName, d, o.samples, o.interval)
+	workloadSamples, workloadProcs, err := samplePhase(ctx, cl, nodeName, d, o.samples, o.interval)
 	if err != nil {
 		return fmt.Errorf("workload sampling: %w", err)
 	}
 	res.WorkloadSamples = workloadSamples
 	res.Workload = aggregate(workloadSamples)
+	res.SerendipdWorkload = processStatsOf(workloadProcs)
+
+	if o.pollClients <= 0 {
+		return nil
+	}
+	comps, err := a.componentIDs(ctx, id)
+	if err != nil {
+		res.Findings = append(res.Findings, "console polling phase skipped: "+err.Error())
+		return nil
+	}
+	if len(comps) == 0 {
+		res.Findings = append(res.Findings, "console polling phase skipped: no components to poll")
+		return nil
+	}
+	log.Printf("polling: %d console tabs on a Component page", o.pollClients)
+	st, stop := a.startConsoleTabs(ctx, id, comps, o.pollClients)
+	start := time.Now()
+	_, pollProcs, err := samplePhase(ctx, cl, nodeName, d, o.samples, o.interval)
+	stop()
+	elapsed := time.Since(start).Seconds()
+	res.Polling = &Polling{
+		Clients:           o.pollClients,
+		Requests:          st.requests.Load(),
+		Errors:            st.errors.Load(),
+		RequestsPerSecond: float64(st.requests.Load()) / elapsed,
+		Serendipd:         processStatsOf(pollProcs),
+	}
+	if err != nil {
+		return fmt.Errorf("polling sampling: %w", err)
+	}
 	return nil
 }
 

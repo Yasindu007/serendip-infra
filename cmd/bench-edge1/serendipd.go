@@ -258,6 +258,35 @@ func (a api) deployWorkload(ctx context.Context, n int, image string) (string, [
 	return appID, serving, nil
 }
 
+// componentIDs lists the Components owned by appID. List endpoints answer
+// a JSON array, so this doesn't go through do.
+func (a api) componentIDs(ctx context.Context, appID string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.base+"/v1/components?ownerId="+appID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("list components: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list components: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list components: %s", resp.Status)
+	}
+	var list []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return nil, fmt.Errorf("decode components: %w", err)
+	}
+	var ids []string
+	for _, c := range list {
+		if id := idOf(c); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
 func (a api) deleteApplication(ctx context.Context, appID string) error {
 	_, err := a.do(ctx, http.MethodDelete, "/v1/applications/"+appID+"?cascade=true", nil)
 	if err != nil && strings.Contains(err.Error(), " 404 ") {

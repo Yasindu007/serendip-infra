@@ -190,3 +190,41 @@ func TestRule4_NoProcessDataIsNotEvaluatedNotPass(t *testing.T) {
 		t.Errorf("summary should carry the not-computed headroom verdict:\n%s", out)
 	}
 }
+
+func TestPollingCheck(t *testing.T) {
+	cases := []struct {
+		name     string
+		cpuMilli float64
+		rssMiB   float64
+		errors   int64
+		capacity float64
+		cpuPass  bool
+		rssPass  bool
+	}{
+		{"well within", 20, 30, 0, 2, true, true},
+		{"over the CPU budget", 120, 30, 0, 2, false, true},
+		{"errors fail it", 20, 30, 3, 2, false, true},
+		{"unknown capacity is not a pass", 20, 30, 0, 0, false, true},
+		{"no RSS samples is not a pass", 20, 0, 0, 2, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Polling{Errors: tc.errors, Serendipd: ProcessStats{CPUMillicores: Stat{Mean: tc.cpuMilli}, RSSMiB: Stat{Mean: tc.rssMiB}}}
+			p.check(tc.capacity)
+			if p.CPUPass != tc.cpuPass || p.RSSPass != tc.rssPass {
+				t.Errorf("cpuPass=%v rssPass=%v, want %v %v (cpu %.2f%%)", p.CPUPass, p.RSSPass, tc.cpuPass, tc.rssPass, p.CPUPercent)
+			}
+		})
+	}
+}
+
+func TestRenderSummary_Polling(t *testing.T) {
+	r := Result{Polling: &Polling{Clients: 3, Requests: 240, RequestsPerSecond: 0.62, Serendipd: ProcessStats{RSSMiB: Stat{Mean: 31}, CPUMillicores: Stat{Mean: 9}}}}
+	r.Polling.check(2)
+	out := renderSummary(r)
+	for _, want := range []string{"serendipd with 3 web-console tabs polling", "240 requests (0.62/s), 0 errors", "**PASS**"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary lacks %q:\n%s", want, out)
+		}
+	}
+}
