@@ -378,6 +378,8 @@ func callJSON(ctx context.Context, hc *http.Client, method, target, bearer strin
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return &statusError{method: method, path: req.URL.Path, status: resp.Status, code: resp.StatusCode}
 	}
+	// Whatever is decoded, read to the end, so the connection can be reused.
+	defer io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 	if out == nil {
 		return nil
 	}

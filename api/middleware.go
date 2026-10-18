@@ -62,6 +62,9 @@ func RequestIDFromContext(ctx context.Context) string {
 // (specs/002-http-api/spec.md acceptance criterion 3). The detail never
 // says which check a token failed. Everything downstream only ever sees the
 // resolved actor via context, never how it got there.
+//
+// It looks up no agent sponsors: use it for people and API keys. NewServer
+// wires the full middleware, which records an agent's sponsor (spec 018).
 func AuthMiddleware(apiKeys map[string]string, authn identity.Authenticator) func(http.Handler) http.Handler {
 	return authMiddleware(apiKeys, authn, nil, nil, nil)
 }

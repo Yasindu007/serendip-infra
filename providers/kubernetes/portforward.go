@@ -140,11 +140,11 @@ func (c *Client) ReadyPod(ctx context.Context, namespace, service string, port i
 	}
 	resp, err := c.do(ctx, http.MethodGet, "/api/v1/namespaces/"+url.PathEscape(namespace)+"/pods?labelSelector="+url.QueryEscape(strings.Join(sel, ",")), nil)
 	if err != nil {
-		return "", 0, err
+		return "", 0, fmt.Errorf("kubernetes: list pods of %s/%s: %w", namespace, service, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, unexpectedStatus(resp)
+		return "", 0, fmt.Errorf("kubernetes: list pods of %s/%s: %w", namespace, service, briefStatus(resp))
 	}
 	var list struct {
 		Items []podInfo `json:"items"`
@@ -191,6 +191,21 @@ func resolveTargetPort(target json.RawMessage, port int, pod podInfo) (int, erro
 		}
 	}
 	return 0, fmt.Errorf("pod %s has no container port named %q", pod.Metadata.Name, name)
+}
+
+// briefStatus is an API server refusal as a short error: the status and the
+// Status object's message, quoted and cut to 200 bytes. These errors end up
+// in logs, so the rest of the body (RBAC and pod detail) is left out.
+func briefStatus(resp *http.Response) error {
+	var st struct {
+		Message string `json:"message"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&st)
+	msg := st.Message
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	return fmt.Errorf("kubernetes: unexpected status %d: %q", resp.StatusCode, msg)
 }
 
 // forwardConn is one forwarded TCP connection, as a net.Conn.

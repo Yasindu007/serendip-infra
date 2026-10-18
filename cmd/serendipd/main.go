@@ -71,14 +71,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	isAgentIssuer := func(issuer string) bool {
-		for _, a := range agentIssuers {
-			if strings.TrimSuffix(a.issuer, "/") == strings.TrimSuffix(issuer, "/") {
-				return true
-			}
-		}
-		return false
-	}
 
 	db, err := sqlite.Open(ctx, dbPath)
 	if err != nil {
@@ -112,7 +104,8 @@ func run() error {
 	}
 	consoleRoutes := consoleURIs{callback: origin.String() + "/auth/callback", postLogout: origin.String() + "/"}
 
-	kube, err := wireKubernetes(os.Getenv("SERENDIP_KUBECONFIG"), registry, db, bus, engine, consoleRoutes, isAgentIssuer)
+	kube, err := wireKubernetes(os.Getenv("SERENDIP_KUBECONFIG"), registry, db, bus, engine, consoleRoutes,
+		func(issuer string) bool { return isAgentIssuer(agentIssuers, issuer) })
 	if err != nil {
 		return fmt.Errorf("kubernetes: %w", err)
 	}

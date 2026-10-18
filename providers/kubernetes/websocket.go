@@ -152,7 +152,7 @@ func (c *Client) handshake(ctx context.Context, conn net.Conn, base *url.URL, pa
 		if resp.StatusCode == http.StatusNotFound {
 			return nil, fmt.Errorf("kubernetes: websocket: %s: %w", path, ErrNotFound)
 		}
-		return nil, unexpectedStatus(resp)
+		return nil, briefStatus(resp)
 	}
 	sum := sha1.Sum([]byte(key + wsGUID))
 	switch {

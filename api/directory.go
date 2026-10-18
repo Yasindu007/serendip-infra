@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/identity"
@@ -31,6 +33,9 @@ const (
 	// maxDirectoryItems bounds a fallback answer, matching the directory's
 	// own bound.
 	maxDirectoryItems = 50
+	// directoryTimeout bounds one live read (a login and up to ten pages);
+	// past it the answer comes from sign-ins instead.
+	directoryTimeout = 10 * time.Second
 )
 
 // directoryItem is one person or group that can be granted a role; the
@@ -73,7 +78,9 @@ func (h *AuthorizationHandler) searchDirectory(w http.ResponseWriter, r *http.Re
 		if t == resource.PrincipalGroup {
 			search = h.directory.Groups
 		}
-		res, err := search(ctx, q)
+		dctx, cancel := context.WithTimeout(ctx, directoryTimeout)
+		res, err := search(dctx, q)
+		cancel()
 		if err == nil {
 			view := directoryView{Source: sourceLive, Truncated: res.Truncated, Items: make([]directoryItem, 0, min(len(res.Items), maxDirectoryItems))}
 			for _, e := range res.Items {
@@ -122,7 +129,9 @@ func (h *AuthorizationHandler) personGroups(w http.ResponseWriter, r *http.Reque
 	ctx := r.Context()
 	id := r.PathValue("id")
 	if h.directory != nil {
-		groups, err := h.directory.GroupsOf(ctx, id)
+		dctx, cancel := context.WithTimeout(ctx, directoryTimeout)
+		groups, err := h.directory.GroupsOf(dctx, id)
+		cancel()
 		switch {
 		case err == nil:
 			if groups == nil {

@@ -64,15 +64,31 @@ func parseAgentIssuers(raw, humanIssuer string) ([]agentIssuer, error) {
 		switch {
 		case aliases[a.alias]:
 			return nil, fmt.Errorf("SERENDIP_AGENT_ISSUERS: alias %q is used twice", a.alias)
-		case issuers[strings.TrimSuffix(a.issuer, "/")]:
+		case issuers[sameIssuer(a.issuer)]:
 			return nil, fmt.Errorf("SERENDIP_AGENT_ISSUERS: issuer %q is listed twice", a.issuer)
-		case humanIssuer != "" && strings.TrimSuffix(a.issuer, "/") == strings.TrimSuffix(humanIssuer, "/"):
+		case humanIssuer != "" && sameIssuer(a.issuer) == sameIssuer(humanIssuer):
 			return nil, fmt.Errorf("SERENDIP_AGENT_ISSUERS %s: the human identity issuer can't also be an agent issuer", a.alias)
 		}
-		aliases[a.alias], issuers[strings.TrimSuffix(a.issuer, "/")] = true, true
+		aliases[a.alias], issuers[sameIssuer(a.issuer)] = true, true
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+// sameIssuer is the form two issuer URLs are compared in when checking for
+// duplicates and collisions: without a trailing slash, so "x" and "x/"
+// count as the same issuer. Token routing still matches "iss" exactly.
+func sameIssuer(s string) string { return strings.TrimSuffix(s, "/") }
+
+// isAgentIssuer reports whether issuer is one of issuers, compared as
+// sameIssuer does.
+func isAgentIssuer(issuers []agentIssuer, issuer string) bool {
+	for _, a := range issuers {
+		if sameIssuer(a.issuer) == sameIssuer(issuer) {
+			return true
+		}
+	}
+	return false
 }
 
 func validIssuerURL(s string) error {

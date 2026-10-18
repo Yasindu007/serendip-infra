@@ -189,7 +189,7 @@ T008 → T009 → T010 → T011 → T012 → T013 → T014.
 - **Verify**: AC 9 holds: it works with measured numbers, or the report
   records exactly why it doesn't.
 
-## T013 — Final reviews
+## T013 — Final reviews — DONE 2026-10-19 (contract-guardian PASS; /security-review on 44fc021..HEAD found nothing at confidence 8 or above; go-reviewer had no blockers, and these are fixed: bodies drained so tunnels are reused, a 10 s directory deadline that falls back to sign-ins, short quoted API-server errors on the port-forward paths, wrapped pod-list errors, one issuer comparison helper, `AuthMiddleware` documented as having no sponsor lookup, and a seam test from a real signed agent token through the router, middleware, policy and audit. Left as is: fallback log volume when not ready, frame-copy allocations, warm-up goroutine contexts)
 
 - **Do**: contract-guardian over `core/` and `providers/`, go-reviewer
   over the whole diff, and `/security-review`. Fix what they find.
