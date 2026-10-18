@@ -212,17 +212,18 @@ The bootstrap administrator:
 
 ### Limits
 
-- **No authorization.** Anyone who logs in has the same full API access as
-  an API key. There's no RBAC or policy engine yet.
+- **No authorization (as of spec 015).** Since spec 017, what a person
+  can do depends on their role assignments; see `authorization.md`.
 - **Plain HTTP.** Fine for a browser on `localhost`; anywhere else needs
   TLS first (a later spec). Browsers won't do OIDC over plain HTTP on other
   hosts anyway.
 - **No revocation before expiry for bearer tokens.** They're verified
   offline, so a token stays valid until it expires (1 h by default). The
   console is different: logging out ends its session at once (below).
-- **The audit actor is the username.** The stable `sub` isn't recorded,
-  so a renamed or reused username is ambiguous in old audit rows. Names
-  are cleaned of control characters and capped at 128 characters.
+- **The audit actor is the username.** Since spec 017 each audit row
+  also records the stable `sub` (`actor_subject`); rows from before that
+  have only the username, so a renamed or reused one is ambiguous there.
+  Names are cleaned of control characters and capped at 128 characters.
 - **ThunderID's RSA signing certificate is valid for 365 days.** What
   happens at expiry is untested upstream; it's a follow-up.
 
@@ -340,12 +341,43 @@ cookie would then cross a network in clear.
 
 ### Limits
 
-- **No RBAC.** Every account in the identity provider is effectively an
-  administrator of Serendip. Only give accounts to people who should be.
+- **No RBAC** (as of spec 015). Since spec 017, roles at scopes decide
+  what each person can do; see `authorization.md`.
 - **Plain HTTP works only for a browser on the same machine.** Remote
   browsers need the HTTPS spec.
 - **Sign-in and sign-out are logged with the actor** but aren't audit
   records yet. The audit log covers mutations.
+
+## Subjects and groups (spec 017)
+
+Authorization identifies a person by their **subject** (`sub`), which
+survives a renamed or reused username. The audit actor stays
+`person:<username>` for readability, and each audit row also records the
+subject (`actor_subject`).
+
+- **Groups** come from the access token's `groups` claim: names, flat as
+  sent, at most 100 of up to 128 characters each.
+  - A malformed or oversized claim rejects the token rather than being
+    trimmed, so which groups apply never depends on an arbitrary cut.
+  - ID tokens never carry groups (T001 spike), so only the access token
+    is read.
+  - Group changes apply when the person's next token is issued: their
+    next sign-in, or the console's session refresh.
+- **ThunderID** puts `groups` in access tokens through the `serendip`
+  client's token attributes. Fresh installs get it from the bootstrap
+  file. Existing installs run `serendip-identity-redirects` once, which
+  adds any missing token attributes and, with `--public-url`, the console
+  URIs.
+- **Known principals.** `serendipd` records each person and API key that
+  authenticates, and each of a person's groups, at most once a minute per
+  unchanged principal. This is what the console offers when assigning a
+  role, and what Check access uses for someone else's groups.
+  - It's a snapshot from sign-ins, not a live directory: the management
+    API isn't reachable through the Kubernetes Service proxy (spec 016),
+    and spec 018 decides how `serendipd` reaches it.
+- **The bootstrap administrator's subject** is ThunderID's fixed
+  bootstrap user ID (`thunderid.AdminSubject`), made Owner and Secrets
+  Officer at `/` on first start.
 
 ## Open questions
 

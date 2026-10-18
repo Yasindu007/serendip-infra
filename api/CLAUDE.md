@@ -14,6 +14,17 @@
   `filterReadableRefs`. A refusal is 403 naming the missing action and
   scope. A refused mutation gets an audit row; the decision that allowed
   a mutation lands in `policy_decision` via `audit.WithPolicyDecision`.
+  - A route whose target comes from the body must read it through
+    `bodyDoc` (the same decoder as `decodeBody`); an unreadable body is
+    refused, never passed on.
+  - `/v1/authorization/*` (`authorization_handler.go`): every role
+    assignment or definition change holds `Engine.LockAssignments` across
+    its checks and its write, and uses `CheckAssign`/`CheckUnassign`
+    (delegation, assignable scopes, the last Owner at `/`).
+  - The server chooses IDs for role definitions, assignments and Secrets;
+    a client-supplied `metadata.id` is dropped.
+  - A 5xx answer never carries internal error text (`writeStoreErr`).
+  - The model: `docs/architecture/authorization.md`, ADR 0014.
 - Actor resolution happens in `AuthMiddleware` (`middleware.go`, spec 015):
   - the static `SERENDIP_API_KEYS` token->actor map first;
   - then the Identity capability's `core/identity.Authenticator`, which

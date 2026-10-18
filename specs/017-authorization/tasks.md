@@ -263,7 +263,7 @@ Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → T007 
 - **Verify**: all PASS, or their blocking findings are fixed and
   re-reviewed.
 
-## T012 [A] — Docs + PROGRESS
+## T012 [A] — Docs + PROGRESS — DONE 2026-10-18 (docs-keeper: drift found and fixed in place)
 
 - **Do**:
   - `docs/architecture/authorization.md` (the model, the Azure mapping,

@@ -17,7 +17,8 @@ standalone in under ~5 minutes and contain decisions, not exploration.
 | `bootstrap-agent.md` | serendip-agent design: lives outside Kubernetes; hardware discovery, enrollment, bootstrap, emergency diagnostics | Done |
 | `operations.md` | Alert → Incident → Diagnosis → Recommendation → Approval → Action → Verification → Postmortem lifecycle; SLO/error budgets; change intelligence | Done |
 | `ai-operations.md` | Severity-based autonomy matrix, approval engine, what context AI receives, MCP surface | Done |
-| `identity.md` | Three identities (human, platform, workload); workload identity abstraction over Entra/Keycloak/Thunder/ServiceAccount | Done |
+| `identity.md` | Three identities (human, platform, workload); workload identity abstraction over Entra/Keycloak/Thunder/ServiceAccount; subjects and groups for authorization | Done |
+| `authorization.md` | Azure-RBAC model (ADR 0014): roles at scopes, inheritance, data actions, constrained delegation; enforcement in `api/authz.go`; evaluation; bootstrap and break-glass; the console's Access control (IAM) | Done |
 
 Extracted from the founding design discussions (`docs/raw/nexus.md`,
 `docs/raw/other.md` — retained as historical source; the project was called

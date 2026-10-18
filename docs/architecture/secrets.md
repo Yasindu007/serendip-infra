@@ -302,8 +302,19 @@ A thin adapter (`providers/secrets/openbao/provider.go`) wrapping spec
 008's `*Client` — no new wire-protocol code. `Exists` calls
 `ReadSecret`, mapping `ErrSecretNotFound` to `(false, nil)`;
 `WriteValue`/`ReadValue`/`Delete` call `WriteSecret`/`ReadSecret`/
-`DeleteSecret` against the single `DefaultKVMount`. Mirrors
-`providers/storage/localpath.Provider`'s naming/placement exactly.
+`DeleteSecret` against the single `DefaultKVMount`.
+
+**Where a value lives (spec 017 T011):** under the Secret's **ID, then its
+path** (`<escaped id>/<path>`), never at the path alone. Authorization is
+decided per Secret, so two Secrets must never share a value; with a
+shared path, a Secret in one project could reach another's value. Values
+written at a bare path before T011 are not read (falling back would
+reopen the alias) and need rewriting. `Spec.Path` is validated
+(`ValidateSecretSpec`: at most 256 characters, no empty, `.` or `..`
+segment, no `?`, `#`, `%`, backslash or control character) and can't
+change after creation (400); the server always chooses the Secret's ID.
+
+The adapter mirrors `providers/storage/localpath.Provider`'s naming/placement.
 
 ## `api.SecretHandler` and the value routes
 
@@ -378,10 +389,9 @@ spec 009's own Scope-OUT:
 - **Secret rotation, versioning, leasing, or expiry** — KV v2 keeps
   multiple versions server-side regardless; this capability only ever
   reads/writes the latest version.
-- **A policy engine gating who may read/write which secret** —
-  `core/policy` doesn't exist yet. Authentication (`AuthMiddleware`: API
-  keys, or an OIDC login since spec 015) is the only access control, the
-  same as for every other resource kind today.
+- **Gating who may read or write which Secret** — done in spec 017, not
+  deferred: role assignments decide it, and values need the
+  `serendip/secrets/value/*` data actions (`authorization.md`).
 - **Kubernetes auth method / workload-identity integration** —
   relevant to a future Identity/Thunder story.
 - **PKI secrets engine, dynamic database credentials, or any OpenBao

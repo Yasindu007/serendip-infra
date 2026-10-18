@@ -76,6 +76,7 @@ Highlights:
   `https` public URL. Remote browsers stop needing the insecure-origin
   opt-in.
 - **RBAC lands:** the session's principal feeds the policy layer, and 403s
-  become real.
+  become real. (Done in spec 017, ADR 0014: the session yields the same
+  `person` principal, with its groups from the access token.)
 - **A second backend appears** (e.g. a separate MCP server): reconsider a
   shared session or token-exchange layer before copying this one.

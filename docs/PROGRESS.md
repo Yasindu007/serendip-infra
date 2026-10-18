@@ -13,9 +13,11 @@ Last updated: 2026-10-18
 
 ## Current phase
 
-**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T011
-done and committed; next is T012** (docs: `docs/architecture/authorization.md`,
-ADR 0014, `api/CLAUDE.md`), which completes the spec.
+**Spec 017 (Authorization, Azure-RBAC style) — COMPLETE** (T001-T012,
+2026-10-18). Model and enforcement: `docs/architecture/authorization.md`,
+ADR 0014. Evidence: `specs/017-authorization/verification.md`. Next is
+spec 018 (WSO2 Agent Manager POC), which must also settle the identity
+provider management channel (the note below).
 (Resolved: the user allowed removing role assignments in the console,
 since RBAC guards it; it's the one written exception to "no delete".) Plan, decisions and
 accepted risks: `specs/017-authorization/plan.md`; task status:
@@ -862,7 +864,7 @@ top of spec 008's foundation, 9 tasks, all complete and committed
   auth method / workload-identity integration, `Application`/
   `Component` secret injection (needs OpenChoreo, doesn't exist yet),
   UI/CLI/MCP surfaces, a policy engine gating secret access
-  (`core/policy` doesn't exist yet), and auditing value reads (needs a
+  (since done: spec 017's `serendip/secrets/value/*` data actions), and auditing value reads (needs a
   `core/audit` extension nothing in this codebase has today).
 
 ## Spec 006 — what actually got built
@@ -1155,9 +1157,7 @@ T010. Still satisfies "Go 1.22+" as a floor (ADR 0003 addendum).
      client (UI, MCP) may offer delete until this exists.
    - **An audit read API.** Audit rows are written, but no API returns
      them, so the console can't show activity.
-   - **RBAC / policy** (`core/policy`). Today every identity-provider
-     account is effectively an admin. The user accepted shipping the
-     console without it.
+   - **RBAC / policy** (`core/policy`): done in spec 017 (ADR 0014).
 2. **HTTPS:** cert-manager (already installed) issuing certificates for an
    HTTPS listener on the existing gateway. It needs a decision on where
    trusted names come from on an edge-1 laptop with no public DNS. It's
