@@ -112,6 +112,9 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
     only by its bearer-token check. 018 should restrict the public route
     to the login paths (`/oauth2`, `/.well-known`, `/flow`, `/auth`,
     `/console`) and give management a restricted route.
+  - **Decided (user, 2026-10-18):** the Gateway restriction is folded
+    into spec 018, not done sooner. In 018, do it before or together
+    with any feature that relies on the management channel.
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
 PR #24.** Specs 002-016 are committed locally only — decided explicitly
