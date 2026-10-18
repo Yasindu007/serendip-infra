@@ -13,10 +13,10 @@ Last updated: 2026-10-18
 
 ## Current phase
 
-**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T009
-done and committed; next is T010** (real-cluster verification on kind),
-together with T009's deferred simulated-T470 re-run (same kind cluster;
-needs the machine kept awake).
+**Spec 017 (Authorization, Azure-RBAC style) — IN PROGRESS: T001-T010
+done and committed; next is T011** (final reviews: contract-guardian,
+go-reviewer, /security-review over the whole spec), then T012 (docs:
+`docs/architecture/authorization.md`, ADR 0014, `api/CLAUDE.md`).
 (Resolved: the user allowed removing role assignments in the console,
 since RBAC guards it; it's the one written exception to "no delete".) Plan, decisions and
 accepted risks: `specs/017-authorization/plan.md`; task status:
@@ -52,6 +52,10 @@ accepted risks: `specs/017-authorization/plan.md`; task status:
   request and +0.72 ms per 100-item list (Linux), +0.7 MiB idle.
   p99 is measured via a `GOOS=linux` test binary run in WSL Ubuntu
   (no Go install needed there).
+- `5f86a2e`, `8fe7120` T010 on kind `serendip-t017` (simulated T470):
+  every AC observed or explicitly test-only, in
+  `specs/017-authorization/verification.md`; T009's T470 run: serendipd
+  36.3 MiB idle, PASS. Three console polish fixes from the real browser.
 - Then T008 console Access control, T009 benchmarks, T010 real cluster,
   T011 reviews, T012 docs/ADR 0014. After 017: spec 018 (WSO2 Agent
   Manager POC, beside Serendip, may reuse our ThunderID/OpenChoreo on a
