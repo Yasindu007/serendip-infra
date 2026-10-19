@@ -89,19 +89,25 @@ console Secrets page, a store that refuses a delete without an approval,
 and Secret values erased from the approval's record (this also fixes
 cascades leaving values behind).
 
-**Spec 019 progress:** T001–T007 done and committed (`66c75fa`, `240bc59`).
-- Every DELETE writes an Approval in its own transaction (header
-  `Serendip-Approval-Id`), and the store refuses a delete without one.
-- `/v1/approvals`: request, list, get, approve and reject.
-- The approval reconciler expires, executes through the store's stale
-  checks, erases deleted Secrets' values, and verifies.
-- contract-guardian and go-reviewer passed, with their findings fixed.
-- Deviations are recorded in `tasks.md` and `plan.md`: the actor is
-  `system:reconciler`, deletes go through one kind-agnostic `DeleteFunc`,
-  and the store records the owner chain.
-- **Next: T008** (end-to-end acceptance tests), then T009 (bench) and
-  T010 (console) in parallel, then T011 (real cluster: `docker start
-  serendip-t018-control-plane`, `k3d cluster start amp-local`).
+**Spec 019 progress:** T001–T010 are done and committed (latest `d9e11d2`).
+- **Backend:** every DELETE writes an Approval in its own transaction
+  (`Serendip-Approval-Id`), and the store refuses a delete without one.
+  `/v1/approvals` serves request, list (indexed and paged), get, approve
+  and reject. The approval reconciler expires requests, executes them
+  through stale checks, erases deleted Secrets' values, and verifies.
+- **T008:** the end-to-end acceptance tests pass under `-race`.
+- **T009:** performance is measured; see `docs/risk-register.md`. The
+  user accepted the extra cost per DELETE and kept
+  `synchronous = FULL`.
+- **T010:** the console has Delete with blast radius on the Application,
+  Component and Secret pages, a Secrets page (metadata only) and an
+  Approvals page.
+- **Next: T011** (real cluster). Run `serendipd` against
+  `serendip-t018`, plus the Agent Manager k3d cluster (`k3d cluster start
+  amp-local`) for the real-agent check. This includes the console browser
+  walk-through moved from T010 and the edge-1 harness run moved from
+  T009. Then T012 (reviews), T013 (docs and ADR 0016) and T014 (close).
+
 Other candidates are in "Next up" below.
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
