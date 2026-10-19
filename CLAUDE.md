@@ -50,3 +50,6 @@ costs nothing.
 - Use the `oss-researcher` subagent for anything requiring upstream project docs (OpenChoreo, Crossplane, Longhorn, K3s, Thunder...). Never paste large upstream docs into the main session.
 - Run `contract-guardian` review before committing changes under `core/` or `providers/`.
 - Commit messages: conventional commits (`feat(core): ...`, `fix(agent): ...`).
+- Risks, performance costs and trade-offs that are accepted rather than fixed
+  (or fixed in a way worth remembering) go in `docs/risk-register.md` as they
+  are found, not only in a spec's plan.md or a benchmark summary.

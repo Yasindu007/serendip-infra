@@ -213,7 +213,7 @@ T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
 - **Verify**: `go test ./... -race` (or without `-race` where cgo isn't
   available on Windows, as in earlier specs). Everything is green.
 
-## T009 [P] — Benchmarks — MEASURED 2026-10-19, one target open (`profiles/edge-1/bench/results/2026-10-19-spec019-approvals/summary.md`). The approval reads with 20,000 approvals pass, with p99 at most 22 ms. Idle memory passes (+0.2 MiB). The DELETE overhead **fails** "< 1 ms p99": +0.6 ms mean and +3 ms p99 on Windows NVMe. It is commit I/O, not CPU, and the simulated T470 run is inconclusive. Whether to accept it and amend the target is **awaiting the user's decision**. Migration `0007` replaced `0006`'s all-kinds paging index after this benchmark measured its cost on every write. The edge-1 harness run on the simulated T470 cluster is deferred to T011, which needs the cluster)
+## T009 [P] — Benchmarks — DONE 2026-10-20 (`profiles/edge-1/bench/results/2026-10-19-spec019-approvals/summary.md`). The approval reads with 20,000 approvals pass, with p99 at most 22 ms. Idle memory passes (+0.2 MiB). The DELETE overhead was +0.6 ms mean and +3 ms p99 on Windows NVMe, which is commit I/O, not CPU. The user accepted it on 2026-10-20 and amended the target to "at most +1 ms mean added, p99 reported" (risk register RP-001, RP-002); `synchronous` stays `FULL`. Migration `0007` replaced `0006`'s all-kinds paging index after this benchmark measured its cost on every write. The edge-1 harness run on the simulated T470 cluster is deferred to T011)
 
 - **Do**:
   - Add a DELETE-with-approval benchmark beside spec 017's authz benches.
@@ -223,8 +223,9 @@ T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
   - Compare with `2026-10-19-spec018-reuse`.
 - **Files**: `api/authz_bench_test.go`,
   `profiles/edge-1/bench/results/2026-10-xx-spec019-approvals/`.
-- **Verify**: the results are committed. The DELETE overhead is under
-  1 ms p99. Rule 4 still passes, with `serendipd` under 256 MiB, and the
+- **Verify**: the results are committed. The DELETE overhead is at most
+  +1 ms mean, with p99 reported (amended 2026-10-20 from "under 1 ms
+  p99"; see risk register RP-002). Rule 4 still passes, with `serendipd` under 256 MiB, and the
   idle delta is reported. With 20,000 seeded approvals, the list (first
   page and `?phase=Pending`), the request with its duplicate check, and a
   resync each stay under 50 ms p99 (T007a).

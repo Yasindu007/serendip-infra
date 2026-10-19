@@ -472,9 +472,12 @@ principal type and ID shape.
   files outside this spec's own code.
 - **The 403 `needs-approval` detail changes.** Spec 018's verification
   matched on the problem type, not the text. T005 checks it.
-- **Performance:** one extra row insert and audit row per delete. The
-  target is under 1 ms p99 extra on the simulated T470. `serendipd` idle
-  memory is expected to change negligibly, and T009 measures both.
+- **Performance:** one extra row insert and audit row per delete. T009
+  measured +0.6 ms mean and +3 ms p99 of commit I/O per DELETE, and
+  +0.2 MiB idle memory. The user accepted it on 2026-10-20 and amended
+  the target to "at most +1 ms mean added, p99 reported". The
+  performance and durability trade-offs live in `docs/risk-register.md`
+  (RP-001 to RP-003, RP-005 to RP-010).
 
 ## Explicitly NOT done
 

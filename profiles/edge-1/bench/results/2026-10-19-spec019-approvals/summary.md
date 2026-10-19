@@ -6,7 +6,7 @@ The targets are from `specs/019-approvals/tasks.md` T009 and T007a.
 - **Approval reads with 20,000 approvals:** PASS.
 - **Idle memory:** PASS.
 - **DELETE overhead:** **FAIL** against the "< 1 ms p99" target. Recording each delete's Approval adds about **+0.6 ms mean and +3 ms p99** on the Windows NVMe. The cost is disk I/O, not CPU (see "Why"). On the simulated T470, disk noise is larger than the difference, so the result there is inconclusive.
-- **Open:** whether to accept this cost and amend the target is a decision for the user. It's recorded in tasks.md T009.
+- **Decided 2026-10-20:** the user accepted the cost (option 1 below), and the target became "+≤ 1 ms mean added; p99 reported". `synchronous` stays `FULL`. See `docs/risk-register.md` RP-001 and RP-002.
 - **Not yet run:** the edge-1 harness on the simulated T470 kind node needs the cluster. It runs with T011.
 
 ## Setup
