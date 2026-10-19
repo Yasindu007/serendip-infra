@@ -20,6 +20,10 @@ cmd/serendipd/console/dist/*
 .env
 .env.*
 *.local
+# serendipd's default store (SERENDIP_DB_PATH) when run from the repo root.
+/serendip.db
+/serendip.db-shm
+/serendip.db-wal
 
 # Editor / OS
 .vscode/
