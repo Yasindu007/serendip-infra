@@ -85,8 +85,21 @@ Approval (decided by policy when allowed), and only `NeedsApproval`
 (T001–T014) were approved on 2026-10-19, amended the same day with a
 console Secrets page, a store that refuses a delete without an approval,
 and Secret values erased from the approval's record (this also fixes
-cascades leaving values behind). T001 (the `Approval` kind) is done but
-uncommitted; it's committed with T002–T004 after contract-guardian.
+cascades leaving values behind).
+
+**Spec 019 progress:** T001–T007 done and committed (`66c75fa`, `240bc59`).
+- Every DELETE writes an Approval in its own transaction (header
+  `Serendip-Approval-Id`), and the store refuses a delete without one.
+- `/v1/approvals`: request, list, get, approve and reject.
+- The approval reconciler expires, executes through the store's stale
+  checks, erases deleted Secrets' values, and verifies.
+- contract-guardian and go-reviewer passed, with their findings fixed.
+- Deviations are recorded in `tasks.md` and `plan.md`: the actor is
+  `system:reconciler`, deletes go through one kind-agnostic `DeleteFunc`,
+  and the store records the owner chain.
+- **Next: T008** (end-to-end acceptance tests), then T009 (bench) and
+  T010 (console) in parallel, then T011 (real cluster: `docker start
+  serendip-t018-control-plane`, `k3d cluster start amp-local`).
 Other candidates are in "Next up" below.
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
