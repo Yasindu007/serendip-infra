@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
@@ -210,4 +212,107 @@ func setCondition(st *resource.Status, c resource.Condition) {
 		}
 	}
 	st.Conditions = append(st.Conditions, c)
+}
+
+// ApprovalQuery selects approvals for ListApprovals. Empty fields don't
+// filter.
+type ApprovalQuery struct {
+	Phase      resource.ApprovalPhase
+	TargetKind resource.Kind
+	TargetID   string
+	// Requester is the requester's audit actor.
+	Requester string
+	// Unsettled keeps only approvals the reconciler still has work on.
+	Unsettled bool
+	// Limit caps the page; zero means no limit.
+	Limit int
+	// After is the ID of the last approval of the previous page: the page
+	// continues with the next older one.
+	After string
+}
+
+// ListApprovals returns approvals newest first (created_at, then ID,
+// descending), served from the approval indexes (migration 0006): it never
+// reads every approval to answer a filtered or paged question. The
+// expressions below are the indexes' own, so the planner can use them.
+func ListApprovals(ctx context.Context, db *sql.DB, q ApprovalQuery) ([]resource.Approval, error) {
+	query, args, err := approvalsSQL(ctx, db, q)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list approvals: %w", err)
+	}
+	defer rows.Close()
+	var out []resource.Approval
+	for rows.Next() {
+		a, err := scanResource[resource.ApprovalSpec, resource.ApprovalStatus](rows, resource.KindApproval)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlite: list approvals: %w", err)
+	}
+	return out, nil
+}
+
+// approvalsSQL builds ListApprovals' query.
+func approvalsSQL(ctx context.Context, db *sql.DB, q ApprovalQuery) (string, []any, error) {
+	where := []string{`kind = 'Approval'`}
+	var args []any
+	// One indexed filter leads, and its index is named: without statistics
+	// the planner may prefer the kind index and read every approval.
+	// INDEXED BY makes an unusable index an error, never a silent scan.
+	index := "idx_resources_kind_created"
+	switch {
+	case q.TargetID != "":
+		index = "idx_approvals_target"
+		where = append(where, `json_extract(spec, '$.action.target.id') = ?`)
+		args = append(args, q.TargetID)
+	case q.Unsettled:
+		index = "idx_approvals_unsettled"
+		where = append(where, `json_extract(status, '$.settled') IS NULL`)
+	case q.Phase != "":
+		index = "idx_approvals_phase"
+		where = append(where, `json_extract(status, '$.phase') = ?`)
+		args = append(args, string(q.Phase))
+	}
+	if q.TargetID != "" && q.Unsettled {
+		where = append(where, `json_extract(status, '$.settled') IS NULL`)
+	}
+	if q.Phase != "" && (q.TargetID != "" || q.Unsettled) {
+		where = append(where, `json_extract(status, '$.phase') = ?`)
+		args = append(args, string(q.Phase))
+	}
+	if q.TargetKind != "" {
+		where = append(where, `json_extract(spec, '$.action.target.kind') = ?`)
+		args = append(args, string(q.TargetKind))
+	}
+	if q.Requester != "" {
+		where = append(where, `json_extract(status, '$.requestedBy.actor') = ?`)
+		args = append(args, q.Requester)
+	}
+	if q.After != "" {
+		var at string
+		err := db.QueryRowContext(ctx, `SELECT created_at FROM resources WHERE kind = 'Approval' AND id = ?`, q.After).Scan(&at)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil, fmt.Errorf("%w: after: no approval %q", resource.ErrValidation, q.After)
+		}
+		if err != nil {
+			return "", nil, fmt.Errorf("sqlite: list approvals: %w", err)
+		}
+		where = append(where, `(created_at < ? OR (created_at = ? AND id < ?))`)
+		args = append(args, at, at, q.After)
+	}
+	query := `SELECT id, name, labels, owner_refs, relationships, spec, status,
+	       resource_version, created_at, updated_at
+	FROM resources INDEXED BY ` + index + ` WHERE ` + strings.Join(where, " AND ") + ` ORDER BY created_at DESC, id DESC`
+	if q.Limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, q.Limit)
+	}
+	return query, args, nil
 }

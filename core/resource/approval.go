@@ -133,6 +133,10 @@ type ApprovalStatus struct {
 	BlastRadius []ApprovalRef     `json:"blastRadius,omitempty"`
 	Decision    *ApprovalDecision `json:"decision,omitempty"`
 	ExecutedAt  time.Time         `json:"executedAt,omitzero"`
+	// Settled is set once nothing more will happen to the approval:
+	// rejected, expired or failed, or executed, cleaned up and verified.
+	// The reconciler only revisits unsettled approvals (spec 019 T007a).
+	Settled bool `json:"settled,omitempty"`
 }
 
 type Approval = Resource[ApprovalSpec, ApprovalStatus]

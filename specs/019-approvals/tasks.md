@@ -5,7 +5,7 @@ Ordered. `[P]` = parallel-safe within its block, `[A]` = subagent-eligible
 `core/` or `providers/`, and `go-reviewer` after each non-trivial Go task.
 
 Dependency sketch: T001 → (T002 ∥ T003 ∥ T004) → T005 → T006 → T007 →
-T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
+T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
 
 ## T001 — The `Approval` kind — DONE 2026-10-19 (`go test ./core/resource/...` and check-imports clean; the spec validators live in `approval.go` beside the kind, like `secrets.go` and `authorization.go`, so `validate.go` is unchanged)
 
@@ -171,6 +171,32 @@ T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
 - **Then**: run `contract-guardian` and `go-reviewer` on T005–T007, then
   commit.
 
+## T007a — Indexed approval reads and paging (added 2026-10-19) — DONE 2026-10-19 (`go test ./...`; query plans pinned, and every approval query uses its index with no sort. `INDEXED BY` was needed because the planner otherwise read every approval for the unsettled query. contract-guardian PASS; both of its findings are fixed: 0006 backfills `settled` for approvals recorded earlier, and timestamps are now written at a fixed width, so text order is time order, while older rows still parse)
+
+- **Do** (plan decision 1, amended):
+  - Migration `0006`: the `(kind, created_at, id)` index, and partial
+    expression indexes for approvals on phase, target ID and unsettled.
+  - Add `status.settled`. The handler's reject sets it, and so do the
+    reconciler's expire, fail and verified finish.
+  - `sqlite.ListApprovals(ctx, db, query)`: phase, target, requester and
+    unsettled filters, newest first, a limit and an `after` cursor.
+  - The list handler pages with it (`limit`, `after`,
+    `Serendip-Next-After`). The duplicate check queries by target, and
+    the reconciler's resync lister asks for unsettled approvals only.
+- **Files**: `core/store/sqlite/migrations/0006_approval_indexes.sql`,
+  `core/store/sqlite/approval.go`, `approval_test.go`,
+  `core/resource/approval.go`, `core/reconcile/approval.go`,
+  `api/approval_handler.go`, the tests, and `cmd/serendipd/wiring.go`.
+- **Verify**:
+  - `go test ./...`.
+  - `EXPLAIN QUERY PLAN` tests show each approval query using its index,
+    not a scan.
+  - The paging tests cover: pages in order with no gaps or repeats;
+    `Serendip-Next-After` only on a full page; and settled approvals left
+    out of the resync list.
+- **Then**: run `contract-guardian` (core and a migration) before
+  committing.
+
 ## T008 [A] — End-to-end acceptance tests
 
 - **Do**: tests in the `api` package against a real SQLite store, with
@@ -199,7 +225,9 @@ T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
   `profiles/edge-1/bench/results/2026-10-xx-spec019-approvals/`.
 - **Verify**: the results are committed. The DELETE overhead is under
   1 ms p99. Rule 4 still passes, with `serendipd` under 256 MiB, and the
-  idle delta is reported.
+  idle delta is reported. With 20,000 seeded approvals, the list (first
+  page and `?phase=Pending`), the request with its duplicate check, and a
+  resync each stay under 50 ms p99 (T007a).
 
 ## T010 [P] — Console
 

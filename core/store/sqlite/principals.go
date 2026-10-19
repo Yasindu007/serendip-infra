@@ -147,10 +147,10 @@ func (r *PrincipalRegistry) List(ctx context.Context, t resource.PrincipalType) 
 		if err := json.Unmarshal([]byte(groups), &p.Groups); err != nil {
 			return nil, fmt.Errorf("sqlite: principal %s %s groups: %w", typ, p.ID, err)
 		}
-		if p.FirstSeen, err = time.Parse(timeLayout, first); err != nil {
+		if p.FirstSeen, err = time.Parse(parseLayout, first); err != nil {
 			return nil, err
 		}
-		if p.LastSeen, err = time.Parse(timeLayout, last); err != nil {
+		if p.LastSeen, err = time.Parse(parseLayout, last); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

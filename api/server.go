@@ -274,7 +274,10 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
 	(&ApprovalHandler{
 		approvals: approvals,
-		tree:      graph.NewSQLiteGraph(db),
+		query: func(ctx context.Context, q sqlite.ApprovalQuery) ([]resource.Approval, error) {
+			return sqlite.ListApprovals(ctx, db, q)
+		},
+		tree: graph.NewSQLiteGraph(db),
 		head: func(ctx context.Context, kind resource.Kind, id string) (string, int64, error) {
 			return sqlite.ResourceHead(ctx, db, kind, id)
 		},

@@ -1,12 +1,11 @@
 package api
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/id"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
+	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
 
 // ApprovalHandler serves /v1/approvals (spec 019): requesting a destructive
@@ -25,7 +25,10 @@ import (
 // reconciler's job, never this handler's (constitution 3).
 type ApprovalHandler struct {
 	approvals store.Store[resource.ApprovalSpec, resource.ApprovalStatus]
-	tree      approvalTree
+	// query reads approvals through their indexes (sqlite.ListApprovals):
+	// approvals only grow, so nothing here lists them all.
+	query func(ctx context.Context, q sqlite.ApprovalQuery) ([]resource.Approval, error)
+	tree  approvalTree
 	// head returns any kind's resource name and version, or
 	// store.ErrNotFound.
 	head func(ctx context.Context, kind resource.Kind, id string) (string, int64, error)
@@ -94,14 +97,14 @@ func (h *ApprovalHandler) request(w http.ResponseWriter, r *http.Request) {
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	all, err := h.approvals.List(ctx, store.ListOptions{Kind: resource.KindApproval})
+	// The target's approvals, by the target index: a handful, however many
+	// approvals exist.
+	sameTarget, err := h.query(ctx, sqlite.ApprovalQuery{TargetID: target.ID, Unsettled: true})
 	if err != nil {
 		writeStoreErr(w, r, err)
 		return
 	}
-	// Listing every approval under the lock is fine at edge-1 scale (plan.md
-	// decision 1: no index until retention).
-	for _, a := range all {
+	for _, a := range sameTarget {
 		open := a.Status.Phase == resource.ApprovalPending || a.Status.Phase == resource.ApprovalApproved
 		if open && a.Spec.Action == spec.Action {
 			// The same action again gets the one already open, whoever asks:
@@ -185,35 +188,52 @@ func (h *ApprovalHandler) get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, approvalView(a))
 }
 
-// list returns the approvals the caller may read, newest first, filtered
-// by ?phase=, ?targetKind= and ?targetId=, and ?requester= (an actor).
+// Paging for GET /v1/approvals.
+const (
+	defaultApprovalPage = 100
+	maxApprovalPage     = 500
+	// nextPageHeader names the cursor for the next page (?after=). It's
+	// set when the page was full: there may be more.
+	nextPageHeader = "Serendip-Next-After"
+)
+
+// list returns one page of the approvals the caller may read, newest
+// first, filtered by ?phase=, ?targetKind= and ?targetId=, and ?requester=
+// (an actor), and paged by ?limit= and ?after=. A page is cut before the
+// read check, so it can hold fewer than limit; a full page names the next
+// cursor in Serendip-Next-After.
 func (h *ApprovalHandler) list(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	all, err := h.approvals.List(ctx, store.ListOptions{Kind: resource.KindApproval})
-	if err != nil {
-		writeStoreErr(w, r, err)
-		return
-	}
-	q := r.URL.Query()
-	matching := make([]resource.Approval, 0, len(all))
-	for _, a := range all {
-		t := a.Spec.Action.Target
-		if (q.Get("phase") != "" && string(a.Status.Phase) != q.Get("phase")) ||
-			(q.Get("targetKind") != "" && string(t.Kind) != q.Get("targetKind")) ||
-			(q.Get("targetId") != "" && t.ID != q.Get("targetId")) ||
-			(q.Get("requester") != "" && a.Status.RequestedBy.Actor != q.Get("requester")) {
-			continue
+	params := r.URL.Query()
+	limit := defaultApprovalPage
+	if v := params.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > maxApprovalPage {
+			writeStoreErr(w, r, fmt.Errorf("%w: limit: 1 to %d", resource.ErrValidation, maxApprovalPage))
+			return
 		}
-		matching = append(matching, a)
+		limit = n
 	}
-	readable, err := filterReadableApprovals(ctx, matching)
+	page, err := h.query(ctx, sqlite.ApprovalQuery{
+		Phase:      resource.ApprovalPhase(params.Get("phase")),
+		TargetKind: resource.Kind(params.Get("targetKind")),
+		TargetID:   params.Get("targetId"),
+		Requester:  params.Get("requester"),
+		Limit:      limit,
+		After:      params.Get("after"),
+	})
 	if err != nil {
 		writeStoreErr(w, r, err)
 		return
 	}
-	slices.SortFunc(readable, func(x, y resource.Approval) int {
-		return cmp.Or(y.Status.RequestedAt.Compare(x.Status.RequestedAt), cmp.Compare(x.Metadata.ID, y.Metadata.ID))
-	})
+	readable, err := filterReadableApprovals(ctx, page)
+	if err != nil {
+		writeStoreErr(w, r, err)
+		return
+	}
+	if len(page) == limit {
+		w.Header().Set(nextPageHeader, page[len(page)-1].Metadata.ID)
+	}
 	out := make([]resource.Approval, len(readable))
 	for i, a := range readable {
 		out[i] = approvalView(a)
@@ -278,6 +298,8 @@ func (h *ApprovalHandler) decide(w http.ResponseWriter, r *http.Request, to reso
 	by := requesterOf(ctx, caller)
 	a.Status.Phase = to
 	a.Status.ExpiresAt = time.Time{}
+	// A rejection ends it; an approval goes on to the reconciler.
+	a.Status.Settled = to == resource.ApprovalRejected
 	a.Status.Decision = &resource.ApprovalDecision{By: &by, At: now, Comment: body.Comment, Evidence: evidence}
 	reason := "ApprovedByPerson"
 	if to == resource.ApprovalRejected {

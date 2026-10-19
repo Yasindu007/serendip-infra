@@ -360,7 +360,19 @@ func registerApprovals(db *sql.DB, bus event.Bus, engine *reconcile.Engine, secr
 		return sqlite.ResourceExists(ctx, db, kind, id)
 	}
 	r := reconcile.NewApprovalReconciler(approvals, del, map[resource.Kind]reconcile.CleanupFunc{resource.KindSecret: eraseSecret}, exists, time.Now)
-	engine.Register(resource.KindApproval, r, lister(approvals, resource.KindApproval))
+	// Resync revisits only unsettled approvals, by their index: approvals
+	// only grow, so listing them all every resync would too.
+	engine.Register(resource.KindApproval, r, func(ctx context.Context) ([]graph.ResourceRef, error) {
+		open, err := sqlite.ListApprovals(ctx, db, sqlite.ApprovalQuery{Unsettled: true})
+		if err != nil {
+			return nil, err
+		}
+		refs := make([]graph.ResourceRef, len(open))
+		for i, a := range open {
+			refs[i] = graph.ResourceRef{Kind: resource.KindApproval, ID: a.Metadata.ID}
+		}
+		return refs, nil
+	})
 }
 
 // lister returns the engine's resync lister for one kind's store.

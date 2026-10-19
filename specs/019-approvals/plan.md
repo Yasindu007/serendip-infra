@@ -42,8 +42,24 @@ Approvals page. No new dependency, no migration, no new role.
    - **No `ownerRefs`:** a cascade must never delete the record of its own
      approval. The target is in `spec.action.target`. The owner chain is
      copied into `status` for read authorization (decision 9).
-   - **No migration.** Approvals are listed and filtered in memory, which
-     is fine at edge-1 scale. A table or index comes when retention does.
+   - **Indexed reads, not a new table** (amended 2026-10-19, T007a).
+     Approvals only grow: every delete adds one, and none are ever deleted,
+     with retention a later spec. So no read may scan them all:
+     - **Migration `0006`** adds:
+       - `(kind, created_at, id)` for newest-first paging;
+       - partial expression indexes, for `kind = 'Approval'` only, on the
+         phase, on the target ID, and on unsettled approvals.
+     - **One store query** (`sqlite.ListApprovals`) serves the list and
+       the duplicate check: filters, newest first, a limit and an
+       `after` cursor.
+     - **The reconciler's resync** lists only unsettled approvals.
+       `status.settled` is set once nothing more will happen: verified
+       after execution, or rejected, expired or failed.
+     - **The API pages:** `GET /v1/approvals?limit=&after=` (default 100,
+       at most 500). A full page names the next cursor in
+       `Serendip-Next-After`.
+     - **Tests pin the query plans** to the indexes. T009 measures 20,000
+       approvals on the simulated T470.
    - **Not in `resourcePaths`,** so the generic CRUD routes (PUT, DELETE)
      never exist for approvals. It has its own handler and five routes.
 
@@ -433,7 +449,12 @@ principal type and ID shape.
 - **Unbounded approval rows.** Every delete adds one (and the bench
   harness deletes per run). Each carries its removed rows' specs. For
   edge-1's kinds that's about 2–4 KiB a delete, more for a large
-  cascade. Retention is out of scope; revisit with retention.
+  cascade. Reads stay bounded by the indexes and paging (decision 1);
+  disk use grows until the retention spec. The audit log keeps every
+  approval's snapshot, so archiving later loses nothing.
+- **Paging before filtering.** A page is cut before the per-item read
+  check. A caller who may read few approvals can get short or empty pages
+  and follows `Serendip-Next-After`, as Azure's paged lists do.
 - **A strict blast-radius match.** A child added to an Application after
   the request makes its approved cascade `Failed` (`StaleTarget`). That's
   the intended safety, but a busy target may need a fresh request.
@@ -457,7 +478,6 @@ principal type and ID shape.
 Everything in spec "Scope — OUT", plus:
 - reading or editing Secret values in the console;
 - `POST /v1/approvals` for access-management kinds, which use DELETE;
-- a database index for approvals (decision 1);
 - clean-up for kinds other than Secret. Volumes and workloads keep their
   existing reconciler teardown; the `cleaners` map is where a future kind
   would plug in.

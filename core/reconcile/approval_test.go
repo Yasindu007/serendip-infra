@@ -172,7 +172,7 @@ func TestApprovalReconciler_ExecutesCleansUpAndVerifies(t *testing.T) {
 		}
 	}
 	a = f.get(a)
-	if a.Status.Phase != resource.ApprovalExecuted || len(f.cleaned) != 0 {
+	if a.Status.Phase != resource.ApprovalExecuted || len(f.cleaned) != 0 || a.Status.Settled {
 		t.Fatalf("after execute: phase %q, cleaned %v; want Executed, nothing cleaned yet", a.Status.Phase, f.cleaned)
 	}
 	var decision string
@@ -196,8 +196,8 @@ func TestApprovalReconciler_ExecutesCleansUpAndVerifies(t *testing.T) {
 	if c := condition(a, resource.ApprovalConditionCleanedUp); c.Status != resource.ConditionTrue || c.Reason != reconcile.ReasonCleanupDone {
 		t.Errorf("CleanedUp = %+v", c)
 	}
-	if c := condition(a, resource.ApprovalConditionVerified); c.Status != resource.ConditionTrue {
-		t.Errorf("Verified = %+v", c)
+	if c := condition(a, resource.ApprovalConditionVerified); c.Status != resource.ConditionTrue || !a.Status.Settled {
+		t.Errorf("Verified = %+v, settled %v; want verified and settled", c, a.Status.Settled)
 	}
 
 	// Idempotent: nothing more to do, nothing written.
@@ -289,8 +289,8 @@ func TestApprovalReconciler_StaleTargetFails(t *testing.T) {
 				t.Fatalf("reconcile: %v", err)
 			}
 			a = f.get(a)
-			if c := condition(a, resource.ApprovalConditionExecuted); a.Status.Phase != resource.ApprovalFailed || c.Reason != reconcile.ReasonStaleTarget {
-				t.Errorf("phase %q, Executed %+v; want Failed/StaleTarget", a.Status.Phase, c)
+			if c := condition(a, resource.ApprovalConditionExecuted); a.Status.Phase != resource.ApprovalFailed || c.Reason != reconcile.ReasonStaleTarget || !a.Status.Settled {
+				t.Errorf("phase %q, Executed %+v, settled %v; want Failed/StaleTarget, settled", a.Status.Phase, c, a.Status.Settled)
 			}
 			if name != "the target is gone" && !f.exists(resource.KindProject, f.project.Metadata.ID) {
 				t.Error("a stale approval deleted something")
@@ -381,8 +381,8 @@ func TestApprovalReconciler_Expiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.get(a)
-	if c := condition(got, resource.ApprovalConditionDecided); got.Status.Phase != resource.ApprovalExpired || c.Reason != "Expired" {
-		t.Errorf("phase %q, Decided %+v; want Expired", got.Status.Phase, c)
+	if c := condition(got, resource.ApprovalConditionDecided); got.Status.Phase != resource.ApprovalExpired || c.Reason != "Expired" || !got.Status.Settled {
+		t.Errorf("phase %q, Decided %+v, settled %v; want Expired, settled", got.Status.Phase, c, got.Status.Settled)
 	}
 	if !f.exists(resource.KindOrganization, f.org.Metadata.ID) {
 		t.Error("an expired approval deleted its target")

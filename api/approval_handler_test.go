@@ -164,9 +164,15 @@ func TestApprovals_Decide(t *testing.T) {
 	w.expect("tok-owner", http.MethodPost, path+"/approve", nil, http.StatusConflict)
 	w.expect("tok-owner", http.MethodPost, path+"/reject", nil, http.StatusConflict)
 
-	// Reject is final too.
+	// Reject is final too, and settles it: nothing more will happen.
 	other := w.requestApproval("tok-agent", deleteRequest(w.scope("devweb"), false, "unused"), http.StatusCreated)
-	w.expect("tok-owner", http.MethodPost, "/v1/approvals/"+other.Metadata.ID+"/reject", nil, http.StatusOK)
+	rejected := w.do("tok-owner", http.MethodPost, "/v1/approvals/"+other.Metadata.ID+"/reject", nil)
+	if r := decodeApproval(t, rejected.Body.Bytes()); rejected.Code != http.StatusOK || r.Status.Phase != resource.ApprovalRejected || !r.Status.Settled {
+		t.Errorf("reject: %d phase %q settled %v", rejected.Code, r.Status.Phase, r.Status.Settled)
+	}
+	if a.Status.Settled {
+		t.Error("an approved request is settled before it ran")
+	}
 	w.expect("tok-owner", http.MethodPost, "/v1/approvals/"+other.Metadata.ID+"/approve", nil, http.StatusConflict)
 
 	// A cascade needs delete on everything below, as it is now: a
@@ -264,5 +270,48 @@ func TestApprovals_DecideWithoutABody(t *testing.T) {
 	w.h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("approve with an empty chunked body: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// The list pages through approvals newest first, naming the next page only
+// when this one was full (spec 019 T007a).
+func TestApprovals_ListPages(t *testing.T) {
+	w := approvalsWorld(t)
+	var want []string
+	for _, name := range []string{"web", "devweb", "secret", "app", "devapp"} {
+		a := w.requestApproval("tok-agent", deleteRequest(w.scope(name), name == "app" || name == "devapp", "cleanup"), http.StatusCreated)
+		want = append([]string{a.Metadata.ID}, want...)
+	}
+	var got []string
+	after := ""
+	for range 5 {
+		path := "/v1/approvals?limit=2"
+		if after != "" {
+			path += "&after=" + after
+		}
+		res := w.do("tok-owner", http.MethodGet, path, nil)
+		if res.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", path, res.Code, res.Body)
+		}
+		var page []resource.Approval
+		if err := json.Unmarshal(res.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range page {
+			got = append(got, a.Metadata.ID)
+		}
+		after = res.Header().Get("Serendip-Next-After")
+		if (len(page) == 2) != (after != "") {
+			t.Errorf("page of %d: next cursor %q; want one exactly when the page is full", len(page), after)
+		}
+		if after == "" {
+			break
+		}
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("paged %v, want newest first %v", got, want)
+	}
+	for _, bad := range []string{"limit=0", "limit=501", "limit=x", "after=nope"} {
+		w.expect("tok-owner", http.MethodGet, "/v1/approvals?"+bad, nil, http.StatusBadRequest)
 	}
 }

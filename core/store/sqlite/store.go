@@ -16,7 +16,16 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/store"
 )
 
-const timeLayout = time.RFC3339Nano
+// timeLayout writes timestamps at a fixed width (always nine fractional
+// digits), so their text order is their time order: lists sort, and
+// approvals page, by created_at as text (spec 019 T007a). RFC 3339's
+// trimmed fractions sorted "Z" after digits, misordering timestamps under a
+// microsecond apart. parseLayout reads both forms, so rows written before
+// the change still parse.
+const (
+	timeLayout  = "2006-01-02T15:04:05.000000000Z07:00"
+	parseLayout = time.RFC3339Nano
+)
 
 // Store is the SQLite implementation of store.Store[S, St] for one
 // resource kind, fixed at construction (kind is a struct field, not a
@@ -694,11 +703,11 @@ func scanResource[S, St any](row rowScanner, kind resource.Kind) (resource.Resou
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: unmarshal status: %w", err)
 	}
 
-	out.Metadata.CreatedAt, err = time.Parse(timeLayout, createdAtStr)
+	out.Metadata.CreatedAt, err = time.Parse(parseLayout, createdAtStr)
 	if err != nil {
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: parse created_at: %w", err)
 	}
-	out.Metadata.UpdatedAt, err = time.Parse(timeLayout, updatedAtStr)
+	out.Metadata.UpdatedAt, err = time.Parse(parseLayout, updatedAtStr)
 	if err != nil {
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: parse updated_at: %w", err)
 	}

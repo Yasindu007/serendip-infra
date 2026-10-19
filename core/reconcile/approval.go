@@ -96,6 +96,7 @@ func (r *ApprovalReconciler) expire(ctx context.Context, a resource.Approval) er
 		return err
 	}
 	a.Status.Phase = resource.ApprovalExpired
+	a.Status.Settled = true
 	a.Status.Conditions = upsertCondition(a.Status.Conditions, resource.Condition{
 		Type: resource.ApprovalConditionDecided, Status: resource.ConditionTrue, Reason: "Expired",
 		Message: "nobody decided before " + a.Status.ExpiresAt.Format(time.RFC3339), LastTransitionTime: now,
@@ -189,6 +190,7 @@ func (r *ApprovalReconciler) fail(ctx context.Context, a resource.Approval, reas
 		return err
 	}
 	a.Status.Phase = resource.ApprovalFailed
+	a.Status.Settled = true
 	a.Status.Conditions = upsertCondition(a.Status.Conditions, resource.Condition{
 		Type: resource.ApprovalConditionExecuted, Status: resource.ConditionFalse, Reason: reason,
 		Message: message, LastTransitionTime: r.now().UTC(),
@@ -251,6 +253,9 @@ func (r *ApprovalReconciler) finish(ctx context.Context, a resource.Approval) er
 	prevVerified := findCondition(a.Status.Conditions, resource.ApprovalConditionVerified)
 	if !(prevVerified != nil && prevVerified.Status == verified.Status && prevVerified.Message == verified.Message && cleanedRecorded) {
 		a.Status.Conditions = upsertCondition(a.Status.Conditions, verified)
+		// Verified ends it: nothing more will happen, so resync stops
+		// revisiting it.
+		a.Status.Settled = len(left) == 0
 		if _, err := r.approvals.Update(ctx, a); err != nil {
 			return err
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
@@ -300,4 +301,192 @@ func findCondition(cs []resource.Condition, typ string) *resource.Condition {
 		}
 	}
 	return nil
+}
+
+// seedApprovals stores n approvals, half pending on the Secret and half
+// executed on the Organization, alternating requesters; every third one is
+// settled. It returns their IDs newest first.
+func seedApprovals(t *testing.T, w *approvalWorld, n int) []string {
+	t.Helper()
+	var ids []string
+	for i := range n {
+		target, phase := resource.Scope{Kind: resource.KindSecret, ID: w.secret.Metadata.ID}, resource.ApprovalPending
+		if i%2 == 1 {
+			target, phase = resource.Scope{Kind: resource.KindOrganization, ID: w.org.Metadata.ID}, resource.ApprovalExecuted
+		}
+		a, err := w.approvals.Create(context.Background(), resource.Approval{
+			Metadata: resource.Metadata{Name: "seeded"},
+			Spec:     resource.ApprovalSpec{Action: resource.ApprovalAction{Verb: resource.ApprovalVerbDelete, Target: target}},
+			Status: resource.ApprovalStatus{Phase: phase, Settled: i%3 == 0,
+				RequestedBy: resource.ApprovalActor{Actor: []string{"alice", "bob"}[i%2]}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append([]string{a.Metadata.ID}, ids...)
+	}
+	return ids
+}
+
+func approvalIDs(as []resource.Approval) []string {
+	out := make([]string, len(as))
+	for i, a := range as {
+		out[i] = a.Metadata.ID
+	}
+	return out
+}
+
+func TestListApprovals_FiltersAndPages(t *testing.T) {
+	w := newApprovalWorld(t)
+	ctx := context.Background()
+	all := seedApprovals(t, w, 10)
+
+	got, err := sqlite.ListApprovals(ctx, w.db, sqlite.ApprovalQuery{})
+	if err != nil || strings.Join(approvalIDs(got), ",") != strings.Join(all, ",") {
+		t.Fatalf("unfiltered = %v (%v), want every approval newest first %v", approvalIDs(got), err, all)
+	}
+
+	// Pages of 3 cover everything once, in order.
+	var paged []string
+	after := ""
+	for range 10 {
+		page, err := sqlite.ListApprovals(ctx, w.db, sqlite.ApprovalQuery{Limit: 3, After: after})
+		if err != nil {
+			t.Fatal(err)
+		}
+		paged = append(paged, approvalIDs(page)...)
+		if len(page) < 3 {
+			break
+		}
+		after = page[len(page)-1].Metadata.ID
+	}
+	if strings.Join(paged, ",") != strings.Join(all, ",") {
+		t.Errorf("paged = %v, want %v", paged, all)
+	}
+
+	for name, tt := range map[string]struct {
+		q    sqlite.ApprovalQuery
+		want func(i int) bool // by seed index, oldest = 0
+	}{
+		"phase":               {sqlite.ApprovalQuery{Phase: resource.ApprovalPending}, func(i int) bool { return i%2 == 0 }},
+		"target":              {sqlite.ApprovalQuery{TargetID: w.org.Metadata.ID}, func(i int) bool { return i%2 == 1 }},
+		"target kind":         {sqlite.ApprovalQuery{TargetKind: resource.KindSecret}, func(i int) bool { return i%2 == 0 }},
+		"requester":           {sqlite.ApprovalQuery{Requester: "bob"}, func(i int) bool { return i%2 == 1 }},
+		"unsettled":           {sqlite.ApprovalQuery{Unsettled: true}, func(i int) bool { return i%3 != 0 }},
+		"unsettled on target": {sqlite.ApprovalQuery{Unsettled: true, TargetID: w.secret.Metadata.ID}, func(i int) bool { return i%3 != 0 && i%2 == 0 }},
+		"phase on target":     {sqlite.ApprovalQuery{Phase: resource.ApprovalExecuted, TargetID: w.org.Metadata.ID}, func(i int) bool { return i%2 == 1 }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := sqlite.ListApprovals(ctx, w.db, tt.q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want []string
+			for j, id := range all {
+				if tt.want(len(all) - 1 - j) {
+					want = append(want, id)
+				}
+			}
+			if strings.Join(approvalIDs(got), ",") != strings.Join(want, ",") {
+				t.Errorf("got %v, want %v", approvalIDs(got), want)
+			}
+		})
+	}
+
+	if _, err := sqlite.ListApprovals(ctx, w.db, sqlite.ApprovalQuery{After: "nope"}); !errors.Is(err, resource.ErrValidation) {
+		t.Errorf("an unknown cursor = %v, want a validation error", err)
+	}
+}
+
+// Approvals only grow, so each read must be served by its index (spec 019
+// T007a): never a scan of every approval, never a sort of them.
+func TestListApprovals_UsesTheIndexes(t *testing.T) {
+	w := newApprovalWorld(t)
+	ctx := context.Background()
+	seedApprovals(t, w, 4)
+	for q, index := range map[sqlite.ApprovalQuery]string{
+		{Limit: 100}:                                "idx_resources_kind_created",
+		{Phase: resource.ApprovalPending}:           "idx_approvals_phase",
+		{TargetID: "x"}:                             "idx_approvals_target",
+		{TargetID: "x", Unsettled: true}:            "idx_approvals_target",
+		{Unsettled: true}:                           "idx_approvals_unsettled",
+		{Phase: resource.ApprovalPending, Limit: 5}: "idx_approvals_phase",
+	} {
+		query, args, err := sqlite.ApprovalsSQL(ctx, w.db, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := w.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		rows.Close()
+		joined := strings.Join(plan, " | ")
+		if !strings.Contains(joined, "INDEX "+index) || strings.Contains(joined, "TEMP B-TREE") {
+			t.Errorf("%+v: plan %q, want it served by %s with no sort", q, joined, index)
+		}
+	}
+}
+
+// Migration 0006 settles approvals recorded before settled existed, but only
+// those nothing more will happen to.
+func TestMigration0006_SettlesFinishedApprovals(t *testing.T) {
+	w := newApprovalWorld(t)
+	ctx := context.Background()
+	verified := []resource.Condition{{Type: resource.ApprovalConditionVerified, Status: resource.ConditionTrue}}
+	unverified := []resource.Condition{{Type: resource.ApprovalConditionVerified, Status: resource.ConditionFalse}}
+	want := map[string]bool{}
+	for phase, cases := range map[resource.ApprovalPhase][]struct {
+		conds   []resource.Condition
+		settled bool
+	}{
+		resource.ApprovalPending:  {{nil, false}},
+		resource.ApprovalApproved: {{nil, false}},
+		resource.ApprovalRejected: {{nil, true}},
+		resource.ApprovalExpired:  {{nil, true}},
+		resource.ApprovalFailed:   {{nil, true}},
+		resource.ApprovalExecuted: {{verified, true}, {unverified, false}, {nil, false}},
+	} {
+		for _, c := range cases {
+			a, err := w.approvals.Create(ctx, resource.Approval{
+				Metadata: resource.Metadata{Name: "old"},
+				Status:   resource.ApprovalStatus{Phase: phase, Status: resource.Status{Conditions: c.conds}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want[a.Metadata.ID] = c.settled
+		}
+	}
+	// Re-run 0006 as an older database would meet it.
+	for _, stmt := range []string{
+		`DELETE FROM schema_migrations WHERE version = 6`,
+		`DROP INDEX idx_resources_kind_created`, `DROP INDEX idx_approvals_phase`,
+		`DROP INDEX idx_approvals_target`, `DROP INDEX idx_approvals_unsettled`,
+	} {
+		if _, err := w.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sqlite.Migrate(ctx, w.db); err != nil {
+		t.Fatalf("Migrate() = %v", err)
+	}
+	for id, settled := range want {
+		a, err := w.approvals.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.Status.Settled != settled {
+			t.Errorf("%s with %v: settled = %v, want %v", a.Status.Phase, a.Status.Conditions, a.Status.Settled, settled)
+		}
+	}
 }
