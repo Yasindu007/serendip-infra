@@ -101,7 +101,9 @@ func TestSecretHandler_WriteThenReadValue_RoundTrips(t *testing.T) {
 	}
 }
 
-func TestSecretHandler_Delete_CallsProviderDeleteBeforeRecordGone(t *testing.T) {
+// The value isn't erased here: the delete's Approval records the Secret
+// and the approval reconciler erases its value afterwards (spec 019).
+func TestSecretHandler_Delete_RemovesTheRecordOnly(t *testing.T) {
 	mux, provider := newTestSecretMux(t)
 
 	created := doRequest(mux, http.MethodPost, "/v1/secrets", resource.Secret{
@@ -114,12 +116,12 @@ func TestSecretHandler_Delete_CallsProviderDeleteBeforeRecordGone(t *testing.T) 
 		"data": map[string]any{"password": "s3cr3t-value"},
 	})
 
-	del := doRequest(mux, http.MethodDelete, "/v1/secrets/"+id, nil)
+	del := doApprovedDelete(mux, "/v1/secrets/"+id, resource.KindSecret, id)
 	if del.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want %d, body: %s", del.Code, http.StatusNoContent, del.Body)
 	}
-	if provider.deleteCalls != 1 {
-		t.Errorf("provider delete calls = %d, want 1", provider.deleteCalls)
+	if provider.deleteCalls != 0 {
+		t.Errorf("provider delete calls = %d, want 0 (erasure is the approval reconciler's)", provider.deleteCalls)
 	}
 
 	get := doRequest(mux, http.MethodGet, "/v1/secrets/"+id, nil)

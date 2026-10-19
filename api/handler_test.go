@@ -10,6 +10,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/core/store/storetest"
 )
 
 func newTestHandler(t *testing.T) *api.ResourceHandler[resource.OrganizationSpec, resource.OrganizationStatus] {
@@ -38,6 +39,17 @@ func doRequest(mux *http.ServeMux, method, path string, body any) *httptest.Resp
 		reqBody = bytes.NewBuffer(nil)
 	}
 	req := httptest.NewRequest(method, path, reqBody)
+	w := httptest.NewRecorder()
+	api.RequestIDMiddleware(mux).ServeHTTP(w, req)
+	return w
+}
+
+// doApprovedDelete DELETEs kind/id on a plain mux, carrying the approval
+// the authorizer would attach (spec 019): the store refuses a delete
+// without one.
+func doApprovedDelete(mux *http.ServeMux, path string, kind resource.Kind, id string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	req = req.WithContext(storetest.Approved(req.Context(), kind, id, false))
 	w := httptest.NewRecorder()
 	api.RequestIDMiddleware(mux).ServeHTTP(w, req)
 	return w
@@ -110,7 +122,10 @@ func TestResourceHandler_CRUDCycle(t *testing.T) {
 	}
 
 	// Delete
-	w = doRequest(mux, http.MethodDelete, "/v1/organizations/"+created.Metadata.ID, nil)
+	if w = doRequest(mux, http.MethodDelete, "/v1/organizations/"+created.Metadata.ID, nil); w.Code != http.StatusInternalServerError {
+		t.Fatalf("Delete without an approval status = %d, want 500 (the store refuses it; only a wiring bug gets here)", w.Code)
+	}
+	w = doApprovedDelete(mux, "/v1/organizations/"+created.Metadata.ID, resource.KindOrganization, created.Metadata.ID)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("Delete status = %d, want %d, body: %s", w.Code, http.StatusNoContent, w.Body)
 	}

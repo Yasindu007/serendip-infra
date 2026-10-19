@@ -102,6 +102,11 @@ Approvals page. No new dependency, no migration, no new role.
      returns a context carrying a real intent. The roughly ten test files
      that call `Delete` directly use it. A new test checks that `Delete`
      without an intent fails and leaves the row in place.
+   - **A stored approval must carry what was reviewed** (contract-guardian
+     finding F1, T003): with `Existing`, a zero `ExpectedVersion` or a nil
+     `ExpectedRadius` is refused with `ErrNoApproval`, so the stale check
+     can't be skipped by omission. Only a new, policy-approved Approval
+     may leave them empty.
    - **The API answer:** `ErrNoApproval` that ever reaches the API is a
      wiring bug, so `MapStoreError` turns it into a 500 with no internal
      text, and it's logged.
@@ -167,8 +172,7 @@ Approvals page. No new dependency, no migration, no new role.
      - **`Pending`:** past `expiresAt`, it becomes `Expired`. Otherwise it
        requeues for the time left. The 30 s resync bounds the lateness.
      - **`Approved`:** it calls the kind's delete with the intent, which
-       carries the expected version and radius, the actor
-       `system:approvals`, interface `approval`, and a policy decision of
+       carries the expected version and radius, and a policy decision of
        `approved: <approval> by <approver>; requested by <requester>`.
        - The store does the stale check inside the transaction, so
          nothing needs pre-checking: nothing irreversible happens before
@@ -206,10 +210,13 @@ Approvals page. No new dependency, no migration, no new role.
    - **The cascade fix:** a cascade that removes Secrets lists them in
      the blast radius like any other ref, so their values are erased too.
      Before this spec they were left in the provider for good.
-   - **Why the actor is `system:approvals`, not the requester:** the
-     requester didn't perform the delete; the approval did. Who asked and
-     who approved are both named in `policy_decision` and in the Approval
-     itself.
+   - **The actor is the engine's `system:reconciler`, not the
+     requester.** The requester didn't perform the delete; the approval
+     did. Who asked and who approved are both named in `policy_decision`
+     and in the Approval itself. (Amended at T005: the plan said
+     `system:approvals` with interface `approval`, but
+     `core/reconcile/CLAUDE.md` has the engine, not each reconciler, set
+     the audit identity.)
 
 8. **Deciding** (`POST /v1/approvals/{id}/approve|reject`).
    - **The rule:** `targetApprovalDecide`. It loads the approval; the

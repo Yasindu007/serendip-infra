@@ -45,5 +45,55 @@ type Store[S, St any] interface {
 	Update(ctx context.Context, r resource.Resource[S, St]) (resource.Resource[S, St], error)
 	// Delete rejects removing a resource that has "owns" children unless
 	// cascade is true (docs/architecture/resource-model.md "Relationships").
+	// The context must carry an approval (WithApproval) naming this delete;
+	// without one Delete returns ErrNoApproval and changes nothing.
 	Delete(ctx context.Context, id string, cascade bool) error
+}
+
+// ErrNoApproval is returned by Delete when the context carries no
+// approval (spec 019, constitution rule 5): no delete happens without one
+// on the record. It fails closed, so a delete path that forgets to attach
+// one is refused rather than deleting unrecorded.
+var ErrNoApproval = errors.New("store: delete refused: no approval")
+
+// ErrStale is returned by Delete when the target, or what a cascade would
+// remove, has changed since the approval was requested. Nothing is
+// deleted: nobody deletes what nobody reviewed.
+var ErrStale = errors.New("store: target changed since the approval was requested")
+
+// ApprovalIntent is the approval a Delete records, carried on the context
+// the way audit.WithPolicyDecision carries the decision: every delete path
+// already passes its request context down. Delete writes or completes the
+// Approval in the same transaction as the delete.
+type ApprovalIntent struct {
+	// Approval is the record. Its phase is Approved, and its action names
+	// exactly the delete being made (kind, ID, cascade). Delete moves it
+	// to Executed and fills in the blast radius it actually removed.
+	Approval resource.Approval
+	// Existing is true when Approval is already stored (the approval
+	// reconciler executing an approved request); Delete then updates it,
+	// and its ResourceVersion must still match. Otherwise Delete inserts
+	// it (a DELETE approved by policy).
+	Existing bool
+	// ExpectedVersion is the target's resourceVersion as reviewed. Zero
+	// skips the check, which only a new (policy-approved) Approval may do.
+	ExpectedVersion int64
+	// ExpectedRadius is what the delete was reviewed to remove, the
+	// target included. Nil skips the check, which only a new
+	// (policy-approved) Approval may do; with Existing, both are required.
+	ExpectedRadius []resource.Scope
+}
+
+type approvalKey struct{}
+
+// WithApproval returns a context carrying the approval the next Delete
+// records.
+func WithApproval(ctx context.Context, in ApprovalIntent) context.Context {
+	return context.WithValue(ctx, approvalKey{}, in)
+}
+
+// ApprovalFrom returns the approval set by WithApproval.
+func ApprovalFrom(ctx context.Context) (ApprovalIntent, bool) {
+	in, ok := ctx.Value(approvalKey{}).(ApprovalIntent)
+	return in, ok
 }

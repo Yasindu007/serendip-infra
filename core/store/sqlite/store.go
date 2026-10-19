@@ -303,7 +303,21 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 // rejects with store.ErrHasChildren; cascade=true deletes every child
 // first (post-order, deepest first), each with its own audit record,
 // entirely within this one transaction.
+//
+// The context must carry an approval for exactly this delete
+// (store.WithApproval); without one Delete returns store.ErrNoApproval.
+// Before removing anything it checks the target, and what a cascade would
+// remove, against what the approval reviewed (store.ErrStale). The
+// Approval is then recorded as Executed, listing every removed row, in
+// this same transaction (approval.go).
 func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bool) error {
+	intent, ok := store.ApprovalFrom(ctx)
+	if !ok {
+		return store.ErrNoApproval
+	}
+	if err := checkIntent(intent, s.kind, resourceID, cascade); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("sqlite: delete %s %s: begin: %w", s.kind, resourceID, err)
@@ -323,12 +337,15 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 	}
 
 	ref := graph.ResourceRef{Kind: s.kind, ID: resourceID}
+	if err := checkReviewed(ctx, tx, intent, ref, before.Metadata.ResourceVersion); err != nil {
+		return err
+	}
 	children, err := graph.Children(ctx, tx, ref)
 	if err != nil {
 		return err
 	}
 	actor := audit.ActorFrom(ctx)
-	var cascaded []graph.ResourceRef
+	var cascaded []removedRow
 	if len(children) > 0 {
 		if !cascade {
 			return store.ErrHasChildren
@@ -366,20 +383,32 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 		return err
 	}
 
+	targetSpec, err := json.Marshal(before.Spec)
+	if err != nil {
+		return fmt.Errorf("sqlite: marshal deleted spec: %w", err)
+	}
+	removed := append([]removedRow{{ref: ref, name: before.Metadata.Name, spec: targetSpec}}, cascaded...)
+	approvalEvent, err := recordApproval(ctx, tx, intent, before.Metadata, removed, now)
+	if err != nil {
+		return err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("sqlite: delete %s %s: commit: %w", s.kind, resourceID, err)
 	}
 	for _, child := range cascaded {
-		s.publishKind(event.EventDeleted, child.Kind, child.ID, actor, now)
+		s.publishKind(event.EventDeleted, child.ref.Kind, child.ref.ID, actor, now)
 	}
 	s.publish(event.EventDeleted, resourceID, actor, now)
+	s.publishKind(approvalEvent.Type, approvalEvent.Kind, approvalEvent.ID, approvalEvent.Actor, now)
 	return nil
 }
 
 // cascadeDeleteChild recursively deletes ref and everything it
 // transitively owns, post-order (grandchildren before children before
 // ref), each deletion writing its own audit record and appending to
-// *deleted so the caller can publish an event per cascaded resource after
+// *deleted (with its name and spec, for the Approval's blast radius) so
+// the caller can publish an event per cascaded resource after
 // the whole transaction commits (events are never published mid-
 // transaction -- see the Store doc comment). Kind-agnostic because a
 // cascade can span multiple resource kinds (an Organization's children
@@ -389,7 +418,7 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 // visited guards against a cyclic owns-graph (nothing in resource.Validate
 // currently rejects one) causing unbounded recursion -- a malformed
 // OwnerRefs cycle is rejected with an error instead of a stack overflow.
-func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, actor string, visited map[graph.ResourceRef]bool, deleted *[]graph.ResourceRef) error {
+func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, actor string, visited map[graph.ResourceRef]bool, deleted *[]removedRow) error {
 	if visited[ref] {
 		return fmt.Errorf("sqlite: cascade delete: cycle detected in owns-graph at %s %s", ref.Kind, ref.ID)
 	}
@@ -405,7 +434,7 @@ func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, 
 		}
 	}
 
-	beforeJSON, err := rawSnapshotJSON(ctx, tx, ref)
+	beforeJSON, name, spec, err := rawSnapshot(ctx, tx, ref)
 	if err != nil {
 		return err
 	}
@@ -416,7 +445,7 @@ func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, 
 	if err := graph.DeleteEdgesFor(ctx, tx, ref); err != nil {
 		return err
 	}
-	*deleted = append(*deleted, ref)
+	*deleted = append(*deleted, removedRow{ref: ref, name: name, spec: spec})
 
 	return writeAudit(ctx, tx, audit.Record{
 		ID:             id.New(),
@@ -434,7 +463,7 @@ func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, 
 	})
 }
 
-// rawSnapshotJSON marshals a resources row into an audit "before"
+// rawSnapshot marshals a resources row into an audit "before"
 // snapshot without needing the row's Spec/Status Go types -- Spec/Status
 // are re-wrapped verbatim via json.RawMessage (their shape is unknown
 // here, that's the whole point), but Labels/OwnerRefs/Relationships are
@@ -452,7 +481,10 @@ func cascadeDeleteChild(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef, 
 // different ad hoc shape, or the audit trail would be inconsistent
 // depending on whether a deletion happened to cascade (constitution
 // rule 8: audit records' "what" should be uniform).
-func rawSnapshotJSON(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef) (json.RawMessage, error) {
+//
+// It also returns the row's name and spec, which an Approval's blast
+// radius records.
+func rawSnapshot(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef) (json.RawMessage, string, json.RawMessage, error) {
 	var snap struct {
 		Metadata struct {
 			ID              string                  `json:"id"`
@@ -478,28 +510,28 @@ func rawSnapshotJSON(ctx context.Context, tx *sql.Tx, ref graph.ResourceRef) (js
 	).Scan(&snap.Metadata.ID, &snap.Metadata.Name, &labelsJSON, &ownerRefsJSON, &relationshipsJSON, &spec, &status,
 		&snap.Metadata.ResourceVersion, &snap.Metadata.CreatedAt, &snap.Metadata.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
+		return nil, "", nil, store.ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("sqlite: raw snapshot %s %s: %w", ref.Kind, ref.ID, err)
+		return nil, "", nil, fmt.Errorf("sqlite: raw snapshot %s %s: %w", ref.Kind, ref.ID, err)
 	}
 	if err := json.Unmarshal([]byte(labelsJSON), &snap.Metadata.Labels); err != nil {
-		return nil, fmt.Errorf("sqlite: unmarshal raw snapshot labels: %w", err)
+		return nil, "", nil, fmt.Errorf("sqlite: unmarshal raw snapshot labels: %w", err)
 	}
 	if err := json.Unmarshal([]byte(ownerRefsJSON), &snap.Metadata.OwnerRefs); err != nil {
-		return nil, fmt.Errorf("sqlite: unmarshal raw snapshot owner_refs: %w", err)
+		return nil, "", nil, fmt.Errorf("sqlite: unmarshal raw snapshot owner_refs: %w", err)
 	}
 	if err := json.Unmarshal([]byte(relationshipsJSON), &snap.Metadata.Relationships); err != nil {
-		return nil, fmt.Errorf("sqlite: unmarshal raw snapshot relationships: %w", err)
+		return nil, "", nil, fmt.Errorf("sqlite: unmarshal raw snapshot relationships: %w", err)
 	}
 	snap.Spec = json.RawMessage(spec)
 	snap.Status = json.RawMessage(status)
 
 	out, err := json.Marshal(snap)
 	if err != nil {
-		return nil, fmt.Errorf("sqlite: marshal raw snapshot %s %s: %w", ref.Kind, ref.ID, err)
+		return nil, "", nil, fmt.Errorf("sqlite: marshal raw snapshot %s %s: %w", ref.Kind, ref.ID, err)
 	}
-	return out, nil
+	return out, snap.Metadata.Name, snap.Spec, nil
 }
 
 // publish sends an event.Event for this Store's own kind to s.bus, if one

@@ -19,6 +19,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/core/store/storetest"
 )
 
 func openStore(t *testing.T) (*sql.DB, string) {
@@ -74,7 +75,7 @@ func TestBootstrapAdmin(t *testing.T) {
 	// (A start that granted only Owner is finished: covered below.)
 	s := sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](db, resource.KindRoleAssignment)
 	for _, a := range got {
-		if err := s.Delete(t.Context(), a.Metadata.ID, false); err != nil {
+		if err := s.Delete(storetest.Approved(t.Context(), resource.KindRoleAssignment, a.Metadata.ID, false), a.Metadata.ID, false); err != nil {
 			t.Fatal(err)
 		}
 	}

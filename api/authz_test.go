@@ -19,6 +19,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/core/store/storetest"
 )
 
 // authzWorld is an ownership tree, people with roles in it, and a server:
@@ -415,7 +416,7 @@ func TestAuthz_RevokedAPIKeyStaysRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := sqlite.NewStore[resource.RoleAssignmentSpec, resource.RoleAssignmentStatus](w.db, resource.KindRoleAssignment)
-	if err := s.Delete(context.Background(), id, false); err != nil {
+	if err := s.Delete(storetest.Approved(context.Background(), resource.KindRoleAssignment, id, false), id, false); err != nil {
 		t.Fatal(err)
 	}
 	h := api.NewServer(w.db, event.NewInProcessBus(), map[string]string{"key-ci": "ci"}, nil, nil, nil, nil).Handler

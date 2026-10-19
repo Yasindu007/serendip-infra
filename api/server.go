@@ -196,7 +196,7 @@ func removeStaleKeyAssignments(ctx context.Context, engine *policy.Engine, assig
 			log.Printf("api: WARNING: API key %q is no longer configured, but its assignment %s is the last Owner at \"/\"; keeping it", p.ID, a.Metadata.ID)
 			continue
 		}
-		if err := assignments.Delete(ctx, a.Metadata.ID, false); err != nil {
+		if err := assignments.Delete(store.WithApproval(ctx, configApproval(ctx, a.Metadata.ID, p.ID)), a.Metadata.ID, false); err != nil {
 			log.Printf("api: remove assignment %s of removed API key %q: %v", a.Metadata.ID, p.ID, err)
 			continue
 		}

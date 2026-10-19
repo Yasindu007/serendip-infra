@@ -17,6 +17,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/graph"
 	"github.com/serendip-infra/serendip-infra/core/policy"
 	"github.com/serendip-infra/serendip-infra/core/resource"
+	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
 
@@ -273,9 +274,18 @@ func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 			}
 			decisions = append(decisions, d.Describe(c.action, c.scope))
 		}
-		ctx = audit.WithPolicyDecision(ctx, strings.Join(decisions, "; "))
+		evidence := strings.Join(decisions, "; ")
+		ctx = audit.WithPolicyDecision(ctx, evidence)
 		if ru.target == targetGraph {
 			ctx = context.WithValue(ctx, readFilterKey{}, readFilter(a.readable(caller)))
+		}
+		if r.Method == http.MethodDelete {
+			// Every delete records an Approval (constitution 5, spec 019):
+			// policy allowed it, so policy approves it, and the store
+			// writes it in the delete's own transaction.
+			in := policyApproval(ctx, caller, ru, resourceID, r.URL.Query().Get("cascade") == "true", evidence)
+			ctx = store.WithApproval(ctx, in)
+			w = &approvalHeaderWriter{ResponseWriter: w, id: in.Approval.Metadata.ID}
 		}
 		h(w, r.WithContext(ctx))
 	}
@@ -523,7 +533,9 @@ func (a *authorizer) deny(w http.ResponseWriter, r *http.Request, ru rule, c che
 	switch {
 	case d.Effect == policy.NeedsApproval:
 		writeProblemType(w, ProblemNeedsApproval, http.StatusForbidden, "approval required",
-			fmt.Sprintf("%s at %s needs an approval (%s); approvals aren't available yet, so nothing was changed", act.Name, target, d.Reason), reqID)
+			fmt.Sprintf("%s at %s needs an approval (%s), so nothing was changed. Request one with POST /v1/approvals and "+
+				`{"action": {"verb": "delete", "target": {"kind": %q, "id": %q}, "cascade": %t}, "reason": "..."}`,
+				act.Name, target, d.Reason, approvalTargetKind(ru, target), resourceID, r.URL.Query().Get("cascade") == "true"), reqID)
 	case d.Reason != "":
 		WriteProblem(w, http.StatusForbidden, "forbidden", fmt.Sprintf("%s at %s: %s", act.Name, target, d.Reason), reqID)
 	default:

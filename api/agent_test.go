@@ -123,6 +123,13 @@ func TestAgents_Guardrails(t *testing.T) {
 	if got.Code != http.StatusForbidden || prob.Type != api.ProblemNeedsApproval || !strings.Contains(prob.Detail, "needs an approval") {
 		t.Errorf("agent delete: %d %s", got.Code, got.Body)
 	}
+	// The detail says how to ask (spec 019), and no Approval was recorded.
+	if want := `POST /v1/approvals and {"action": {"verb": "delete", "target": {"kind": "Component", "id": "` + w.id["web"] + `"}, "cascade": false}`; !strings.Contains(prob.Detail, want) {
+		t.Errorf("needs-approval detail = %q, want it to contain %q", prob.Detail, want)
+	}
+	if got.Header().Get("Serendip-Approval-Id") != "" {
+		t.Errorf("a refused delete named an approval: %q", got.Header().Get("Serendip-Approval-Id"))
+	}
 	w.expect("tok-owner", http.MethodGet, "/v1/components/"+w.id["web"], nil, http.StatusOK)
 	var decision string
 	if err := w.db.QueryRow(`SELECT policy_decision FROM audit_log WHERE actor = 'agent:am-dev/agent-1' AND resource_id = ?`, w.id["web"]).Scan(&decision); err != nil ||

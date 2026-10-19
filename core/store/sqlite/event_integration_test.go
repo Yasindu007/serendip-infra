@@ -9,6 +9,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/core/store/storetest"
 )
 
 // recordingBus collects every published event, safe for concurrent use
@@ -61,14 +62,18 @@ func TestStore_PublishesEventPerMutation(t *testing.T) {
 	if _, err := s.Update(ctx, created); err != nil {
 		t.Fatalf("Update() = %v", err)
 	}
-	if err := s.Delete(ctx, created.Metadata.ID, false); err != nil {
+	if err := s.Delete(storetest.Approved(ctx, resource.KindOrganization, created.Metadata.ID, false), created.Metadata.ID, false); err != nil {
 		t.Fatalf("Delete() = %v", err)
 	}
 
 	got := bus.snapshot()
-	if len(got) != 3 {
-		t.Fatalf("published events = %d, want 3 (create, update, delete)", len(got))
+	if len(got) != 4 {
+		t.Fatalf("published events = %d, want 4 (create, update, delete, approval created)", len(got))
 	}
+	if last := got[3]; last.Type != event.EventCreated || last.Kind != resource.KindApproval {
+		t.Errorf("event[3] = %+v, want the Approval's created event after the delete", last)
+	}
+	got = got[:3]
 	wantTypes := []event.EventType{event.EventCreated, event.EventUpdated, event.EventDeleted}
 	for i, want := range wantTypes {
 		if got[i].Type != want {
@@ -91,7 +96,7 @@ func TestStore_NoBusAttached_NoPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() = %v", err)
 	}
-	if err := s.Delete(ctx, created.Metadata.ID, false); err != nil {
+	if err := s.Delete(storetest.Approved(ctx, resource.KindOrganization, created.Metadata.ID, false), created.Metadata.ID, false); err != nil {
 		t.Fatalf("Delete() = %v", err)
 	}
 }
@@ -122,15 +127,20 @@ func TestStore_CascadeDelete_PublishesEventPerCascadedResource(t *testing.T) {
 		t.Fatalf("Create(app) = %v", err)
 	}
 
-	if err := orgs.Delete(ctx, org.Metadata.ID, true); err != nil {
+	if err := orgs.Delete(storetest.Approved(ctx, resource.KindOrganization, org.Metadata.ID, true), org.Metadata.ID, true); err != nil {
 		t.Fatalf("Delete(org, cascade=true) = %v", err)
 	}
 
 	got := bus.snapshot()
-	// 3 creates + 3 cascade-triggered deletes (org, project, app).
-	if len(got) != 6 {
-		t.Fatalf("published events = %d, want 6", len(got))
+	// 3 creates + 3 cascade-triggered deletes (org, project, app) + the
+	// Approval's created event, last (spec 019).
+	if len(got) != 7 {
+		t.Fatalf("published events = %d, want 7", len(got))
 	}
+	if last := got[6]; last.Type != event.EventCreated || last.Kind != resource.KindApproval {
+		t.Errorf("event[6] = %+v, want the Approval's created event last", last)
+	}
+	got = got[:6]
 
 	deletedIDs := map[string]resource.Kind{}
 	for _, e := range got[3:] {

@@ -11,6 +11,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/core/store/storetest"
 )
 
 // This is spec 001's acceptance criterion 2 (spec.md): "Creating an
@@ -72,7 +73,7 @@ func TestAcceptanceCriterion2_OrgProjectApplication(t *testing.T) {
 
 	// Deleting the Project without cascade must be rejected -- it owns
 	// the Application.
-	err = projects.Delete(ctx, project.Metadata.ID, false)
+	err = projects.Delete(storetest.Approved(ctx, resource.KindProject, project.Metadata.ID, false), project.Metadata.ID, false)
 	if !errors.Is(err, store.ErrHasChildren) {
 		t.Fatalf("Delete(project, cascade=false) error = %v, want ErrHasChildren", err)
 	}
@@ -86,14 +87,14 @@ func TestAcceptanceCriterion2_OrgProjectApplication(t *testing.T) {
 
 	// Deleting the Organization without cascade must also be rejected --
 	// transitively, it owns the Project (though not directly).
-	err = orgs.Delete(ctx, org.Metadata.ID, false)
+	err = orgs.Delete(storetest.Approved(ctx, resource.KindOrganization, org.Metadata.ID, false), org.Metadata.ID, false)
 	if !errors.Is(err, store.ErrHasChildren) {
 		t.Fatalf("Delete(org, cascade=false) error = %v, want ErrHasChildren", err)
 	}
 
 	// With cascade=true, deleting the Organization removes the Project
 	// and the Application too (multi-kind cascade, post-order).
-	if err := orgs.Delete(ctx, org.Metadata.ID, true); err != nil {
+	if err := orgs.Delete(storetest.Approved(ctx, resource.KindOrganization, org.Metadata.ID, true), org.Metadata.ID, true); err != nil {
 		t.Fatalf("Delete(org, cascade=true) = %v", err)
 	}
 	if _, err := orgs.Get(ctx, org.Metadata.ID); !errors.Is(err, store.ErrNotFound) {
@@ -107,13 +108,14 @@ func TestAcceptanceCriterion2_OrgProjectApplication(t *testing.T) {
 	}
 
 	// Every deletion in the cascade (org, project, app) must have its own
-	// audit record, plus the 3 Create records from setup = 6 total.
+	// audit record, plus the 3 Create records from setup and the
+	// Approval's own record (spec 019) = 7 total.
 	var auditCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log`).Scan(&auditCount); err != nil {
 		t.Fatalf("count audit_log: %v", err)
 	}
-	if auditCount != 6 {
-		t.Errorf("audit_log rows = %d, want 6 (3 creates + 3 cascade deletes)", auditCount)
+	if auditCount != 7 {
+		t.Errorf("audit_log rows = %d, want 7 (3 creates + 3 cascade deletes + 1 approval)", auditCount)
 	}
 
 	// No dangling edges should remain after the cascade.
@@ -137,7 +139,7 @@ func TestDelete_CascadeFalse_NoChildren_Succeeds(t *testing.T) {
 	}
 
 	// No children at all -- cascade=false must succeed, not be rejected.
-	if err := orgs.Delete(ctx, org.Metadata.ID, false); err != nil {
+	if err := orgs.Delete(storetest.Approved(ctx, resource.KindOrganization, org.Metadata.ID, false), org.Metadata.ID, false); err != nil {
 		t.Fatalf("Delete(org with no children, cascade=false) = %v, want success", err)
 	}
 }
@@ -172,7 +174,7 @@ func TestDelete_Cascade_CycleDetected(t *testing.T) {
 		t.Fatalf("Update(a, owned by b) = %v", err)
 	}
 
-	err = orgs.Delete(ctx, a.Metadata.ID, true)
+	err = orgs.Delete(storetest.Approved(ctx, resource.KindOrganization, a.Metadata.ID, true), a.Metadata.ID, true)
 	if err == nil {
 		t.Fatal("Delete(a, cascade=true) on a cyclic owns-graph succeeded, want a cycle-detected error")
 	}
@@ -182,7 +184,7 @@ func TestDelete_Cascade_CycleDetected(t *testing.T) {
 // cascade-deleted child's audit "before" snapshot has the same shape and
 // key casing (lowerCamelCase, nested under "metadata") as an ordinary
 // (non-cascaded) delete's -- contract-guardian flagged this as a real gap
-// after T005-T010 added json tags to core/resource: rawSnapshotJSON built
+// after T005-T010 added json tags to core/resource: rawSnapshot built
 // its own ad hoc struct with hardcoded capitalized tags, independent of
 // resource.Metadata, so cascade-deleted children's audit records would
 // have looked different from every other resource's.
@@ -209,8 +211,8 @@ func TestCascadeDelete_AuditSnapshotShape_MatchesOrdinaryDelete(t *testing.T) {
 
 	// org has a child (project), so deleting it cascades -- project's
 	// audit "before" snapshot goes through cascadeDeleteChild/
-	// rawSnapshotJSON, not the ordinary typed Delete() path.
-	if err := orgs.Delete(ctx, org.Metadata.ID, true); err != nil {
+	// rawSnapshot, not the ordinary typed Delete() path.
+	if err := orgs.Delete(storetest.Approved(ctx, resource.KindOrganization, org.Metadata.ID, true), org.Metadata.ID, true); err != nil {
 		t.Fatalf("Delete(org, cascade=true) = %v", err)
 	}
 

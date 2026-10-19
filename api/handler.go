@@ -126,6 +126,12 @@ func (h *ResourceHandler[S, St]) Delete(w http.ResponseWriter, r *http.Request) 
 
 func (h *ResourceHandler[S, St]) writeStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	status, title := MapStoreError(err)
+	if status == http.StatusInternalServerError {
+		// Never internal error text in a 500 (api/CLAUDE.md); a
+		// store.ErrNoApproval here is a wiring bug, logged for the operator.
+		writeStoreErr(w, r, err)
+		return
+	}
 	h.writeError(w, r, status, title, err.Error())
 }
 

@@ -28,8 +28,9 @@ type SecretHandler struct {
 
 // NewSecretHandler returns a handler for the Secret kind. Get and List
 // delegate to an embedded *ResourceHandler. Create and Update are its own,
-// to validate the path and keep it fixed (spec 017 T011); Delete is its
-// own, to remove the value too.
+// to validate the path and keep it fixed (spec 017 T011). Delete is the
+// ordinary one: the delete's Approval records the Secret, and the
+// approval reconciler erases its value afterwards (spec 019).
 func NewSecretHandler(s store.Store[resource.SecretSpec, resource.SecretStatus], r *reconcile.SecretReconciler) *SecretHandler {
 	return &SecretHandler{
 		ResourceHandler: NewResourceHandler[resource.SecretSpec, resource.SecretStatus](s, "secrets"),
@@ -37,8 +38,7 @@ func NewSecretHandler(s store.Store[resource.SecretSpec, resource.SecretStatus],
 	}
 }
 
-// Register wires the 5 ordinary CRUD routes (DELETE overridden below)
-// plus the two value routes:
+// Register wires the 5 ordinary CRUD routes plus the two value routes:
 //
 //	POST /v1/secrets/{id}/value   Write a value through to the provider
 //	GET  /v1/secrets/{id}/value   Read the current value from the provider
@@ -100,20 +100,6 @@ func (h *SecretHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
-}
-
-// Delete shadows the embedded ResourceHandler's store-only Delete --
-// it must remove the value from the provider before the Serendip-side
-// record disappears (reconcile.SecretReconciler.DeleteWithValue's own
-// doc comment explains why this can't be deferred to the reconcile
-// loop the way VolumeReconciler's delete-cascade is).
-func (h *SecretHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	cascade := r.URL.Query().Get("cascade") == "true"
-	if err := h.reconciler.DeleteWithValue(r.Context(), r.PathValue("id"), cascade); err != nil {
-		h.writeStoreError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // secretValueBody mirrors providers/secrets/openbao's own KV v2 wire

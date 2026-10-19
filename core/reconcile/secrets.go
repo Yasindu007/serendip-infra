@@ -2,7 +2,9 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/graph"
@@ -36,10 +38,11 @@ const conditionReachable = "Reachable"
 // Secret's path and report that (constitution rule 6) -- not silently
 // imply a repair action that doesn't exist.
 //
-// WriteValue/ReadValue/Delete are called synchronously by
-// SecretReconciler's own WriteValue/ReadValue/DeleteWithValue methods
-// (below), driven directly by api/, not by Reconcile or the engine's
-// resync loop -- see those methods' doc comments for why.
+// WriteValue/ReadValue are called synchronously by SecretReconciler's own
+// WriteValue/ReadValue methods (below), driven directly by api/, not by
+// Reconcile or the engine's resync loop -- see those methods' doc
+// comments for why. Delete is called by EraseValue, the clean-up an
+// executed Approval runs once a Secret's record is gone (spec 019).
 //
 // Each Secret's value is its own: a provider stores it under the Secret's
 // identity (Metadata.ID) as well as its Path, so two Secrets with the same
@@ -54,7 +57,8 @@ type SecretsProvider interface {
 	// ReadValue reads the value currently at sec's Path.
 	ReadValue(ctx context.Context, sec resource.Secret) (map[string]any, error)
 	// Delete removes the value at sec's Path. A no-op, not an error,
-	// if it doesn't exist (already deleted, or never written).
+	// if it doesn't exist (already deleted, or never written): erasure is
+	// retried until it succeeds, so it must be idempotent.
 	Delete(ctx context.Context, sec resource.Secret) error
 }
 
@@ -80,11 +84,10 @@ func NewSecretReconciler(
 var _ Reconciler = (*SecretReconciler)(nil)
 
 // Reconcile's store.ErrNotFound branch is a plain no-op, deliberately
-// unlike VolumeReconciler's -- a Secret's Path (unused once the
-// Serendip-side record is gone) is the only way to know what to clean
-// up in the provider, so that cleanup happens synchronously in api/'s
-// Delete handler (via DeleteWithValue, below) before the record
-// disappears, not here, after it already has.
+// unlike VolumeReconciler's -- a Secret's Path is gone with its record,
+// so this reconciler can't know what to erase. The delete's Approval
+// records the removed Secret's spec, and the approval reconciler erases
+// the value from that record (EraseValue, below; spec 019).
 func (r *SecretReconciler) Reconcile(ctx context.Context, ref graph.ResourceRef) error {
 	sec, err := r.secrets.Get(ctx, ref.ID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -187,21 +190,22 @@ func (r *SecretReconciler) ReadValue(ctx context.Context, id string) (map[string
 	return r.provider.ReadValue(ctx, sec)
 }
 
-// DeleteWithValue removes id's value from the provider, then deletes
-// the Serendip-side record -- in that order, deliberately. If the
-// provider delete fails, the record is left in place so a retry has
-// something to retry (a store.Delete success with a failed provider
-// delete would silently orphan the real value, unreachable through the
-// API but still live in the provider). Called directly by
-// api/SecretHandler's Delete, not by Reconcile's store.ErrNotFound
-// branch -- see that method's doc comment for why.
-func (r *SecretReconciler) DeleteWithValue(ctx context.Context, id string, cascade bool) error {
-	sec, err := r.secrets.Get(ctx, id)
-	if err != nil {
-		return err
+// EraseValue erases the value of a Secret whose record a delete removed,
+// rebuilding what the provider needs (ID and path) from ref, the deleted
+// Secret as its Approval recorded it. The order is record first, value
+// second: in between, nothing can reach the value, since access is
+// decided per Secret record and Secret IDs are never reused. Erasing an
+// already-erased value succeeds, so a retry after a crash is safe.
+func (r *SecretReconciler) EraseValue(ctx context.Context, ref resource.ApprovalRef) error {
+	if ref.Kind != resource.KindSecret {
+		return fmt.Errorf("reconcile: erase value: %s %s is not a Secret", ref.Kind, ref.ID)
 	}
-	if err := r.provider.Delete(ctx, sec); err != nil {
-		return err
+	var spec resource.SecretSpec
+	if err := json.Unmarshal(ref.LastSpec, &spec); err != nil || spec.Path == "" {
+		return fmt.Errorf("reconcile: erase value of Secret %s: no recorded path", ref.ID)
 	}
-	return r.secrets.Delete(ctx, id, cascade)
+	return r.provider.Delete(ctx, resource.Secret{
+		Metadata: resource.Metadata{ID: ref.ID, Name: ref.Name, Kind: resource.KindSecret},
+		Spec:     spec,
+	})
 }

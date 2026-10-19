@@ -45,6 +45,7 @@ type fakeSecretsProvider struct {
 	writeCalls  int
 	readCalls   int
 	deleteCalls int
+	deleted     []resource.Secret
 }
 
 func (f *fakeSecretsProvider) Exists(ctx context.Context, sec resource.Secret) (bool, error) {
@@ -64,6 +65,9 @@ func (f *fakeSecretsProvider) ReadValue(ctx context.Context, sec resource.Secret
 
 func (f *fakeSecretsProvider) Delete(ctx context.Context, sec resource.Secret) error {
 	f.deleteCalls++
+	if f.deleteErr == nil {
+		f.deleted = append(f.deleted, sec)
+	}
 	return f.deleteErr
 }
 
@@ -190,11 +194,11 @@ func TestSecretReconciler_DeletedSecretSinceEvent_NoProviderCall(t *testing.T) {
 		t.Errorf("provider.Exists call count = %d, want 0", provider.existsCalls)
 	}
 	// Deliberately unlike VolumeReconciler: no provider.Delete call
-	// here either -- a Secret's Path is gone once the record is gone,
-	// so cleanup must already have happened synchronously in api/'s
-	// Delete handler (DeleteWithValue), before the record disappeared.
+	// here either -- a Secret's Path is gone once the record is gone, so
+	// the value is erased from the delete's Approval (EraseValue), not
+	// here.
 	if provider.deleteCalls != 0 {
-		t.Errorf("provider.Delete call count = %d, want 0 (cleanup happens in DeleteWithValue, not Reconcile)", provider.deleteCalls)
+		t.Errorf("provider.Delete call count = %d, want 0 (erasure happens in EraseValue, not Reconcile)", provider.deleteCalls)
 	}
 }
 
@@ -315,47 +319,55 @@ func TestSecretReconciler_ReadValue_ReturnsProviderDataNoStoreWrite(t *testing.T
 	}
 }
 
-func TestSecretReconciler_DeleteWithValue_DeletesProviderThenStore(t *testing.T) {
+func TestSecretReconciler_EraseValue(t *testing.T) {
 	secrets, _ := newSecretTestStoreAndDB(t)
-	sec, err := secrets.Create(context.Background(), resource.Secret{
-		Metadata: resource.Metadata{Name: "secret-under-test"},
-		Spec:     resource.SecretSpec{Path: "myapp/db-password"},
-	})
-	if err != nil {
-		t.Fatalf("Create(secret) = %v", err)
-	}
+	ref := resource.ApprovalRef{Kind: resource.KindSecret, ID: "s-1", Name: "db", LastSpec: json.RawMessage(`{"path":"myapp/db-password"}`)}
 
 	provider := &fakeSecretsProvider{}
 	r := reconcile.NewSecretReconciler(secrets, provider)
-
-	if err := r.DeleteWithValue(context.Background(), sec.Metadata.ID, false); err != nil {
-		t.Fatalf("DeleteWithValue() = %v", err)
+	for i := range 2 { // a retry after a crash erases again; that must succeed
+		if err := r.EraseValue(context.Background(), ref); err != nil {
+			t.Fatalf("EraseValue() #%d = %v", i+1, err)
+		}
 	}
-	if provider.deleteCalls != 1 {
-		t.Errorf("provider.Delete call count = %d, want 1", provider.deleteCalls)
+	if len(provider.deleted) != 2 {
+		t.Fatalf("provider.Delete calls = %d, want 2", len(provider.deleted))
 	}
-	if _, err := secrets.Get(context.Background(), sec.Metadata.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("Get() after DeleteWithValue = %v, want ErrNotFound", err)
+	got := provider.deleted[0]
+	if got.Metadata.ID != "s-1" || got.Metadata.Kind != resource.KindSecret || got.Spec.Path != "myapp/db-password" {
+		t.Errorf("provider.Delete got %+v, want Secret s-1 at myapp/db-password: values are stored under ID and path", got)
 	}
 }
 
-func TestSecretReconciler_DeleteWithValue_ProviderErrorLeavesRecordIntact(t *testing.T) {
+func TestSecretReconciler_EraseValue_Errors(t *testing.T) {
 	secrets, _ := newSecretTestStoreAndDB(t)
-	sec, err := secrets.Create(context.Background(), resource.Secret{
-		Metadata: resource.Metadata{Name: "secret-under-test"},
-		Spec:     resource.SecretSpec{Path: "myapp/db-password"},
-	})
-	if err != nil {
-		t.Fatalf("Create(secret) = %v", err)
+	tests := []struct {
+		name     string
+		ref      resource.ApprovalRef
+		provider *fakeSecretsProvider
+		want     error
+	}{
+		{name: "provider not ready", ref: resource.ApprovalRef{Kind: resource.KindSecret, ID: "s-1", LastSpec: json.RawMessage(`{"path":"a/b"}`)},
+			provider: &fakeSecretsProvider{deleteErr: reconcile.ErrProviderNotReady}, want: reconcile.ErrProviderNotReady},
+		{name: "provider failure", ref: resource.ApprovalRef{Kind: resource.KindSecret, ID: "s-1", LastSpec: json.RawMessage(`{"path":"a/b"}`)},
+			provider: &fakeSecretsProvider{deleteErr: errors.New("connection refused")}},
+		{name: "not a Secret", ref: resource.ApprovalRef{Kind: resource.KindVolume, ID: "v-1", LastSpec: json.RawMessage(`{"path":"a/b"}`)},
+			provider: &fakeSecretsProvider{}},
+		{name: "no recorded spec", ref: resource.ApprovalRef{Kind: resource.KindSecret, ID: "s-1"}, provider: &fakeSecretsProvider{}},
+		{name: "no recorded path", ref: resource.ApprovalRef{Kind: resource.KindSecret, ID: "s-1", LastSpec: json.RawMessage(`{}`)}, provider: &fakeSecretsProvider{}},
 	}
-
-	provider := &fakeSecretsProvider{deleteErr: errors.New("connection refused")}
-	r := reconcile.NewSecretReconciler(secrets, provider)
-
-	if err := r.DeleteWithValue(context.Background(), sec.Metadata.ID, false); err == nil {
-		t.Fatal("DeleteWithValue() = nil, want the provider's Delete error propagated")
-	}
-	if _, err := secrets.Get(context.Background(), sec.Metadata.ID); err != nil {
-		t.Errorf("Get() after a failed DeleteWithValue = %v, want the record to still exist so a retry has something to retry", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := reconcile.NewSecretReconciler(secrets, tt.provider).EraseValue(context.Background(), tt.ref)
+			if err == nil {
+				t.Fatal("EraseValue() = nil, want an error")
+			}
+			if tt.want != nil && !errors.Is(err, tt.want) {
+				t.Errorf("EraseValue() = %v, want %v", err, tt.want)
+			}
+			if len(tt.provider.deleted) != 0 {
+				t.Errorf("provider erased %v despite the error", tt.provider.deleted)
+			}
+		})
 	}
 }

@@ -23,7 +23,7 @@ T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
 - **Verify**: `go test ./core/resource/...`;
   `bash .claude/scripts/check-imports.sh`.
 
-## T002 [P] — `policy.MayDecide`
+## T002 [P] — `policy.MayDecide` — DONE 2026-10-19 (`go test ./core/policy/...`; it takes the requester as `*resource.PrincipalRef`, nil for a server-side requester, and allows only person and apiKey approvers, so `system` needs no principal type)
 
 - **Do**: `core/policy/approvals.go`. It refuses `agent` and `system`
   approvers (`ErrApproverGuardrail`) and the requester itself
@@ -33,7 +33,7 @@ T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
 - **Files**: `core/policy/approvals.go`, `approvals_test.go`.
 - **Verify**: `go test ./core/policy/...`.
 
-## T003 [P] — The store: the intent, fail-closed, removed rows recorded
+## T003 [P] — The store: the intent, fail-closed, removed rows recorded — DONE 2026-10-19 (`go test ./...` green; the production delete callers are exactly the four in `api/`, with the approval reconciler to come in T007. contract-guardian PASS on T001–T004; its finding F1 is fixed here: a stored approval must carry the reviewed version and radius, or `ErrNoApproval`)
 
 - **Do**:
   - Add `store.ErrStale`, `store.ErrNoApproval`, `ApprovalIntent` and
@@ -69,7 +69,7 @@ T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
   - `grep -rn "\.Delete(" --include=*.go` shows no production caller
     outside the five in plan decision 3.
 
-## T004 [P] — Secret value erasure from the record
+## T004 [P] — Secret value erasure from the record — DONE 2026-10-19 (OpenBao `DeleteSecret` already treats 404 as success, pinned by `TestClient_DeleteSecret_404ReturnsNilNotError`, so no provider change was needed. `EraseValue` tests cover a repeat erase and the errors)
 
 - **Do**:
   - Add `SecretReconciler.EraseValue(ctx, ref)`, which rebuilds the
@@ -91,7 +91,7 @@ T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
     succeeding.
 - **Then**: run `contract-guardian` on T001–T004 before committing.
 
-## T005 — Every DELETE records an Approval
+## T005 — Every DELETE records an Approval — DONE 2026-10-19 (`approvals_delete_test.go`, `approvals_routes_test.go`, `agent_test.go`. A 500 from `ResourceHandler` no longer carries internal text. Committed together with T001–T004, since the fail-closed store breaks every API DELETE without this task)
 
 - **Do**: in `api/authz.go`:
   - extract `deleteChecks`;
@@ -144,7 +144,7 @@ T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
 - **Do**:
   - `core/reconcile/approval.go`, per plan decision 7:
     - expire;
-    - execute with the intent and the `system:approvals` actor, with
+    - execute with the intent (the engine's `system:reconciler` actor), with
       stale → `Failed`;
     - clean up each blast-radius ref through `cleaners`, saving
       `cleanedUp` per ref;

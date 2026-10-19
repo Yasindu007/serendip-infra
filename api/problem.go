@@ -54,6 +54,8 @@ func MapStoreError(err error) (status int, title string) {
 		return http.StatusConflict, "resource version conflict"
 	case errors.Is(err, store.ErrHasChildren):
 		return http.StatusConflict, "resource has children"
+	case errors.Is(err, store.ErrStale):
+		return http.StatusConflict, "stale target"
 	case errors.Is(err, resource.ErrValidation):
 		return http.StatusBadRequest, "validation failed"
 	case errors.Is(err, reconcile.ErrProviderNotReady):

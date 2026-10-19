@@ -12,6 +12,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/core/store/storetest"
 )
 
 func newTestStore(t *testing.T) *sqlite.Store[resource.OrganizationSpec, resource.OrganizationStatus] {
@@ -263,7 +264,7 @@ func TestStore_Delete(t *testing.T) {
 		t.Fatalf("Create() = %v", err)
 	}
 
-	if err := s.Delete(ctx, created.Metadata.ID, false); err != nil {
+	if err := s.Delete(storetest.Approved(ctx, resource.KindOrganization, created.Metadata.ID, false), created.Metadata.ID, false); err != nil {
 		t.Fatalf("Delete() = %v", err)
 	}
 
@@ -277,7 +278,7 @@ func TestStore_Delete_NotFound(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 
-	err := s.Delete(ctx, "does-not-exist", false)
+	err := s.Delete(storetest.Approved(ctx, resource.KindOrganization, "does-not-exist", false), "does-not-exist", false)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("Delete() error = %v, want ErrNotFound", err)
 	}
@@ -357,7 +358,7 @@ func TestStore_Delete_WritesExactlyOneAuditRecordWithBeforeOnly(t *testing.T) {
 		t.Fatalf("Create() = %v", err)
 	}
 
-	if err := s.Delete(ctx, created.Metadata.ID, false); err != nil {
+	if err := s.Delete(storetest.Approved(ctx, resource.KindOrganization, created.Metadata.ID, false), created.Metadata.ID, false); err != nil {
 		t.Fatalf("Delete() = %v", err)
 	}
 

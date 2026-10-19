@@ -15,6 +15,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/core/store/storetest"
 )
 
 // world is a store with an ownership tree and an engine over it:
@@ -260,7 +261,7 @@ func TestNewAssignmentsTakeEffectImmediately(t *testing.T) {
 	w.expect(check{alice, "serendip/components/read", false, web, false})
 	id := w.grant(alice, policy.ReaderRoleID, web, nil)
 	w.expect(check{alice, "serendip/components/read", false, web, true})
-	if err := w.assign.Delete(w.ctx, id, false); err != nil {
+	if err := w.assign.Delete(storetest.Approved(w.ctx, resource.KindRoleAssignment, id, false), id, false); err != nil {
 		t.Fatal(err)
 	}
 	w.expect(check{alice, "serendip/components/read", false, web, false})
