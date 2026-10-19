@@ -72,8 +72,9 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 	}
 	engine, stopPolicy := newPolicyEngine(db, bus)
 	migrateAPIKeys(engine, db, bus, apiKeys)
-	apiMux := &authzMux{mux: http.NewServeMux(), a: newAuthorizer(engine, graph.NewSQLiteGraph(db), recordDeniedIn(db))}
-	registerAPI(apiMux, db, bus, engine, secretReconciler, providers, console, o)
+	approvals := sqlite.NewStore[resource.ApprovalSpec, resource.ApprovalStatus](db, resource.KindApproval).SetBus(bus)
+	apiMux := &authzMux{mux: http.NewServeMux(), a: newAuthorizer(engine, graph.NewSQLiteGraph(db), recordDeniedIn(db), approvals, resourceExistsIn(db))}
+	registerAPI(apiMux, db, bus, engine, approvals, secretReconciler, providers, console, o)
 
 	topMux := http.NewServeMux()
 	topMux.HandleFunc("GET /healthz", healthzHandler)
@@ -234,7 +235,7 @@ func WithDirectory(d identity.Directory) ServerOption {
 
 // registerAPI registers every /v1 route on mux. NewServer passes its
 // authorizing mux; the fail-closed test passes a recorder to enumerate them.
-func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, secretReconciler *reconcile.SecretReconciler, providers *provider.Registry, console *Console, opts serverOptions) {
+func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, approvals store.Store[resource.ApprovalSpec, resource.ApprovalStatus], secretReconciler *reconcile.SecretReconciler, providers *provider.Registry, console *Console, opts serverOptions) {
 	// 14 explicit instantiations, deliberately not abstracted further
 	// (specs/002-http-api/plan.md Risks: "each line is trivial and
 	// independently readable" -- a loop over a slice of type-erased
@@ -271,6 +272,14 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, s
 	}
 
 	NewGraphHandler(graph.NewSQLiteGraph(db)).Register(apiMux)
+	(&ApprovalHandler{
+		approvals: approvals,
+		tree:      graph.NewSQLiteGraph(db),
+		head: func(ctx context.Context, kind resource.Kind, id string) (string, int64, error) {
+			return sqlite.ResourceHead(ctx, db, kind, id)
+		},
+		now: time.Now,
+	}).Register(apiMux)
 	NewRegistryHandler(registry.NewCapabilityRegistry(capStore)).Register(apiMux)
 	NewReadinessHandler(providers).Register(apiMux)
 	(&AuthorizationHandler{
@@ -280,9 +289,7 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, s
 		principals:   sqlite.NewPrincipalRegistry(db),
 		directory:    opts.directory,
 		recordDenied: recordDeniedIn(db),
-		exists: func(ctx context.Context, kind resource.Kind, id string) (bool, error) {
-			return sqlite.ResourceExists(ctx, db, kind, id)
-		},
+		exists:       resourceExistsIn(db),
 	}).Register(apiMux)
 	apiMux.HandleFunc("GET /v1/session", console.sessionHandler)
 	// Catch-all for anything under /v1/ that doesn't match a registered
@@ -306,4 +313,11 @@ func mountResource[S, St any](mux Mux, db *sql.DB, bus event.Bus, kind resource.
 
 func healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
+}
+
+// resourceExistsIn says whether a resource of any kind exists in db.
+func resourceExistsIn(db *sql.DB) func(ctx context.Context, kind resource.Kind, id string) (bool, error) {
+	return func(ctx context.Context, kind resource.Kind, id string) (bool, error) {
+		return sqlite.ResourceExists(ctx, db, kind, id)
+	}
 }

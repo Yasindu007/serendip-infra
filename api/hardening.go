@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -62,6 +63,22 @@ func writeTooLarge(w http.ResponseWriter, r *http.Request) {
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	err := json.NewDecoder(r.Body).Decode(v)
 	if err == nil {
+		return true
+	}
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		writeTooLarge(w, r)
+		return false
+	}
+	WriteProblem(w, http.StatusBadRequest, "malformed request body", err.Error(), audit.RequestIDFrom(r.Context()))
+	return false
+}
+
+// decodeOptionalBody is decodeBody for a body that may be absent: an empty
+// body, sized or chunked, leaves v as it is.
+func decodeOptionalBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	err := json.NewDecoder(r.Body).Decode(v)
+	if err == nil || errors.Is(err, io.EOF) {
 		return true
 	}
 	var tooBig *http.MaxBytesError

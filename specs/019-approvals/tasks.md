@@ -117,7 +117,7 @@ T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
     detail.
   - A test of bootstrap key removal shows its Approval.
 
-## T006 — Approval routes
+## T006 — Approval routes — DONE 2026-10-19 (`approval_handler_test.go`: request, decide, self-approval and expiry, reading. Deviation: an approval written by a plain DELETE gets its owner chain from the store, read inside the delete transaction, so reading it after the target is gone works too. `MayDecide` runs in the authorizer before the permission checks, so an agent gets "approver guardrail", not a needs-approval answer)
 
 - **Do**:
   - `api/approval_handler.go`: request, get, list (with filters), approve
@@ -139,7 +139,7 @@ T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
     an access-management target; 404 for a missing target; a client-sent
     status being ignored; and no `lastSpec` in any response.
 
-## T007 — `ApprovalReconciler` and wiring
+## T007 — `ApprovalReconciler` and wiring — DONE 2026-10-19 (`approval_test.go`, 7 tests on a real SQLite store. Deviation: one kind-agnostic `DeleteFunc(ctx, kind, id, cascade)` instead of a per-kind map; `cmd/serendipd` serves it with a `json.RawMessage` store per call. Without a cluster, the Secret cleaner answers `ErrProviderNotReady`, so erasure waits rather than being skipped. Reviews of T005–T007: contract-guardian PASS and go-reviewer PASS, findings fixed before commit. The reconciler re-checks who decided (`MayDecide`) before executing. A permanent delete error ends as Failed/DeleteFailed. Conditions carry no provider or store error text; it's logged instead. StillPresent requeues. The approvals list filters on loaded approvals. A decision also needs delete on the recorded blast radius. Approve and reject accept an empty chunked body. Not done: an index for approvals, which stays plan decision 1)
 
 - **Do**:
   - `core/reconcile/approval.go`, per plan decision 7:

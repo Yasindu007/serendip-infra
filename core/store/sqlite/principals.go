@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/resource"
+	"github.com/serendip-infra/serendip-infra/core/store"
 )
 
 // KnownPrincipal is a principal serendipd has seen authenticate (spec 017
@@ -199,4 +201,18 @@ func ResourceExists(ctx context.Context, db *sql.DB, kind resource.Kind, id stri
 		return false, fmt.Errorf("sqlite: look up %s %s: %w", kind, id, err)
 	}
 	return n > 0, nil
+}
+
+// ResourceHead returns the name and resourceVersion of any kind's resource,
+// or store.ErrNotFound: what an approval request records about its target
+// and the resources it would remove, whatever their kind (spec 019).
+func ResourceHead(ctx context.Context, db *sql.DB, kind resource.Kind, id string) (name string, version int64, err error) {
+	err = db.QueryRowContext(ctx, `SELECT name, resource_version FROM resources WHERE kind = ? AND id = ?`, string(kind), id).Scan(&name, &version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, store.ErrNotFound
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("sqlite: look up %s %s: %w", kind, id, err)
+	}
+	return name, version, nil
 }

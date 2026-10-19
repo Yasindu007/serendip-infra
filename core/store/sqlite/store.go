@@ -340,6 +340,12 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 	if err := checkReviewed(ctx, tx, intent, ref, before.Metadata.ResourceVersion); err != nil {
 		return err
 	}
+	// The owners, read before the edges go: reading the Approval later is
+	// decided at the nearest one that still exists.
+	owners, err := graph.Ancestors(ctx, tx, ref)
+	if err != nil {
+		return err
+	}
 	children, err := graph.Children(ctx, tx, ref)
 	if err != nil {
 		return err
@@ -388,7 +394,7 @@ func (s *Store[S, St]) Delete(ctx context.Context, resourceID string, cascade bo
 		return fmt.Errorf("sqlite: marshal deleted spec: %w", err)
 	}
 	removed := append([]removedRow{{ref: ref, name: before.Metadata.Name, spec: targetSpec}}, cascaded...)
-	approvalEvent, err := recordApproval(ctx, tx, intent, before.Metadata, removed, now)
+	approvalEvent, err := recordApproval(ctx, tx, intent, before.Metadata, owners, removed, now)
 	if err != nil {
 		return err
 	}

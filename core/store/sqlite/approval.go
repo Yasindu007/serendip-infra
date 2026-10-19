@@ -86,7 +86,7 @@ func checkReviewed(ctx context.Context, tx *sql.Tx, in store.ApprovalIntent, ref
 // recordApproval inserts the intent's Approval, or updates the stored one,
 // as Executed with the rows actually removed (the target first). It
 // returns the event to publish after commit.
-func recordApproval(ctx context.Context, tx *sql.Tx, in store.ApprovalIntent, target resource.Metadata, removed []removedRow, now time.Time) (event.Event, error) {
+func recordApproval(ctx context.Context, tx *sql.Tx, in store.ApprovalIntent, target resource.Metadata, owners []graph.ResourceRef, removed []removedRow, now time.Time) (event.Event, error) {
 	a := in.Approval
 	var before *resource.Approval
 	if in.Existing {
@@ -118,6 +118,11 @@ func recordApproval(ctx context.Context, tx *sql.Tx, in store.ApprovalIntent, ta
 		}
 		if a.Status.TargetVersion == 0 {
 			a.Status.TargetVersion = target.ResourceVersion
+		}
+	}
+	if len(a.Status.OwnerChain) == 0 {
+		for _, o := range owners {
+			a.Status.OwnerChain = append(a.Status.OwnerChain, resource.Scope{Kind: o.Kind, ID: o.ID})
 		}
 	}
 	a.Metadata.Kind = resource.KindApproval

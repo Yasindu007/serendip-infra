@@ -143,6 +143,9 @@ func TestDelete_RecordsANewApprovalInTheSameTransaction(t *testing.T) {
 		string(st.BlastRadius[0].LastSpec) != `{"path":"web/db"}` {
 		t.Errorf("blast radius = %+v, want the Secret with its name and spec", st.BlastRadius)
 	}
+	if want := []resource.Scope{{Kind: resource.KindProject, ID: w.project.Metadata.ID}, {Kind: resource.KindOrganization, ID: w.org.Metadata.ID}}; len(st.OwnerChain) != 2 || st.OwnerChain[0] != want[0] || st.OwnerChain[1] != want[1] {
+		t.Errorf("ownerChain = %v, want %v (nearest first, read before the delete)", st.OwnerChain, want)
+	}
 	if len(got.Metadata.OwnerRefs) != 0 {
 		t.Errorf("ownerRefs = %v, want none: a cascade must never delete an approval", got.Metadata.OwnerRefs)
 	}

@@ -117,6 +117,7 @@ func run() error {
 		secretReconciler = kube.secretReconciler
 		authn = kube.authn
 	}
+	registerApprovals(db, bus, engine, secretReconciler)
 	if len(agentIssuers) > 0 {
 		agents, err := agentVerifiers(ctx, agentIssuers)
 		if err != nil {

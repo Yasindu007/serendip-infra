@@ -29,7 +29,7 @@ func TestEveryRouteHasARule(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 	m := &recordingMux{}
 	// A zero reconciler is enough: registering never calls it.
-	registerAPI(m, db, event.NewInProcessBus(), nil, &reconcile.SecretReconciler{}, nil, nil, serverOptions{})
+	registerAPI(m, db, event.NewInProcessBus(), nil, nil, &reconcile.SecretReconciler{}, nil, nil, serverOptions{})
 
 	table := routeTable()
 	for _, p := range m.patterns {
