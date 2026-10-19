@@ -78,15 +78,15 @@ ADR 0014. Evidence: `specs/017-authorization/verification.md`. Upgrade
 note from T011: Secret values written before the per-Secret value
 storage fix must be written again.
 
-**Next: spec 019 (Approvals),** drafted earlier in `specs/019-approvals/`
-(uncommitted, on hold until 017 and 018 were done). Rework it on top of
-017's roles and 018's `NeedsApproval`:
-- roles decide, and an approval is the exception;
-- an agent can never approve its own request;
-- every destructive action still produces an Approval object
-  (constitution 5).
-
-The user's direction is in memory (`authorization_model_direction`).
+**Next: spec 019 (Approvals).** `spec.md` was reworked on top of 017 and
+018 and approved on 2026-10-19: roles decide, every delete writes an
+Approval (decided by policy when allowed), and only `NeedsApproval`
+(agents' deletes) waits for a person. `plan.md` and `tasks.md`
+(T001–T014) were approved on 2026-10-19, amended the same day with a
+console Secrets page, a store that refuses a delete without an approval,
+and Secret values erased from the approval's record (this also fixes
+cascades leaving values behind). T001 (the `Approval` kind) is done but
+uncommitted; it's committed with T002–T004 after contract-guardian.
 Other candidates are in "Next up" below.
 
 **Spec 001 (Foundation) merged to Serendip-Infra/serendip-infra:main via
