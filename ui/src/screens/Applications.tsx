@@ -3,6 +3,8 @@ import { apiFetch, apiList, ApiError, isShown, NetworkError } from "../api/clien
 import type { Application, Component } from "../api/types";
 import { ApiEquivalent } from "../components/ApiEquivalent";
 import { ConditionsTable, SafeLink } from "../components/Data";
+import { DeleteConfirm } from "../components/Delete";
+import { Guarded } from "../components/Guarded";
 import { TextField } from "../components/Field";
 import { RequestError } from "../components/RequestError";
 import { PageHeader } from "../components/Shell";
@@ -151,7 +153,12 @@ export function ApplicationDetail({ id }: { id: string }) {
   const app = usePoll((s) => apiFetch<Application>("GET", `/v1/applications/${encodeURIComponent(id)}`, undefined, s), 5_000, `app-${id}`);
   const comps = usePoll((s) => apiList<Component>(`/v1/components?ownerId=${encodeURIComponent(id)}`, s), 5_000, `app-comps-${id}`);
   const scope = { kind: "Application", id };
-  const canCreate = usePermissions(scope).can(action("Component", "write"));
+  const access = usePermissions(scope);
+  const canCreate = access.can(action("Component", "write"));
+  // Deleting an application takes everything it owns with it, so the
+  // server also checks delete on each of those; this is only the first gate.
+  const canDelete = access.can(action("Application", "delete"));
+  const [deleting, setDeleting] = useState(false);
 
   if (app.error) return <RequestError error={app.error} what="application" action={<Link to="/applications">Back to applications</Link>} />;
   if (!app.data) return <LoadingState what="the application" />;
@@ -172,6 +179,14 @@ export function ApplicationDetail({ id }: { id: string }) {
             <Link className="button" to={accessPath(scope)}>
               Access control (IAM)
             </Link>
+            <Link className="button" to={`/secrets?owner=${encodeURIComponent(id)}`}>
+              Secrets
+            </Link>
+            <Guarded allowed={canDelete} label="Delete application" reason="Your roles here don't allow deleting this application.">
+              <button type="button" className="button" onClick={() => setDeleting(true)} disabled={deleting}>
+                Delete application
+              </button>
+            </Guarded>
             {canCreate && (
               <Link className="button button--primary" to={`/applications/${encodeURIComponent(id)}/components/new`}>
                 Create component
@@ -181,6 +196,15 @@ export function ApplicationDetail({ id }: { id: string }) {
         }
         meta={<UpdatedLine at={app.updatedAt} now={now} />}
       />
+
+      {deleting && (
+        <DeleteConfirm
+          target={{ kind: "Application", id, name: a.metadata.name }}
+          cascade
+          onDeleted={(approval) => navigate(approval ? `/approvals/${encodeURIComponent(approval)}` : "/applications")}
+          onCancel={() => setDeleting(false)}
+        />
+      )}
 
       <section className="section" aria-labelledby="app-components">
         <h2 id="app-components" className="section-title">

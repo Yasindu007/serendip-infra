@@ -230,7 +230,7 @@ T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
   page and `?phase=Pending`), the request with its duplicate check, and a
   resync each stay under 50 ms p99 (T007a).
 
-## T010 [P] — Console
+## T010 [P] — Console — DONE 2026-10-20, except the browser walk-through, which moves into T011 since signing in needs the cluster's identity provider (`pnpm typecheck`, `pnpm test` 82/82, `pnpm build` 83.6 KiB gz of 160; no raw HTML; no Secrets screen requests a `/value` path. `approvals.test.tsx` covers: Delete with blast radius and the request; the cascade listing with the Secrets note; a Reader seeing Delete disabled with the reason; the Secrets list and delete; Approvals pending first with the rail count; approve with a comment whose sent body matches the shown request; and approve disabled for the requester. The old "no delete" tests were replaced; `ui/DESIGN.md` and `ui/CLAUDE.md` were updated)
 
 - **Do**:
   - Add the types and client calls.

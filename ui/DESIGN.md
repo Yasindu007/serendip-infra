@@ -66,7 +66,7 @@ guessed at.
 
 | Component | Purpose |
 |---|---|
-| `Shell` | The rail (Overview, Applications; Secrets and Volumes labelled "not available yet"), skip link, signed-in person, sign-out, and the banner slot. |
+| `Shell` | The rail (Overview, Applications, Secrets, Approvals with how many wait for a decision; Volumes labelled "not available yet"), skip link, signed-in person, sign-out, and the banner slot. |
 | `PageHeader` | Breadcrumb, title, status, actions, and a meta line ("Updated 12 seconds ago"). |
 | `StatusText`, `ReadyStatus` | The status vocabulary above. |
 | `ReconciliationPath` | The signature element. Stages come from real Conditions only, and each stage's state is spoken to screen readers. |
@@ -76,6 +76,8 @@ guessed at.
 | `ApiEquivalent` | The request a screen sends (method, path, JSON body), never headers or credentials. On every form and detail page. |
 | `TextField` | Label, hint and error tied to one input with `aria-describedby`. |
 | `SelectField` | `TextField` for a fixed set of choices. |
+| `DeleteConfirm` | Asks before a delete (spec 019): what it removes (`BlastRadius`, walked from the graph for a cascade), a note when Secrets' values will be erased, and the DELETE request. The server records the delete as an Approval; the screen then opens it. |
+| `BlastRadius` | What an action removes: kind, name and ID, the target first. Used before a delete and on an approval. |
 | `Guarded` | An action the caller may take, or the same action disabled with the reason beneath (spec 017). Disabled while the caller's permissions are still loading, never offered on a guess. |
 | `Banner`, `Notice` | Page-wide and inline notices (warn or danger). |
 | `EmptyState`, `LoadingState`, `ErrorState` | Every screen's non-happy states. `ErrorState` shows the request ID. |
@@ -100,12 +102,16 @@ guessed at.
 - **No fabricated content:** no fake metrics, charts, activity or
   placeholder statistics. A feature that isn't built is labelled "not
   available yet".
-- **No delete action anywhere** until approval objects exist
-  (constitution 5). One exception, by the user's decision (spec 017):
-  removing a role assignment on the Access control (IAM) page. It revokes
-  access, destroys nothing, is guarded by RBAC, and asks for confirmation
-  with the request shown. As in Azure, an inherited assignment is removed
-  where it was made.
+- **Every delete goes through an approval** (constitution 5, spec 019).
+  A delete is offered only through `DeleteConfirm`: it shows what will be
+  removed and the request, and the server records the delete as an
+  Approval, which the console then opens. Removing a role assignment on
+  the Access control (IAM) page keeps its own confirmation (spec 017); the
+  server records an Approval for it too. As in Azure, an inherited
+  assignment is removed where it was made.
+- **Approving and rejecting** are offered only to someone who may decide:
+  never the requester, and only when their roles allow the delete
+  themselves. Otherwise they're shown disabled with the reason.
 - **Permission-aware controls** (spec 017): an action the caller can't
   take is hidden when it creates something, and disabled with a reason
   (`Guarded`) when it changes something that's on screen. The decision

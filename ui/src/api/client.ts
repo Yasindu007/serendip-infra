@@ -35,6 +35,13 @@ export function onSessionEnded(fn: SessionEndedListener): () => void {
 }
 
 export async function apiFetch<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await request(method, path, body, signal);
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+/** Sends one request; a non-2xx answer becomes an ApiError. */
+async function request(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
   const timeout = AbortSignal.timeout(TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const headers: Record<string, string> = { Accept: "application/json", "X-Serendip-Csrf": "1" };
@@ -57,11 +64,7 @@ export async function apiFetch<T>(method: "GET" | "POST" | "PUT" | "DELETE", pat
     throw new NetworkError("Can't reach Serendip.");
   }
 
-  if (res.ok) {
-    if (res.status === 204) return undefined as T;
-    const data = (await res.json()) as T;
-    return data;
-  }
+  if (res.ok) return res;
 
   let problem: Partial<Problem> = {};
   try {
@@ -78,6 +81,21 @@ export async function apiFetch<T>(method: "GET" | "POST" | "PUT" | "DELETE", pat
     typeof problem.instance === "string" ? problem.instance : (res.headers.get("X-Request-Id") ?? undefined),
     Number.isFinite(retry) && retry > 0 ? retry : undefined,
   );
+}
+
+/**
+ * DELETE records an Approval with every delete (spec 019): the server names
+ * it in Serendip-Approval-Id. Returns that ID, or undefined if absent.
+ */
+export async function apiDelete(path: string): Promise<string | undefined> {
+  return (await request("DELETE", path)).headers.get("Serendip-Approval-Id") ?? undefined;
+}
+
+/** One page of a paged list (GET /v1/approvals) and the cursor for the next. */
+export async function apiPage<T>(path: string, signal?: AbortSignal): Promise<{ items: T[]; next: string | undefined }> {
+  const res = await request("GET", path, undefined, signal);
+  const items = ((await res.json()) as T[] | null) ?? [];
+  return { items, next: res.headers.get("Serendip-Next-After") ?? undefined };
 }
 
 /** A list endpoint answers a JSON array, or null when empty. */

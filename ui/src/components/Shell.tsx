@@ -5,13 +5,32 @@ import { Icon } from "./Icon";
 const nav: Array<{ label: string; to?: string }> = [
   { label: "Overview", to: "/" },
   { label: "Applications", to: "/applications" },
-  // Shown so the shape of the product is honest, never as working links
+  { label: "Secrets", to: "/secrets" },
+  { label: "Approvals", to: "/approvals" },
+  // Shown so the shape of the product is honest, never as a working link
   // (constitution 6, spec 016 "labelled, not mocked").
-  { label: "Secrets" },
   { label: "Volumes" },
 ];
 
-export function Shell({ path, actor, onSignOut, banner, children }: { path: string; actor?: string; onSignOut?: () => void; banner?: ReactNode; children: ReactNode }) {
+/**
+ * Shell is the frame of every signed-in page. waiting is how many approvals
+ * wait for a decision, shown beside Approvals in words.
+ */
+export function Shell({
+  path,
+  actor,
+  onSignOut,
+  banner,
+  waiting,
+  children,
+}: {
+  path: string;
+  actor?: string;
+  onSignOut?: () => void;
+  banner?: ReactNode;
+  waiting?: string | undefined;
+  children: ReactNode;
+}) {
   const section = path === "/" ? "/" : "/" + (path.split("/")[1] ?? "");
   return (
     <div className="shell">
@@ -27,6 +46,7 @@ export function Shell({ path, actor, onSignOut, banner, children }: { path: stri
           item.to ? (
             <Link key={item.label} to={item.to} aria-current={section === item.to ? "page" : undefined}>
               {item.label}
+              {item.to === "/approvals" && waiting && ` (${waiting} waiting)`}
             </Link>
           ) : (
             <span key={item.label} className="rail-item rail-item--unavailable">

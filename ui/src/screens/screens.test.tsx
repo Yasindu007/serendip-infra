@@ -137,22 +137,6 @@ describe("create application", () => {
   });
 });
 
-describe("no delete", () => {
-  it("offers no delete action on a component", async () => {
-    goTo("/applications/a1/components/c1");
-    mockFetch((url) => {
-      if (url === "/v1/session") return json(200, session);
-      if (url.startsWith("/v1/components/")) return json(200, { metadata: { id: "c1", name: "web", resourceVersion: 1 }, spec: { image: "nginx" }, status: {} });
-      if (url.startsWith("/v1/applications/")) return json(200, { metadata: { id: "a1", name: "storefront", resourceVersion: 1 }, spec: {}, status: {} });
-      return json(200, []);
-    });
-    render(<App />);
-    await screen.findByRole("heading", { name: "web" });
-    expect(screen.queryByRole("button", { name: /delete/i })).toBeNull();
-    expect(screen.queryByRole("link", { name: /delete/i })).toBeNull();
-  });
-});
-
 function Poller({ onLoad }: { onLoad: (s: AbortSignal) => Promise<number> }) {
   const p = usePoll(onLoad, 1_000, "k");
   return <span>{p.data ?? "none"}</span>;

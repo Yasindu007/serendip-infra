@@ -183,3 +183,68 @@ export interface GroupsView {
   source: DirectorySource;
   groups: string[];
 }
+
+// Approvals (spec 019): the record of every destructive action.
+
+export type ApprovalPhase = "Pending" | "Approved" | "Rejected" | "Expired" | "Executed" | "Failed";
+
+export interface ApprovalAction {
+  verb: "delete";
+  target: Scope;
+  cascade?: boolean;
+}
+
+export interface ApprovalSpec {
+  action: ApprovalAction;
+  reason?: string;
+}
+
+/** Who asked or decided: the audit actor, and the principal behind it when there is one. */
+export interface ApprovalActor {
+  actor: string;
+  principal?: PrincipalRef;
+  subject?: string;
+  sponsor?: string;
+}
+
+/** One resource the action removes. Its last spec never leaves the server. */
+export interface ApprovalRef {
+  kind: string;
+  id: string;
+  name?: string;
+  cleanedUp?: boolean;
+}
+
+export interface ApprovalDecision {
+  byPolicy?: boolean;
+  by?: ApprovalActor;
+  at: string;
+  comment?: string;
+  evidence?: string;
+}
+
+export interface ApprovalStatus extends BaseStatus {
+  phase: ApprovalPhase;
+  requestedBy: ApprovalActor;
+  requestedAt: string;
+  expiresAt?: string;
+  requestDecision?: string;
+  targetName?: string;
+  targetVersion?: number;
+  ownerChain?: Scope[];
+  blastRadius?: ApprovalRef[];
+  decision?: ApprovalDecision;
+  executedAt?: string;
+  settled?: boolean;
+}
+
+export type Approval = Resource<ApprovalSpec, ApprovalStatus>;
+
+/** GET /v1/graph/{kind}/{id}/children: core/graph.ResourceRef has no JSON tags. */
+export interface GraphRef {
+  Kind: string;
+  ID: string;
+}
+
+export type SecretSpec = { path: string };
+export type Secret = Resource<SecretSpec, BaseStatus>;

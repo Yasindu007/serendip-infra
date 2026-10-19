@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { apiFetch, apiList, isShown, onSessionEnded, signOut, type ApiError, type NetworkError } from "./api/client";
-import type { NodeResource, SessionInfo } from "./api/types";
+import { apiFetch, apiList, apiPage, isShown, onSessionEnded, signOut, type ApiError, type NetworkError } from "./api/client";
+import type { Approval, NodeResource, SessionInfo } from "./api/types";
 import { RequestError } from "./components/RequestError";
 import { Shell } from "./components/Shell";
 import { Banner, LoadingState } from "./components/States";
@@ -11,6 +11,8 @@ import { ApplicationDetail, ApplicationList, NewApplication } from "./screens/Ap
 import { ComponentDetail, ComponentForm, NotFound } from "./screens/Components";
 import { parseScopeParam } from "./lib/permissions";
 import { AccessPage } from "./screens/AccessPage";
+import { ApprovalDetail, ApprovalList } from "./screens/Approvals";
+import { SecretDetail, SecretList } from "./screens/Secrets";
 import { Overview } from "./screens/Overview";
 import { SignIn } from "./screens/SignIn";
 
@@ -67,8 +69,12 @@ export function App() {
 function SignedIn({ path, actor, onSignOut, children }: { path: string; actor: string; onSignOut: () => void; children: React.ReactNode }) {
   const nodes = usePoll((s) => apiList<NodeResource>("/v1/nodes", s), 60_000, "topology");
   const banner = nodes.data && isSingleNode(nodes.data.length) ? <Banner>{topologySentence(nodes.data.length)}</Banner> : undefined;
+  // Pending approvals the person can see, for the rail. A full page (100)
+  // reads "100+" rather than a count it doesn't have.
+  const pending = usePoll((s) => apiPage<Approval>("/v1/approvals?phase=Pending&limit=100", s), 30_000, "rail-pending");
+  const waiting = pending.data ? (pending.data.next ? "100+" : String(pending.data.items.length)) : undefined;
   return (
-    <Shell path={path} actor={actor} onSignOut={onSignOut} banner={banner}>
+    <Shell path={path} actor={actor} onSignOut={onSignOut} banner={banner} waiting={waiting === "0" ? undefined : waiting}>
       {children}
     </Shell>
   );
@@ -87,5 +93,9 @@ function Routes({ path, query }: { path: string; query: URLSearchParams }) {
   if ((p = match("/applications/:app/components/:id/edit", path))) return <ComponentForm appId={p.app!} id={p.id!} />;
   if ((p = match("/applications/:app/components/:id", path))) return <ComponentDetail appId={p.app!} id={p.id!} />;
   if ((p = match("/applications/:id", path))) return <ApplicationDetail id={p.id!} />;
+  if (path === "/secrets") return <SecretList ownerId={query.get("owner") ?? undefined} />;
+  if ((p = match("/secrets/:id", path))) return <SecretDetail id={p.id!} />;
+  if (path === "/approvals") return <ApprovalList />;
+  if ((p = match("/approvals/:id", path))) return <ApprovalDetail id={p.id!} />;
   return <NotFound />;
 }

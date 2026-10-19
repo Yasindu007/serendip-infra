@@ -107,7 +107,11 @@ describe("permission-aware controls", () => {
     await waitFor(() => expect(screen.getByText("Your roles here don't allow changing this component.")).toBeTruthy());
     expect((edit as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole("link", { name: "Edit component" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /delete|remove/i })).toBeNull();
+    // Delete is an action on what's on screen: shown disabled, with why
+    // (ui/DESIGN.md, spec 019).
+    const del = await screen.findByRole("button", { name: "Delete component" });
+    expect((del as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Your roles here don't allow deleting this component.")).toBeTruthy();
   });
 
   it("offers an Owner the same controls", async () => {

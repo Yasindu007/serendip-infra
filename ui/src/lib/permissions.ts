@@ -32,6 +32,7 @@ export function allows(perms: Permission[], action: string, data = false): boole
 const paths: Record<string, string> = {
   Application: "applications",
   Component: "components",
+  Secret: "secrets",
 };
 
 export function action(kind: string, verb: "read" | "write" | "delete"): string {

@@ -3,6 +3,7 @@ import { apiFetch, ApiError, isShown, NetworkError } from "../api/client";
 import type { Application, Component } from "../api/types";
 import { ApiEquivalent, type ApiRequest } from "../components/ApiEquivalent";
 import { ConditionsTable, KeyValueList, SafeLink } from "../components/Data";
+import { DeleteConfirm } from "../components/Delete";
 import { TextField } from "../components/Field";
 import { Guarded } from "../components/Guarded";
 import { Icon } from "../components/Icon";
@@ -28,7 +29,10 @@ export function ComponentDetail({ appId, id }: { appId: string; id: string }) {
   const comp = usePoll((s) => apiFetch<Component>("GET", `/v1/components/${encodeURIComponent(id)}`, undefined, s), 5_000, `comp-${id}`);
   const app = usePoll((s) => apiFetch<Application>("GET", `/v1/applications/${encodeURIComponent(appId)}`, undefined, s), 5_000, `comp-app-${appId}`);
   const scope = { kind: "Component", id };
-  const canEdit = usePermissions(scope).can(action("Component", "write"));
+  const access = usePermissions(scope);
+  const canEdit = access.can(action("Component", "write"));
+  const canDelete = access.can(action("Component", "delete"));
+  const [deleting, setDeleting] = useState(false);
 
   if (comp.error) return <RequestError error={comp.error} what="component" action={<Link to={appPath(appId)}>Back to the application</Link>} />;
   if (!comp.data) return <LoadingState what="the component" />;
@@ -62,6 +66,11 @@ export function ComponentDetail({ appId, id }: { appId: string; id: string }) {
             <Link className="button" to={accessPath(scope)}>
               Access control (IAM)
             </Link>
+            <Guarded allowed={canDelete} label="Delete component" reason="Your roles here don't allow deleting this component.">
+              <button type="button" className="button" onClick={() => setDeleting(true)} disabled={deleting}>
+                Delete component
+              </button>
+            </Guarded>
             <Guarded allowed={canEdit} label="Edit component" reason="Your roles here don't allow changing this component.">
               <Link className="button button--primary" to={`${compPath(appId, id)}/edit`}>
                 Edit component
@@ -71,6 +80,15 @@ export function ComponentDetail({ appId, id }: { appId: string; id: string }) {
         }
         meta={<UpdatedLine at={comp.updatedAt} now={now} />}
       />
+
+      {deleting && (
+        <DeleteConfirm
+          target={{ kind: "Component", id, name: c.metadata.name }}
+          cascade={false}
+          onDeleted={(approval) => navigate(approval ? `/approvals/${encodeURIComponent(approval)}` : appPath(appId))}
+          onCancel={() => setDeleting(false)}
+        />
+      )}
 
       <section className="section panel" aria-labelledby="comp-path">
         <h2 id="comp-path" className="section-title">
