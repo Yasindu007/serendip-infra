@@ -197,7 +197,7 @@ T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
 - **Then**: run `contract-guardian` (core and a migration) before
   committing.
 
-## T008 [A] — End-to-end acceptance tests
+## T008 [A] — End-to-end acceptance tests — DONE 2026-10-19 (`approval_acceptance_test.go`: the API, SQLite and the running engine; `go test -race ./...` is green, and the acceptance test passed 5 runs under `-race`. Criteria 1, 3, 4, 6, 7, 8, 10 and 15 run end to end, the last including a provider outage and an engine restart. Criteria 2, 5, 9 and 11 are in the handler tests; expiry is in the reconciler tests with a fake clock, since the engine uses real time; 16 is in the store tests)
 
 - **Do**: tests in the `api` package against a real SQLite store, with
   the engine running and a fake Secrets provider, for spec acceptance
