@@ -194,6 +194,9 @@ func TestApprovalsAcceptance(t *testing.T) {
 			}
 			trail = append(trail, actor+" "+kind+" "+decision)
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
 		joined := strings.Join(trail, "\n")
 		for _, want := range []string{
 			"agent:am-dev/agent-1 Approval needsApproval: serendip/components/delete",                                          // the request

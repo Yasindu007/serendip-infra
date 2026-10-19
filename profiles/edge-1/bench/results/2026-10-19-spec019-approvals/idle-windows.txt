@@ -1,0 +1,6 @@
+serendipd-head.exe 15.8 24.4 | 15.8 24.4 | 15.8 24.4
+serendipd-base.exe 16.1 24.2 | 16.1 24.2 | 16.1 24.2
+serendipd-head.exe 16.0 14.0 | 16.0 14.0 | 16.0 14.0
+serendipd-base.exe 15.7 13.7 | 15.7 13.7 | 15.7 13.7
+serendipd-head.exe 15.9 14.2 | 15.9 14.2 | 15.9 14.2
+serendipd-base.exe 15.7 13.7 | 15.7 13.7 | 15.7 13.7

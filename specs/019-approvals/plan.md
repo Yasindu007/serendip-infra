@@ -46,9 +46,12 @@ Approvals page. No new dependency, no migration, no new role.
      Approvals only grow: every delete adds one, and none are ever deleted,
      with retention a later spec. So no read may scan them all:
      - **Migration `0006`** adds:
-       - `(kind, created_at, id)` for newest-first paging;
-       - partial expression indexes, for `kind = 'Approval'` only, on the
-         phase, on the target ID, and on unsettled approvals.
+       - partial indexes, for `kind = 'Approval'` only, so other kinds'
+         writes pay nothing: `(created_at, id)` for newest-first paging,
+         and expression indexes on the phase, the target ID, and
+         unsettled approvals. (0006 first made the paging index cover
+         every kind; T009 measured that cost on every write, and `0007`
+         replaced it with the approvals-only index.)
      - **One store query** (`sqlite.ListApprovals`) serves the list and
        the duplicate check: filters, newest first, a limit and an
        `after` cursor.

@@ -1,0 +1,15 @@
+BenchmarkApprovals/list-first-page/owner-2         	     422	   8208116 ns/op	      7557 p50-µs	     17763 p99-µs	  980476 B/op	   12156 allocs/op
+BenchmarkApprovals/list-first-page/owner-2         	     414	   7506441 ns/op	      6795 p50-µs	     19843 p99-µs	  988993 B/op	   12156 allocs/op
+BenchmarkApprovals/list-first-page/owner-2         	     482	   7615216 ns/op	      7154 p50-µs	     13816 p99-µs	  981571 B/op	   12156 allocs/op
+BenchmarkApprovals/list-first-page/reader-2        	     434	   7793811 ns/op	      7251 p50-µs	     14211 p99-µs	  988271 B/op	   12159 allocs/op
+BenchmarkApprovals/list-first-page/reader-2        	     447	   7856094 ns/op	      6773 p50-µs	     22325 p99-µs	  987239 B/op	   12159 allocs/op
+BenchmarkApprovals/list-first-page/reader-2        	     513	   7073031 ns/op	      6745 p50-µs	     13563 p99-µs	  986875 B/op	   12159 allocs/op
+BenchmarkApprovals/list-pending/owner-2            	    1033	   3965536 ns/op	      3464 p50-µs	     10076 p99-µs	  451346 B/op	    5857 allocs/op
+BenchmarkApprovals/list-pending/owner-2            	     946	   3725020 ns/op	      3415 p50-µs	      6487 p99-µs	  451214 B/op	    5857 allocs/op
+BenchmarkApprovals/list-pending/owner-2            	    1005	   3906468 ns/op	      3540 p50-µs	      7838 p99-µs	  451266 B/op	    5857 allocs/op
+BenchmarkApprovals/resync-list-2                   	    3639	    873146 ns/op	       754.0 p50-µs	      2049 p99-µs	  247427 B/op	    3373 allocs/op
+BenchmarkApprovals/resync-list-2                   	    3781	    909523 ns/op	       776.0 p50-µs	      2254 p99-µs	  247426 B/op	    3373 allocs/op
+BenchmarkApprovals/resync-list-2                   	    3877	    944903 ns/op	       775.0 p50-µs	      3267 p99-µs	  247425 B/op	    3373 allocs/op
+BenchmarkApprovals/request/owner-2         	   10000	    326501 ns/op	       258.0 p50-µs	      1195 p99-µs	   22933 B/op	     256 allocs/op
+BenchmarkApprovals/request/owner-2         	   13207	    269200 ns/op	       232.0 p50-µs	       772.0 p99-µs	   22934 B/op	     256 allocs/op
+BenchmarkApprovals/request/owner-2         	   12918	    274967 ns/op	       233.0 p50-µs	       859.0 p99-µs	   22933 B/op	     256 allocs/op

@@ -405,7 +405,7 @@ func TestListApprovals_UsesTheIndexes(t *testing.T) {
 	ctx := context.Background()
 	seedApprovals(t, w, 4)
 	for q, index := range map[sqlite.ApprovalQuery]string{
-		{Limit: 100}:                                "idx_resources_kind_created",
+		{Limit: 100}:                                "idx_approvals_created",
 		{Phase: resource.ApprovalPending}:           "idx_approvals_phase",
 		{TargetID: "x"}:                             "idx_approvals_target",
 		{TargetID: "x", Unsettled: true}:            "idx_approvals_target",
@@ -470,7 +470,7 @@ func TestMigration0006_SettlesFinishedApprovals(t *testing.T) {
 	// Re-run 0006 as an older database would meet it.
 	for _, stmt := range []string{
 		`DELETE FROM schema_migrations WHERE version = 6`,
-		`DROP INDEX idx_resources_kind_created`, `DROP INDEX idx_approvals_phase`,
+		`DROP INDEX idx_approvals_phase`,
 		`DROP INDEX idx_approvals_target`, `DROP INDEX idx_approvals_unsettled`,
 	} {
 		if _, err := w.db.ExecContext(ctx, stmt); err != nil {
@@ -488,5 +488,30 @@ func TestMigration0006_SettlesFinishedApprovals(t *testing.T) {
 		if a.Status.Settled != settled {
 			t.Errorf("%s with %v: settled = %v, want %v", a.Status.Phase, a.Status.Conditions, a.Status.Settled, settled)
 		}
+	}
+}
+
+// After every migration, the newest-first index covers approvals only
+// (0007 replaced 0006's index over every kind).
+func TestMigrations_ApprovalPagingIndexIsApprovalsOnly(t *testing.T) {
+	w := newApprovalWorld(t)
+	names := map[string]bool{}
+	rows, err := w.db.Query(`SELECT name FROM sqlite_master WHERE type = 'index'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		names[n] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !names["idx_approvals_created"] || names["idx_resources_kind_created"] {
+		t.Errorf("indexes = %v, want idx_approvals_created and no idx_resources_kind_created", names)
 	}
 }

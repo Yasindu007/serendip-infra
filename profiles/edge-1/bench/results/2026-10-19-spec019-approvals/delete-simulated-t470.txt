@@ -1,0 +1,8 @@
+round1 head BenchmarkDelete-2   	    2000	   3760903 ns/op	      3439 p50-µs	     10377 p99-µs	   23400 B/op	     398 allocs/op
+round1 base BenchmarkDelete-2   	    2000	   5533814 ns/op	      5933 p50-µs	     14688 p99-µs	   11866 B/op	     247 allocs/op
+round2 head BenchmarkDelete-2   	    2000	   7462378 ns/op	      6809 p50-µs	     17212 p99-µs	   23382 B/op	     398 allocs/op
+round2 base BenchmarkDelete-2   	    2000	   6515197 ns/op	      6144 p50-µs	     13074 p99-µs	   11864 B/op	     247 allocs/op
+round3 head BenchmarkDelete-2   	    2000	   7399005 ns/op	      6809 p50-µs	     16246 p99-µs	   23381 B/op	     398 allocs/op
+round3 base BenchmarkDelete-2   	    2000	   6703756 ns/op	      6093 p50-µs	     20876 p99-µs	   11866 B/op	     247 allocs/op
+round4 head BenchmarkDelete-2   	    2000	   3148585 ns/op	      2949 p50-µs	      9112 p99-µs	   23380 B/op	     398 allocs/op
+round4 base BenchmarkDelete-2   	    2000	   4504083 ns/op	      4113 p50-µs	     12413 p99-µs	   11866 B/op	     247 allocs/op

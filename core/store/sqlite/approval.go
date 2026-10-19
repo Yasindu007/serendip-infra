@@ -266,7 +266,7 @@ func approvalsSQL(ctx context.Context, db *sql.DB, q ApprovalQuery) (string, []a
 	// One indexed filter leads, and its index is named: without statistics
 	// the planner may prefer the kind index and read every approval.
 	// INDEXED BY makes an unusable index an error, never a silent scan.
-	index := "idx_resources_kind_created"
+	index := "idx_approvals_created"
 	switch {
 	case q.TargetID != "":
 		index = "idx_approvals_target"
