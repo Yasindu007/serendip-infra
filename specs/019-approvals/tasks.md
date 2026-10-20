@@ -319,7 +319,7 @@ T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
 - **Verify**: `docs-keeper` reports the docs in sync with the code. Every
   route, phase and condition in the code appears in `approvals.md`.
 
-## T014 — Close the spec
+## T014 — Close the spec — DONE 2026-10-20 (PROGRESS.md records spec 019 complete, what it built, the leftovers including the Agent Manager restart recipe, and the next candidates)
 
 - **Do**: update `docs/PROGRESS.md`: spec 019 complete, what it built,
   the leftovers, and what's next. Mark every task done with its evidence.

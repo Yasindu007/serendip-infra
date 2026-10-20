@@ -11,9 +11,100 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/risk-register.md` (known risks, performance costs and trade-offs,
 with when to revisit each).
 
-Last updated: 2026-10-19
+Last updated: 2026-10-20
 
 ## Current phase
+
+**Spec 019 (Approvals): COMPLETE** (T001–T014 plus T007a, 2026-10-20).
+The spec, plan (with an "As built" section) and tasks are in
+`specs/019-approvals/`, and the live record is `verification.md`. ADR 0016
+records the decision; `docs/architecture/approvals.md` is the model.
+Accepted trade-offs live in the new `docs/risk-register.md` (RP-001 to
+RP-017), which CLAUDE.md now asks every spec to keep current.
+
+What it built:
+- **Every delete records an Approval** in the delete's own transaction.
+  - The authorizer attaches an approval intent to every DELETE route,
+    the response names it (`Serendip-Approval-Id`), and its audit rows
+    say `approved: <approval> by policy (…)`.
+  - **The store fails closed** (`store.ErrNoApproval`, no bypass), so a
+    delete path that forgets its Approval can't delete.
+  - **Policy approves instantly** when roles allow. Only `NeedsApproval`
+    (agents' deletes) waits for a person.
+- **`/v1/approvals`:** request, list (indexed, paged with
+  `limit`/`after`/`Serendip-Next-After`), get, approve, reject.
+  - Deciders need the delete themselves. `policy.MayDecide` refuses
+    agents, `system:` actors and the requester.
+- **The approval reconciler:**
+  - expires requests after 24 h;
+  - executes them through the store's stale checks (target version and
+    the exact blast radius);
+  - erases deleted Secrets' values from the record, retrying until done;
+  - verifies, then marks the approval `settled`.
+
+  This replaced Secret delete's erase-first order and fixed cascades
+  that left Secret values in OpenBao for good.
+- **Migrations 0006 and 0007:** approvals-only partial indexes, pinned by
+  query-plan tests, so no read scans every approval. Timestamps are now
+  written fixed-width.
+- **The console:**
+  - Delete with blast radius on the Application, Component and Secret
+    pages;
+  - a Secrets page (metadata only, never values);
+  - an Approvals page with the waiting count in the rail.
+- **Measured:**
+  - Approval reads with 20,000 approvals: at most 22 ms p99.
+  - A DELETE costs +0.6 ms mean and +3 ms p99 of commit I/O (accepted;
+    `synchronous` stays `FULL`, RP-001 and RP-002).
+  - The simulated-T470 harness: the edge-1 stack idles at 1.29 GiB and
+    `serendipd` at 27.4 MiB, every group within tolerance of spec 018.
+- **Live on kind with the real Agent Manager agent** (T011): Secret
+  erasure on delete, on cascade, and across an OpenBao outage and a
+  restart; an agent's delete approved in the console; reject; stale
+  target; the full audit trail.
+- **Reviews (T012):** contract-guardian, go-reviewer and
+  `/security-review` (nothing at confidence 8 or above) passed, with
+  their findings fixed. One process slip: `a85a659` (T012 fixes, touching
+  `core/`) was committed before its contract-guardian run, which ran
+  post-hoc and passed.
+
+Leftovers on this machine (scratch only, all reversible):
+- **`serendip-t018` (kind) is running.** Its OpenBao unseal file is
+  spec 018 T001's scratch `openbao-init.json`. Pass it with
+  `SERENDIP_OPENBAO_CREDENTIALS_PATH` when running `serendipd` against
+  this cluster.
+- **Agent Manager (`amp-local`) is stopped.** `k3d` isn't installed on
+  the host, and plain `docker start` gives the server a new IP, which
+  makes K3s crash-loop ("failed to find interface with specified node
+  ip"). To restart it, first free host port 8080 (`serendipd` must use
+  another port, e.g. `:8088`), then:
+  `docker network disconnect k3d-amp-local k3d-amp-local-server-0`
+  (and the same for `-serverlb`), then
+  `docker network connect --ip 172.27.0.3 k3d-amp-local k3d-amp-local-server-0`
+  and `docker network connect --ip 172.27.0.2 k3d-amp-local k3d-amp-local-serverlb`,
+  then start the server first and the load balancer about 20 s later.
+- **The `serendip-ext` agent's client secret was regenerated** in T011.
+  The old one no longer works, and the new one is only in session
+  scratch.
+- **The user's own `go run ./cmd/serendipd` on :8080 was stopped** in
+  T011 to free the port. `serendip.db*` in the repo root is now
+  git-ignored.
+
+**Next:** candidates, none started. Ask the user which.
+- **Small follow-ups from the register:**
+  - RP-014: a new Secret's value write can answer 409 after writing;
+  - RP-015: show an agent's sponsor by name;
+  - RP-017: an opaque paging cursor.
+- **A retention spec for approvals** (RP-003). The audit log already
+  keeps every snapshot.
+- **Approval policies for people,** e.g. "deletes in production need a
+  second person" or "not the sponsor" (RP-007). The engine's
+  `NeedsApproval` is the hook.
+- **Other destructive verbs** (scale-to-zero, drain, volume operations)
+  once the API has them. `ApprovalVerb` is designed for them.
+- **A real T470 run** (RP-008), before any profile default changes.
+- **Pushing to GitHub:** specs 002–019 are committed locally only, as
+  agreed earlier.
 
 **Spec 018 (agent identities, a WSO2 Agent Manager POC, and the
 identity-provider management channel): COMPLETE** (T001–T014,
@@ -79,34 +170,6 @@ Leftovers on this machine (scratch only, all reversible):
 ADR 0014. Evidence: `specs/017-authorization/verification.md`. Upgrade
 note from T011: Secret values written before the per-Secret value
 storage fix must be written again.
-
-**Next: spec 019 (Approvals).** `spec.md` was reworked on top of 017 and
-018 and approved on 2026-10-19: roles decide, every delete writes an
-Approval (decided by policy when allowed), and only `NeedsApproval`
-(agents' deletes) waits for a person. `plan.md` and `tasks.md`
-(T001–T014) were approved on 2026-10-19, amended the same day with a
-console Secrets page, a store that refuses a delete without an approval,
-and Secret values erased from the approval's record (this also fixes
-cascades leaving values behind).
-
-**Spec 019 progress:** T001–T010 are done and committed (latest `d9e11d2`).
-- **Backend:** every DELETE writes an Approval in its own transaction
-  (`Serendip-Approval-Id`), and the store refuses a delete without one.
-  `/v1/approvals` serves request, list (indexed and paged), get, approve
-  and reject. The approval reconciler expires requests, executes them
-  through stale checks, erases deleted Secrets' values, and verifies.
-- **T008:** the end-to-end acceptance tests pass under `-race`.
-- **T009:** performance is measured; see `docs/risk-register.md`. The
-  user accepted the extra cost per DELETE and kept
-  `synchronous = FULL`.
-- **T010:** the console has Delete with blast radius on the Application,
-  Component and Secret pages, a Secrets page (metadata only) and an
-  Approvals page.
-- **Next: T011** (real cluster). Run `serendipd` against
-  `serendip-t018`, plus the Agent Manager k3d cluster (`k3d cluster start
-  amp-local`) for the real-agent check. This includes the console browser
-  walk-through moved from T010 and the edge-1 harness run moved from
-  T009. Then T012 (reviews), T013 (docs and ADR 0016) and T014 (close).
 
 Other candidates are in "Next up" below.
 
