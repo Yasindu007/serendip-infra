@@ -487,3 +487,35 @@ Everything in spec "Scope — OUT", plus:
 - clean-up for kinds other than Secret. Volumes and workloads keep their
   existing reconciler teardown; the `cleaners` map is where a future kind
   would plug in.
+
+## As built (T014)
+
+Where the code ended up differing from this plan. Each difference is
+recorded in its task in `tasks.md`; the architecture doc
+(`docs/architecture/approvals.md`) and ADR 0016 describe the code.
+
+- **One kind-agnostic `DeleteFunc(ctx, kind, id, cascade)`,** not a
+  per-kind `deleters` map. `cmd/serendipd` serves it with a
+  `json.RawMessage` store per call. `exists` takes `(ctx, kind, id)`.
+  Only the `cleaners` map exists, with Secret's `EraseValue`.
+- **`policy.MayDecide(approver Principal, requester *PrincipalRef)`:** the
+  requester is a pointer, nil for a server-side requester such as
+  start-up's key revocation.
+- **The executing actor is the engine's `system:reconciler`,** not
+  `system:approvals` (core/reconcile/CLAUDE.md: the engine sets the audit
+  identity). Who asked and who approved are in `policy_decision`.
+- **Extra condition reasons:** `Decided` False `AwaitingDecision`;
+  `CleanedUp` False `ProviderNotReady`; `Verified` False `StillPresent`.
+- **Deciding an approval past `expiresAt`** that the reconciler hasn't
+  marked `Expired` yet answers 409.
+- **The store records the owner chain** for an Approval written by a
+  plain DELETE (read inside the delete transaction), so reading it after
+  the target is gone works too.
+- **A policy-approved cascade DELETE** records the scopes it checked as
+  the expected blast radius, so a tree that changed between the check and
+  the transaction is refused as stale (409; T012).
+- **A direct DELETE's audit rows** name their Approval:
+  `approved: <approval> by policy (<evidence>)` (T013).
+- **Indexed reads and paging** (decision 1, amended at T007a): migrations
+  0006 and 0007, `status.settled`, `sqlite.ListApprovals`, and
+  `Serendip-Next-After`.

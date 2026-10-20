@@ -27,7 +27,8 @@ This is constitution rule 5, made concrete per severity:
 At no severity does AI receive cluster-admin, raw `kubectl`, or direct
 provider credentials. Destructive operations (delete, scale-to-zero, node
 drain, volume operations) always require an explicit approval object, even
-when a human is the one approving (constitution 5).
+when a human is the one approving (constitution 5). Spec 019 built this
+for deletes: `approvals.md`.
 
 ## Approval engine
 
@@ -41,7 +42,14 @@ AI → Serendip Action → Policy check → Provider → Execution → Verificat
 - **Serendip Action** — a structured, typed request, not free-form
   automation; it references a Runbook or a specific resource mutation.
 - **Policy check** — evaluates severity, resource sensitivity, and
-  organizational policy before anything is allowed to proceed.
+  organizational policy before anything is allowed to proceed. Today it
+  is the role check in `core/policy` (`authorization.md`). For an agent,
+  a delete returns `NeedsApproval`: the agent files `POST /v1/approvals`
+  with a reason, a person allowed to delete the target approves it, and
+  the approval reconciler executes it and verifies the result. The same
+  path records an Approval, decided by policy, for a person's delete
+  (`approvals.md`). Severity and sensitivity rules, and pre-approved
+  runbooks, don't exist yet.
 - **Provider / Execution** — same provider abstraction as any other
   reconciliation (`provider-model.md`); AI never talks to Kubernetes or a
   cloud API directly.

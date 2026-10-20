@@ -275,7 +275,7 @@ rule 6). `Reconcile` is thin: `Exists` → one Condition, `"Reachable"`
 `Unknown`/`"CheckFailed"`) — named `"Reachable"`, not `"Synced"`,
 since there's no desired value in `Spec` to compare against.
 
-**`WriteValue`, `ReadValue`, `DeleteWithValue` are three separate,
+**`WriteValue` and `ReadValue` are two separate,
 synchronous methods on `SecretReconciler` — called directly by `api/`,
 never from `Reconcile` or the async resync loop.** A secret's value
 has no "desired state" to reconcile toward; routing it through the
@@ -285,16 +285,39 @@ immediately. They live on `SecretReconciler` as a convenience (reuse
 its `store`/`provider` fields), doc-commented as synchronous, not
 reconcile-loop, concerns.
 
-**Delete bypasses the reconcile loop entirely, unlike
-`VolumeReconciler`'s.** `VolumeReconciler`'s `ErrNotFound` branch can
-call `provider.Delete` with just the ref's ID because the PVC name is
-*derived* from it; a `Secret`'s `Path` is not derived from anything,
-so once the record is gone, `Path` is gone with it. External cleanup
-must happen *before* the store record is deleted:
-`DeleteWithValue` fetches the `Secret`, calls `provider.Delete`, then
-`store.Delete` — so a failed provider delete leaves the record in
-place for a retry rather than orphaning a live value in OpenBao.
-`Reconcile`'s own `ErrNotFound` branch is consequently a plain no-op.
+### Deleting a Secret (spec 019, ADR 0016)
+
+**The record goes first; its value is erased afterwards from the
+Approval's record.** This replaces spec 009's erase-then-delete order
+(`DeleteWithValue`, removed).
+
+A `Secret`'s `Path` is not derived from anything, so once the record is
+gone, `Path` is gone with it. The store therefore keeps it: every delete
+records an Approval (`approvals.md`) that lists each removed resource
+with its last spec, and the Secret's last spec holds the path.
+
+1. `DELETE /v1/secrets/{id}` is the generic store delete, like any
+   kind's. It records the Approval and removes the record in one
+   transaction, and answers with `Serendip-Approval-Id`.
+2. The approval reconciler then calls `SecretReconciler.EraseValue` with
+   the removed Secret's ID and recorded spec, which rebuilds the
+   `resource.Secret` the provider needs and calls `provider.Delete`. It
+   retries until it succeeds, across a provider outage and a `serendipd`
+   restart.
+3. The approval is `Verified` only when the record is gone **and** the
+   value is erased.
+
+- **Idempotent:** erasing an already-erased value succeeds (the OpenBao
+  provider treats "not found" as done), which is what makes a retry after
+  a crash safe.
+- **The window:** from the record's deletion until the erase, seconds
+  normally, or as long as the provider is down (RP-005). In between the
+  value can't be reached: access is decided per Secret record, and Secret
+  IDs are server-chosen and never reused.
+- **Cascades:** a cascade that removes Secrets (deleting an Application
+  or Project) lists them in the blast radius, so their values are erased
+  too. Before spec 019 they were left in the provider for good.
+- `Reconcile`'s own `ErrNotFound` branch is a plain no-op.
 
 ## `providers/secrets/openbao.Provider`
 
@@ -327,7 +350,7 @@ reimplementation), plus:
 ```
 POST   /v1/secrets/{id}/value   -> SecretReconciler.WriteValue
 GET    /v1/secrets/{id}/value   -> SecretReconciler.ReadValue
-DELETE /v1/secrets/{id}         -> SecretReconciler.DeleteWithValue (overridden)
+DELETE /v1/secrets/{id}         -> the generic delete (spec 019; see "Deleting a Secret")
 ```
 
 **This is the first `api/` handler depending on a `core/reconcile`
@@ -343,8 +366,8 @@ it hits the same structural wall.
 Constitution rule 3 requires state changes to flow desired state ->
 reconciliation engine -> provider -> verification, with "no imperative
 side-channels that mutate infrastructure directly from an API
-handler." `SecretHandler.WriteValue`/`.Delete` (via `DeleteWithValue`)
-call the `SecretsProvider` synchronously from the HTTP request path,
+handler." `SecretHandler.WriteValue`
+calls the `SecretsProvider` synchronously from the HTTP request path,
 bypassing the async reconcile engine — a `contract-guardian` review
 flagged this directly, and it is real.
 
@@ -353,9 +376,8 @@ to fix later: a secret's value has no "desired state" to reconcile
 toward, so there's nothing for the engine to diff or converge, and
 routing it through the async loop would add latency and
 eventual-consistency surprise for a caller expecting to read back a
-value they just wrote. The exception is scoped to exactly three
-methods — `SecretReconciler.WriteValue`/`.ReadValue`/
-`.DeleteWithValue` — not a general pattern other handlers should
+value they just wrote. The exception is scoped to exactly two
+methods — `SecretReconciler.WriteValue`/`.ReadValue` — not a general pattern other handlers should
 follow. A future capability facing the same "no desired state" shape
 should make the same case explicitly in its own plan.md, not assume
 this precedent extends automatically.
@@ -417,14 +439,9 @@ spec 009's own Scope-OUT:
 - **Mode-`0600` file permission is unverified on this Windows dev
   machine** (NTFS has no POSIX bits) — needs a real Linux run to close
   out `bootstrap_test.go`'s `runtime.GOOS`-gated assertion for real.
-- **`DeleteWithValue`'s provider-delete-then-store-delete ordering is
-  not atomic.** If the provider delete succeeds but the subsequent
-  `store.Delete` fails (e.g. a future `graph.ErrHasChildren` once
-  something can own a `Secret`, which nothing does today), OpenBao's
-  value is gone while the Serendip-side record remains, pointing at
-  nothing. Accepted as a real, narrow gap rather than a two-phase
-  commit across two unrelated systems (constitution rule 10) — revisit
-  if `Secret` ever gains children.
+- **A deleted Secret's value is erased after its record** (RP-005), and
+  writing a new Secret's value can answer 409 after writing it (RP-014).
+  Both are in `docs/risk-register.md`.
 - **A concurrent edit racing `WriteValue`'s internal fetch-then-update**
   surfaces as an ordinary `ErrConflict`, same as any other optimistic-
   concurrency race in this codebase — not a new risk class, just a new

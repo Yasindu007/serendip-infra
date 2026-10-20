@@ -3,7 +3,7 @@
 Who may do what, where. Spec 017 (`specs/017-authorization/`), ADR 0014.
 Serendip copies **Azure RBAC**: roles at scopes decide authority, the
 industry-standard model that most operators already know. Approvals (spec
-019) are the exception path, not the default.
+019, `approvals.md`) are the exception path, not the default.
 
 ## The model
 
@@ -164,8 +164,11 @@ keys are unaffected.
   - The refusal is audited as `needsApproval: <action> at <scope>, allowed
     by <role> (<assignment>) at <scope>: an agent's delete needs an
     approval`.
-  - Spec 019 turns it into a real approval request, which an agent can
-    never approve itself.
+  - The detail names the way forward: `POST /v1/approvals` with the
+    action and a reason creates a `Pending` approval, naming the agent's
+    sponsor. A person who may delete the target approves it, and the
+    approval reconciler deletes it (`approvals.md`). An agent can never
+    approve, its own request or anyone's.
   - A test pins every DELETE route to an action ending in `/delete`.
 - **One sponsor per agent.** Every assignment for an agent names the same
   person sponsor. A different one is refused, after the caller's own
@@ -186,6 +189,13 @@ Every mutation's audit row carries the subject of the person behind it
 `allow: <role> (<assignment>) at <scope>`). A refused mutation leaves its
 own row with no before or after (`deny: missing <action> at <scope>`).
 Refused reads are logged, not audited, as in Azure.
+
+Every delete also records an Approval (`approvals.md`, spec 019). The
+request, the decision and the execution each have their own row. A direct
+`DELETE` keeps the `allow: …` evidence. A delete that an approved request
+runs carries `approved: <approval> by <approver or policy>; requested by
+<requester>`. A refused approval decision is `deny: policy: forbidden: …`,
+and a request that waits is `needsApproval: …`.
 
 ## Bootstrap, lockout and recovery
 
@@ -215,14 +225,19 @@ Refused reads are logged, not audited, as in Azure.
     person's groups as of their last sign-in.
   - **Role assignments** shows those made here and those inherited from
     above, marked with their source. Assignments can be added, and removed
-    with a confirmation. This is the one exception to "no delete": it
-    revokes access, destroys nothing, and is guarded by RBAC. An inherited
-    assignment is removed where it was made, not here.
+    with a confirmation. Removing one revokes access and destroys nothing;
+    like every delete it records an Approval, decided by policy. An
+    inherited assignment is removed where it was made, not here.
   - **Roles** lists every role.
 - **Controls follow `GET /v1/authorization/permissions`:**
   - create actions are hidden when not allowed;
   - edits are disabled with the reason (`Guarded`);
   - while access is still loading, controls stay disabled.
+- **Delete** (spec 019) on the Application, Component and Secret pages is
+  shown when the permissions API allows it. It sends the ordinary `DELETE`,
+  which records an Approval decided by policy, and shows its ID. The
+  Approvals page lists requests waiting for a person, who approves or
+  rejects them if they may delete the target (`approvals.md`).
 
 ## Secrets and authorization
 

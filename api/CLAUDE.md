@@ -29,6 +29,25 @@
     answers `NeedsApproval` for their deletes. `deny()` turns that into a
     403 with `ProblemNeedsApproval`, and every DELETE route must check an
     action ending in `/delete` (`deleteactions_test.go`).
+  - **No destructive operation without an Approval** (constitution 5,
+    spec 019, ADR 0016, `docs/architecture/approvals.md`):
+    - The authorizer's `wrap` attaches an approval intent
+      (`store.WithApproval`) to the context of **every DELETE route**,
+      after its checks pass, and adds `Serendip-Approval-Id` to a 2xx
+      answer. A new delete path must carry an intent too: the store
+      fails closed (`store.ErrNoApproval`, a 500 if it ever reaches
+      the API) and has no bypass. `deleteactions_test.go` names a route
+      that doesn't leave one `Executed` Approval.
+    - Approval routes (`approval_handler.go`) record requests and
+      decisions only. Execution belongs to the approval reconciler, never
+      a handler. `POST /v1/approvals` is the one route that lets
+      `NeedsApproval` through (`allowNeedsApproval`).
+    - Approvals are not in `resourcePaths`: no generic `PUT` or `DELETE`.
+      Status is built by the server, never taken from a client.
+    - A blast-radius ref's `LastSpec` is clean-up input and is never
+      returned (`approvalView`). Lists page with `limit`/`after` and
+      `Serendip-Next-After`, through `sqlite.ListApprovals`; never list
+      all approvals.
   - Directory reads (`directory.go`) are gated like `/principals`
     (`mayListPrincipals`). They read the optional `identity.Directory`
     (`WithDirectory`) under a 10 s deadline, then fall back to the

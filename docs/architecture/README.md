@@ -18,6 +18,7 @@ standalone in under ~5 minutes and contain decisions, not exploration.
 | `operations.md` | Alert → Incident → Diagnosis → Recommendation → Approval → Action → Verification → Postmortem lifecycle; SLO/error budgets; change intelligence | Done |
 | `ai-operations.md` | Severity-based autonomy matrix, approval engine, what context AI receives, MCP surface | Done |
 | `identity.md` | Three identities (human, platform, workload); workload identity abstraction over Entra/Keycloak/Thunder/ServiceAccount; subjects and groups for authorization | Done |
+| `approvals.md` | The `Approval` kind: a record for every destructive action, decided by policy unless it needs a person; phases, conditions, routes, who may decide, execution with stale checks, clean-up and verification, audit, the console (ADR 0016) | Done |
 | `authorization.md` | Azure-RBAC model (ADR 0014): roles at scopes, inheritance, data actions, constrained delegation; enforcement in `api/authz.go`; evaluation; bootstrap and break-glass; the console's Access control (IAM) | Done |
 
 Extracted from the founding design discussions (`docs/raw/nexus.md`,

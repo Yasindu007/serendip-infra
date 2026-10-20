@@ -305,7 +305,7 @@ T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
 - **Verify**: all three pass, and `go test ./...` and `pnpm test` are
   green after the fixes.
 
-## T013 [A] — Docs and ADR
+## T013 [A] — Docs and ADR — DONE 2026-10-20 (written by docs-keeper. New: ADR 0016 and `docs/architecture/approvals.md`, covering every route, phase, condition and reason in the code. Updated: `authorization.md`, `ai-operations.md`, `secrets.md`, `resource-model.md`, the architecture README and `api/CLAUDE.md`. Checking the docs against the code found one mismatch: a direct DELETE's audit rows didn't name their Approval as spec criterion 10 says. The code was fixed. The plan's other differences are collected in plan.md "As built")
 
 - **Do**:
   - Write ADR 0016 and `docs/architecture/approvals.md`.

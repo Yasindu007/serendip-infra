@@ -87,6 +87,12 @@ Site → Cluster → Node
   produced by one or more Alerts. Carries severity, affected resources,
   diagnosis, and the approval/action trail. Full lifecycle in
   `operations.md`.
+- **Approval** — the record of one destructive action (today, a delete):
+  what was asked, who asked, what it removes (its blast radius), who or
+  what decided (policy, or a person), and how execution and verification
+  went. Every delete writes one. It has no owner, so a cascade never
+  removes it, and it can't be deleted or changed once decided. Spec in
+  `approvals.md`.
 
 ## Relationships (resource graph)
 
@@ -105,6 +111,11 @@ AI root-cause correlation possible (`operations.md`, `ai-operations.md`).
 
 Deleting a resource with children is rejected unless cascade is explicitly
 requested.
+
+**A store delete requires an Approval** (constitution 5, `approvals.md`).
+`Store.Delete` takes it from the context and writes it in the delete's own
+transaction, listing every row removed. A delete with no approval on its
+context is refused with `store.ErrNoApproval` and changes nothing.
 
 ## Status conventions
 
