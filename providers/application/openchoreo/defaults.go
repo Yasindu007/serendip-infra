@@ -55,8 +55,9 @@ func mustJSON(v any) json.RawMessage {
 // EnsurePlatformDefaults server-side-applies the platform-level objects
 // every Serendip Application/Component deploys through, none of which the
 // OpenChoreo charts seed themselves: a project type, a component type, the
-// single Environment, and a single-environment DeploymentPipeline. It also
-// labels ControlPlaneNamespace as the org namespace (reused because the
+// single Environment, a single-environment DeploymentPipeline, and the
+// NetworkPolicy that closes the OpenChoreo API to every pod (apiDenyPolicy;
+// risk register RP-018). It also labels ControlPlaneNamespace as the org namespace (reused because the
 // default DataPlane already lives there). Safe to call repeatedly -- cmd's
 // foundations loop does, so a default deleted or edited by hand is
 // restored, and a field a newer Serendip stops setting is removed. A
@@ -125,6 +126,7 @@ func platformDefaults() []platformDefault {
 				}},
 			}),
 		}},
+		{"/apis/networking.k8s.io/v1/namespaces/" + ControlPlaneNamespace + "/networkpolicies", apiDenyPolicy()},
 	}
 }
 
@@ -323,5 +325,30 @@ func deploymentTemplate() map[string]any {
 				},
 			},
 		},
+	}
+}
+
+// apiDenyPolicyName names the NetworkPolicy that closes the OpenChoreo API.
+const apiDenyPolicyName = "serendip-deny-openchoreo-api"
+
+// apiDenyPolicy denies all ingress to the OpenChoreo API server's pods
+// (risk register RP-018). The control-plane chart is installed with
+// security.enabled=false (see deploy.go), which makes that API accept
+// every request with no authentication and no authorization, and its
+// ClusterIP Service is otherwise reachable from any pod: a workload could
+// create or delete OpenChoreo resources outside Serendip's RBAC, approvals
+// and audit. Serendip never calls that API (it reads and writes the CRs
+// through the Kubernetes API), and no other OpenChoreo component does
+// either (verified on 1.3.1: only the kubelet's probes reach it, which
+// NetworkPolicy doesn't block). An empty ingress list is deny-all.
+func apiDenyPolicy() kubernetes.Object {
+	return kubernetes.Object{
+		APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy",
+		Metadata: kubernetes.ObjectMeta{Name: apiDenyPolicyName, Namespace: ControlPlaneNamespace},
+		Spec: mustJSON(map[string]any{
+			"podSelector": map[string]any{"matchLabels": map[string]string{"app.kubernetes.io/component": "api-server"}},
+			"policyTypes": []string{"Ingress"},
+			"ingress":     []any{},
+		}),
 	}
 }

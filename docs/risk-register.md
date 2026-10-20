@@ -38,7 +38,7 @@ purpose), **Closed** (fixed).
 | RP-015 | The console shows an agent's sponsor as a subject ID | Usability | Open | Spec 019 T011 |
 | RP-016 | Migration 0006 marks old approvals settled without an audit row | Audit | Decided | Spec 019 T012 |
 | RP-017 | The approvals paging cursor can reveal IDs the caller can't read | Data exposure (low) | Open | Spec 019 T012 |
-| RP-018 | OpenChoreo's API answers any pod in the cluster, unauthenticated | Security (high) | Open | Spec 020 research |
+| RP-018 | OpenChoreo's API answered any pod in the cluster, unauthenticated | Security (high) | Closed | Spec 020 research |
 
 ---
 
@@ -283,8 +283,8 @@ purpose), **Closed** (fixed).
 
 ## RP-018 — OpenChoreo's API answers any pod in the cluster, unauthenticated
 
-- **Kind:** security, high. **Status:** Open; spec 020 T001 fixes it
-  first. **Found:** spec 020 research, 2026-10-20 (OpenChoreo 1.3.1,
+- **Kind:** security, high. **Status:** Closed, 2026-10-20 (fixed before
+  spec 020, at the user's request). **Found:** spec 020 research, 2026-10-20 (OpenChoreo 1.3.1,
   verified from its chart and source). It has existed since spec 010.
 - **What:** spec 010 installs OpenChoreo's control plane with
   `security.enabled=false`, so `openchoreo-api` accepts requests with no
@@ -298,7 +298,19 @@ purpose), **Closed** (fixed).
 - **Why it wasn't caught:** spec 010 set the flag to avoid the chart's
   placeholder OIDC issuer, and treated the API as unused. Unused isn't the
   same as unreachable.
-- **Fix (spec 020 decision 1):** a NetworkPolicy denying ingress to
-  `openchoreo-api` (Serendip doesn't use it); if the cluster can't enforce
-  NetworkPolicy, scale it to zero. Verified live with a pod that must be
-  refused.
+- **Fixed:** the OpenChoreo provider's platform defaults now apply
+  `serendip-deny-openchoreo-api`, a NetworkPolicy denying all ingress to
+  the API's pods (`providers/application/openchoreo/defaults.go`).
+  - **It's restored by the foundations loop** if deleted or edited.
+  - **Verified live on kind** (kindest/node v1.34.0):
+    - Before the fix, an anonymous pod listed projects (HTTP 200).
+    - After `serendipd` applied the policy, the same request got no
+      answer.
+    - The kubelet's probes still pass, and a new Component still deployed
+      Ready in about 16 s.
+  - **Still to verify live:** K3s enforcement, on the first K3s run.
+- **Residual risk:** the policy matches only by the pods' label
+  (`app.kubernetes.io/component=api-server`). A future chart that
+  relabels them would silently re-open the API. `VERSIONS.md` requires a
+  re-check on every OpenChoreo upgrade. A foundations-time check that the
+  selector matches a pod would be stronger, later.

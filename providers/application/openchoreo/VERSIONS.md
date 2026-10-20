@@ -29,4 +29,22 @@ Notes:
   `httproute-external`; verified against OpenChoreo 1.3.1, whose
   `ReleaseBinding.status.endpoints[].externalURLs.http` carries the URL.
 - `helm` must be on `$PATH` (ADR 0010).
+- **The OpenChoreo API is closed by a NetworkPolicy** (risk register
+  RP-018). The control plane runs with `security.enabled=false`, which
+  makes `openchoreo-api` anonymous with no authorization, and its
+  ClusterIP Service (port 8080) has no NetworkPolicy of its own.
+  `serendip-deny-openchoreo-api` (`defaults.go`) denies all ingress to pods
+  labelled `app.kubernetes.io/component=api-server`. That rests on these
+  facts, verified on 1.3.1 (2026-10-20):
+  - those pods carry that label;
+  - nothing else in the control plane (controller-manager, event-forwarder,
+    cluster-gateway) calls the API; only the kubelet's `/ready` and
+    `/health` probes reached it in 24 h;
+  - kindnet (kindest/node v1.34.0) enforces NetworkPolicy and still lets
+    kubelet probes through (verified live). K3s enforces it with its
+    embedded network-policy controller, but that's not yet verified live on
+    our K3s pin: check it on the first K3s run.
+
+  Re-check all three on every OpenChoreo upgrade. If Serendip ever calls
+  the API, turn its OIDC security on rather than opening the policy.
 - Details: `docs/architecture/application-platform.md`.

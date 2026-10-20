@@ -232,6 +232,26 @@ func TestEnsurePlatformDefaults_AllAbsent_AppliesEach(t *testing.T) {
 		"/apis/openchoreo.dev/v1alpha1/namespaces/openchoreo-control-plane/environments/development":     "Environment",
 		"/apis/openchoreo.dev/v1alpha1/namespaces/openchoreo-control-plane/deploymentpipelines/serendip": "DeploymentPipeline",
 	}
+	// RP-018: the OpenChoreo API is closed to every pod.
+	policyPath := "/apis/networking.k8s.io/v1/namespaces/openchoreo-control-plane/networkpolicies/serendip-deny-openchoreo-api"
+	if policy, ok := api.objects[policyPath]; !ok || policy.Kind != "NetworkPolicy" {
+		t.Errorf("missing the NetworkPolicy closing the OpenChoreo API at %s", policyPath)
+	} else {
+		var spec struct {
+			PodSelector struct {
+				MatchLabels map[string]string `json:"matchLabels"`
+			} `json:"podSelector"`
+			PolicyTypes []string `json:"policyTypes"`
+			Ingress     []any    `json:"ingress"`
+		}
+		if err := json.Unmarshal(policy.Spec, &spec); err != nil {
+			t.Fatal(err)
+		}
+		if spec.PodSelector.MatchLabels["app.kubernetes.io/component"] != "api-server" ||
+			len(spec.PolicyTypes) != 1 || spec.PolicyTypes[0] != "Ingress" || spec.Ingress == nil || len(spec.Ingress) != 0 {
+			t.Errorf("policy spec = %+v, want api-server pods selected, Ingress only, and an empty (deny-all) ingress list", spec)
+		}
+	}
 	for path, kind := range wantPaths {
 		obj, ok := api.objects[path]
 		if !ok {
@@ -242,8 +262,8 @@ func TestEnsurePlatformDefaults_AllAbsent_AppliesEach(t *testing.T) {
 			t.Errorf("%s: kind/apiVersion = %s/%s", path, obj.Kind, obj.APIVersion)
 		}
 	}
-	if got := api.count(methodApply); got != 4 {
-		t.Errorf("apply calls = %d, want 4", got)
+	if got := api.count(methodApply); got != 5 {
+		t.Errorf("apply calls = %d, want 5", got)
 	}
 	for _, a := range api.applies {
 		if a.fieldManager != kubernetes.FieldManager || a.force != "true" {
