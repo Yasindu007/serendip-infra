@@ -74,3 +74,4 @@ Last updated: 2026-10-20.
 |---|---|---|
 | Observability backend default | OpenObserve, SigNoz, OpenSearch | `capability-model.md`, after a T470 benchmark |
 | A person-launched AI's identity | Token exchange "on behalf of" (preferred if the POC works) or a separate agent identity | Spec 021 T001 |
+| Self-service autonomous agents in Serendip's own ThunderID | A small spec after 020 (both identity kinds: exchange for a person's assistant, own identity for autonomous agents) | Spec 021 plan decision 1 |

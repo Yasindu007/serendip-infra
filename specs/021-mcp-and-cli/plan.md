@@ -112,6 +112,16 @@ Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
        agents, which spec 018's agent issuers already cover.
    - **Rejected either way: Serendip issuing tokens itself.** That's
      building an identity provider.
+   - **Both identity kinds, each built when needed** (agreed with the
+     user, 2026-10-20):
+     - **A person's own assistant:** token exchange, in this spec.
+     - **An autonomous or hosted agent:** its own identity.
+       - **From an external agent issuer** (WSO2 Agent Manager): exists
+         since spec 018.
+       - **Self-service in Serendip's own ThunderID** (an edge-1 user with
+         no Agent Manager creates an agent they sponsor): a **separate
+         small spec after 020**. It moves into this spec only if T001
+         rules out token exchange, as the fallback above.
 
 2. **CLI sign-in: authorization code with PKCE on the fixed loopback
    `127.0.0.1:8250`, with a paste-back fallback.**
