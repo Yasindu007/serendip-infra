@@ -103,8 +103,10 @@ Leftovers on this machine (scratch only, all reversible):
 - **Other destructive verbs** (scale-to-zero, drain, volume operations)
   once the API has them. `ApprovalVerb` is designed for them.
 - **A real T470 run** (RP-008), before any profile default changes.
-- **Pushing to GitHub:** specs 002–019 are committed locally only, as
-  agreed earlier.
+- **Pushing to GitHub, slowly** (the account was blocked once for bulk
+  issue creation): specs 002–003 were pushed on 2026-10-20 as the branch
+  `spec-002-003` (up to `f13ac45`), with no PR yet. Specs 004–019 are
+  local only. Push a spec or two at a time, only when the user asks.
 
 **Spec 018 (agent identities, a WSO2 Agent Manager POC, and the
 identity-provider management channel): COMPLETE** (T001–T014,
