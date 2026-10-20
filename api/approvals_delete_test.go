@@ -130,3 +130,18 @@ func TestDelete_RemovedAPIKeyAssignmentHasAnApproval(t *testing.T) {
 		t.Errorf("approval = %+v / %+v", a.Spec, a.Status)
 	}
 }
+
+// Access-management deletes never cascade: a stray ?cascade=true is
+// ignored, not turned into an approval for another delete (T012 review).
+func TestDelete_AccessManagementIgnoresCascade(t *testing.T) {
+	w := newAuthzWorld(t, func(*authzWorld) {})
+	id := grant(t, w.db, resource.PrincipalPerson, "sub-reader", policy.ReaderRoleID, w.scope("projB"))
+	got := w.do("key-ci", http.MethodDelete, "/v1/authorization/roleAssignments/"+id+"?cascade=true", nil)
+	if got.Code != http.StatusNoContent || got.Header().Get("Serendip-Approval-Id") == "" {
+		t.Fatalf("DELETE role assignment ?cascade=true: %d %s", got.Code, got.Body)
+	}
+	list := approvalsOf(t, w, resource.Scope{Kind: resource.KindRoleAssignment, ID: id})
+	if len(list) != 1 || list[0].Spec.Action.Cascade {
+		t.Errorf("approvals = %+v, want one, not a cascade", list)
+	}
+}

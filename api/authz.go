@@ -279,8 +279,36 @@ func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 			return
 		case ru.list:
 			ctx = context.WithValue(ctx, readFilterKey{}, readFilter(a.readable(caller)))
+			// One page's approvals share targets and owners: each existence
+			// check and decision is made once per request (T012 review).
+			seen := map[resource.Scope]bool{}
+			exists := func(ctx context.Context, kind resource.Kind, id string) (bool, error) {
+				s := resource.Scope{Kind: kind, ID: id}
+				if ok, hit := seen[s]; hit {
+					return ok, nil
+				}
+				ok, err := a.exists(ctx, kind, id)
+				if err == nil {
+					seen[s] = ok
+				}
+				return ok, err
+			}
+			decided := map[[2]resource.Scope]bool{}
 			ctx = context.WithValue(ctx, approvalFilterKey{}, approvalFilter(func(ctx context.Context, ap resource.Approval) (bool, error) {
-				return a.approvalReadableLoaded(ctx, caller, ap)
+				at, err := a.approvalScope(ctx, ap, exists)
+				if err != nil {
+					return false, err
+				}
+				key := [2]resource.Scope{{Kind: ap.Spec.Action.Target.Kind}, at}
+				if ok, hit := decided[key]; hit {
+					return ok, nil
+				}
+				d, err := a.engine.Decide(ctx, caller, action(ap.Spec.Action.Target.Kind, "read"), at)
+				if err != nil {
+					return false, err
+				}
+				decided[key] = d.Effect == policy.Allow
+				return decided[key], nil
 			}))
 			ctx = context.WithValue(ctx, deciderKey{}, decider(func(ctx context.Context, act policy.Action, at resource.Scope) (bool, error) {
 				d, err := a.engine.Decide(ctx, caller, act, at)
@@ -336,6 +364,15 @@ func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 			// policy allowed it, so policy approves it, and the store
 			// writes it in the delete's own transaction.
 			in := policyApproval(ctx, caller, ru, resourceID, r.URL.Query().Get("cascade") == "true", evidence)
+			if in.Approval.Spec.Action.Cascade {
+				// What a cascade removes must be what was just checked: a
+				// child added since then would go without its own delete
+				// being decided, so the store refuses a changed tree
+				// (ErrStale, 409; T012 review).
+				for _, c := range checks {
+					in.ExpectedRadius = append(in.ExpectedRadius, c.scope)
+				}
+			}
 			ctx = store.WithApproval(ctx, in)
 			w = &approvalHeaderWriter{ResponseWriter: w, id: in.Approval.Metadata.ID}
 		}
@@ -483,7 +520,7 @@ func (a *authorizer) checks(ctx context.Context, r *http.Request, ru rule) ([]ch
 		if err != nil {
 			return nil, "", err
 		}
-		at, err := a.approvalScope(ctx, ap)
+		at, err := a.approvalScope(ctx, ap, a.exists)
 		if err != nil {
 			return nil, "", err
 		}
@@ -532,9 +569,9 @@ func (a *authorizer) deleteChecks(ctx context.Context, target resource.Scope, ca
 // approvalScope is where reading ap is decided: its target, or once that
 // is gone, the nearest owner recorded at request time that still exists,
 // or "/" (spec 019 plan.md decision 9).
-func (a *authorizer) approvalScope(ctx context.Context, ap resource.Approval) (resource.Scope, error) {
+func (a *authorizer) approvalScope(ctx context.Context, ap resource.Approval, exists func(ctx context.Context, kind resource.Kind, id string) (bool, error)) (resource.Scope, error) {
 	for _, s := range append([]resource.Scope{ap.Spec.Action.Target}, ap.Status.OwnerChain...) {
-		ok, err := a.exists(ctx, s.Kind, s.ID)
+		ok, err := exists(ctx, s.Kind, s.ID)
 		if err != nil {
 			return resource.Scope{}, err
 		}
@@ -714,12 +751,7 @@ func (a *authorizer) approvalReadable(ctx context.Context, caller policy.Princip
 	if err != nil {
 		return false, err
 	}
-	return a.approvalReadableLoaded(ctx, caller, ap)
-}
-
-// approvalReadableLoaded is approvalReadable for an approval already read.
-func (a *authorizer) approvalReadableLoaded(ctx context.Context, caller policy.Principal, ap resource.Approval) (bool, error) {
-	at, err := a.approvalScope(ctx, ap)
+	at, err := a.approvalScope(ctx, ap, a.exists)
 	if err != nil {
 		return false, err
 	}

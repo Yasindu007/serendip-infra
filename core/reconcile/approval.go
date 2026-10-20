@@ -145,7 +145,8 @@ func (r *ApprovalReconciler) execute(ctx context.Context, a resource.Approval) e
 		// on the approval, once per distinct error.
 		log.Printf("reconcile: approval %s: delete of %s failed, will retry: %v", a.Metadata.ID, act.Target, err)
 		msg := "the delete failed and will be retried"
-		if prev := findCondition(a.Status.Conditions, resource.ApprovalConditionExecuted); prev == nil || prev.Message != msg {
+		// A cancelled context failed the delete; don't spend it on a write.
+		if prev := findCondition(a.Status.Conditions, resource.ApprovalConditionExecuted); ctx.Err() == nil && (prev == nil || prev.Message != msg) {
 			a.Status.Conditions = upsertCondition(a.Status.Conditions, resource.Condition{
 				Type: resource.ApprovalConditionExecuted, Status: resource.ConditionFalse, Reason: ReasonDeleteFailed,
 				Message: msg, LastTransitionTime: r.now().UTC(),
@@ -196,6 +197,9 @@ func (r *ApprovalReconciler) fail(ctx context.Context, a resource.Approval, reas
 		Message: message, LastTransitionTime: r.now().UTC(),
 	})
 	_, err := r.approvals.Update(ctx, a)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil // the approval itself is gone: nothing left to record
+	}
 	return err
 }
 
@@ -224,9 +228,12 @@ func (r *ApprovalReconciler) finish(ctx context.Context, a resource.Approval) er
 	}
 
 	now := r.now().UTC()
-	reason, message := ReasonNothingToClean, "nothing it removed needs cleaning up"
+	// The claim is scoped to what this reconciler did: records removed and
+	// any clean-up registered for their kinds. Workload teardown is still
+	// reported by each kind's own reconciler (T012 review).
+	reason, message := ReasonNothingToClean, "no approval-driven clean-up applies to what it removed"
 	if r.needsCleanup(a) {
-		reason, message = ReasonCleanupDone, "everything it removed is cleaned up"
+		reason, message = ReasonCleanupDone, "every clean-up for what it removed is done"
 	}
 	prevCleaned := findCondition(a.Status.Conditions, resource.ApprovalConditionCleanedUp)
 	cleanedRecorded := prevCleaned != nil && prevCleaned.Status == resource.ConditionTrue && prevCleaned.Reason == reason
@@ -244,7 +251,7 @@ func (r *ApprovalReconciler) finish(ctx context.Context, a resource.Approval) er
 		}
 	}
 	verified := resource.Condition{Type: resource.ApprovalConditionVerified, Status: resource.ConditionTrue, Reason: "Gone",
-		Message: fmt.Sprintf("all %d removed resource(s) are gone", len(a.Status.BlastRadius)), LastTransitionTime: now}
+		Message: fmt.Sprintf("all %d removed record(s) are gone from Serendip", len(a.Status.BlastRadius)), LastTransitionTime: now}
 	if len(left) > 0 {
 		verified.Status, verified.Reason, verified.Message = resource.ConditionFalse, "StillPresent", fmt.Sprintf("still present: %v", left)
 	}
