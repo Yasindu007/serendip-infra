@@ -38,6 +38,7 @@ purpose), **Closed** (fixed).
 | RP-015 | The console shows an agent's sponsor as a subject ID | Usability | Open | Spec 019 T011 |
 | RP-016 | Migration 0006 marks old approvals settled without an audit row | Audit | Decided | Spec 019 T012 |
 | RP-017 | The approvals paging cursor can reveal IDs the caller can't read | Data exposure (low) | Open | Spec 019 T012 |
+| RP-018 | OpenChoreo's API answers any pod in the cluster, unauthenticated | Security (high) | Open | Spec 020 research |
 
 ---
 
@@ -279,3 +280,25 @@ purpose), **Closed** (fixed).
 - **Fix when touched:** an opaque cursor (for example the page's last
   `created_at` and a sequence, not an ID), or filtering before cutting
   with a scope-aware query (RP-006's fix).
+
+## RP-018 — OpenChoreo's API answers any pod in the cluster, unauthenticated
+
+- **Kind:** security, high. **Status:** Open; spec 020 T001 fixes it
+  first. **Found:** spec 020 research, 2026-10-20 (OpenChoreo 1.3.1,
+  verified from its chart and source). It has existed since spec 010.
+- **What:** spec 010 installs OpenChoreo's control plane with
+  `security.enabled=false`, so `openchoreo-api` accepts requests with no
+  authentication and no authorization. It's a ClusterIP Service on port
+  8080, and the chart ships no NetworkPolicy by default.
+- **Impact:** any pod in the cluster can create, change or delete
+  OpenChoreo resources (projects, components, bindings), and so run
+  workloads or remove them. That includes a user's workload, or a
+  compromised one. It bypasses Serendip's RBAC, approvals and audit
+  entirely. Nothing outside the cluster can reach it.
+- **Why it wasn't caught:** spec 010 set the flag to avoid the chart's
+  placeholder OIDC issuer, and treated the API as unused. Unused isn't the
+  same as unreachable.
+- **Fix (spec 020 decision 1):** a NetworkPolicy denying ingress to
+  `openchoreo-api` (Serendip doesn't use it); if the cluster can't enforce
+  NetworkPolicy, scale it to zero. Verified live with a pod that must be
+  refused.
