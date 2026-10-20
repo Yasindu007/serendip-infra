@@ -54,8 +54,10 @@ unless marked inferred.
 
 ## Decisions
 
-1. **Close RP-018 first** (task T001, before anything else, and worth
-   doing even if the rest of spec 020 waits).
+1. **Close RP-018 first.** **Done** before spec 020, at the user's
+   request (`96f285d`). The NetworkPolicy is in the provider's platform
+   defaults, and was verified live on kind. What follows is the rationale
+   as decided.
    - Serendip doesn't use `openchoreo-api` (decision 3), so it shouldn't
      answer anyone.
    - **The fix:** a NetworkPolicy, applied by the OpenChoreo provider's
@@ -235,8 +237,8 @@ unless marked inferred.
    - **Agents:** spec 018's guardrails apply unchanged. Undeploying is a
      delete, so it needs an Approval.
 
-10. **Delivery: one design, three specs** (spec open question 5). This
-    needs your agreement, since it reshapes the spec list:
+10. **Delivery: one design, three specs** (spec open question 5).
+    **Agreed by the user, 2026-10-20:**
     - **020, this spec, narrowed:**
       - the RP-018 fix;
       - the environment model and migration;

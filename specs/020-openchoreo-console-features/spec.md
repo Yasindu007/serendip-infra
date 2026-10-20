@@ -1,6 +1,7 @@
 # Spec 020: OpenChoreo's portal features in Serendip's own console
 
-Status: Draft, 2026-10-20. Awaiting review.
+Status: Draft, 2026-10-20. Scope reviewed by the user; split agreed
+(see "Delivery"). The plan is awaiting approval.
 
 ## Problem
 
@@ -43,6 +44,20 @@ things:
 - **Honest availability:** a feature whose package isn't installed is
   shown greyed out as unavailable, saying which package it needs, instead
   of hidden or faked (constitution 6).
+
+## Delivery: one design, three specs (agreed 2026-10-20)
+
+This spec is the shared design. Delivery splits:
+
+| Spec | Delivers | Acceptance criteria |
+|---|---|---|
+| **020 (this spec)** | Items 1–5, 10–13, and the **package framework**: installing and removing an optional package (items 6 and 8, as mechanics), readiness, and the greyed-out treatment | 1–7, 10–13 |
+| **021** | The builds package (items 6–7) | 8 |
+| **022** | The observability package (items 8–9) | 9 |
+
+Before any of this, RP-018 (OpenChoreo's API open to any pod in the
+cluster), found while researching this spec, was fixed on its own
+(`96f285d`).
 
 ## Scope — IN
 
@@ -248,7 +263,7 @@ things:
 13. **Nothing else breaks.** Existing tests, the bench harness and a
     real-cluster run pass.
 
-## Open questions (for plan.md)
+## Open questions (answered in plan.md decisions 2, 3, 5, 8 and 10)
 
 1. **Environments in the resource model.** Serendip's tree puts an
    Application *under* one Environment (Project → Environment →
