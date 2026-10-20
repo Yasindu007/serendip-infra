@@ -90,7 +90,15 @@ Leftovers on this machine (scratch only, all reversible):
   T011 to free the port. `serendip.db*` in the repo root is now
   git-ignored.
 
-**Next:** candidates, none started. Ask the user which.
+**Next: OpenChoreo's UI features in our own console** (started
+2026-10-20, the user). Backstage stays out (dependency weight and
+supply-chain risk), so the useful features of OpenChoreo's portal get
+rebuilt in our console, in our design language, through Serendip's API
+(constitution 7) and capability-shaped interfaces in `core/` (rule 1).
+Step one is an inventory of OpenChoreo's UI features and what each one
+needs (planes, CRDs, API), then a spec (020).
+
+**On hold** (the user, 2026-10-20), none started:
 - **Small follow-ups from the register:**
   - RP-014: a new Secret's value write can answer 409 after writing;
   - RP-015: show an agent's sponsor by name;
