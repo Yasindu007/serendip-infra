@@ -91,6 +91,12 @@ unless marked inferred.
        - **It references the Component** with a `depends-on` edge.
      - **Releases** (immutable snapshots of a Component's workload) are
        read-only status from the provider, not a writable kind.
+     - **Per-environment overrides** live on the `Deployment` (its spec
+       gains `overrides`: environment variables, replicas, resource
+       limits, and the parameters the component type marks as
+       per-environment, validated against its `environmentConfigs`
+       schema). They map to the ReleaseBinding's overrides. Promotion
+       copies the release, not the source environment's overrides.
    - **Authorization falls out of spec 017's inheritance unchanged:**
      - **Deploying or promoting into staging** writes a `Deployment` owned
        by `Environment/staging`. That needs `deployments/write` *there*,
@@ -249,10 +255,13 @@ unless marked inferred.
       - the platform view;
       - the package framework (`ProviderInstance` reconciler and
         availability), plus the greyed-out console sections.
-    - **021: the builds package and its features.**
-    - **022: the observability package and its features.**
+    - **021 (done before 020): Serendip's own MCP server and CLI** over
+      Serendip's API. The user's order, so 020's new actions land in the
+      console, CLI and MCP together.
+    - **022: the builds package and its features.**
+    - **023: the observability package and its features.**
 
-    Each is shippable and testable alone. 021 and 022 then plug into the
+    Each is shippable and testable alone. 022 and 023 then plug into the
     framework 020 builds. One spec for all three would be about 30 tasks,
     with two heavy installs on the critical path.
 
@@ -266,10 +275,10 @@ unless marked inferred.
   - **The main risk is the resource-model migration** (decision 2). It's
     the largest change to authorization since spec 017, and needs careful
     tests.
-- **Feasible, with real weight (021):** the workflow plane needs ESO, a
+- **Feasible, with real weight (022):** the workflow plane needs ESO, a
   registry and Argo. That's three more components to keep current, and
   builds are CPU-heavy on 2 cores. It's not for edge-1 by default.
-- **Uncertain (022):**
+- **Uncertain (023):**
   - **Fit:** OpenSearch's and Prometheus's real footprint on a T470 isn't
     documented. It may well not fit comfortably beside edge-1 (RP-008
     style). Measure before promising it.
@@ -353,12 +362,46 @@ type ApplicationPlatformProvider interface {
   streams per session and per server (about 3 and 20).
 - **Pipeline enforcement is ours.** A bug there could allow skipping an
   environment, so it needs table-driven tests.
-- **Packages** (021 and 022) are heavy. They're never in the edge-1
+- **Packages** (022 and 023) are heavy. They're never in the edge-1
   default, and they're measured before anything is promised.
+
+## What we give up (recorded 2026-10-20, at the user's question)
+
+None of this is recovered by installing Backstage. Backstage would bypass
+Serendip's RBAC, approvals and audit by calling OpenChoreo's API
+directly, and would need that API open (RP-018).
+
+- **From building our own console:**
+  - **No free UI updates.** New OpenChoreo portal features aren't free;
+    each is our choice and our build.
+  - **No Backstage ecosystem:** no plugin marketplace, no TechDocs.
+- **From closing OpenChoreo's API and using Kubernetes directly:**
+  - **OpenChoreo's own `occ` CLI and MCP can't be used** on a Serendip
+    install. Serendip's own CLI and MCP (spec 021) are the supported
+    path. An admin-only OIDC escape hatch for `occ` is deferred: the user
+    asked to keep it in mind (it's in memory).
+  - **Remote data planes** wait for a gateway-backed provider.
+  - **Small API conveniences** (release naming, environment-config schema
+    extraction) are ours to keep in step.
+  - **No buffer against OpenChoreo's CR format.** We're coupled directly
+    to its `v1alpha1` shapes, so every upgrade needs a re-check.
+  - **OpenChoreo's own roles and role bindings don't apply.** That's
+    intended: Serendip's RBAC is the one model.
+- **From the Azure-style environment model:**
+  - **Environment-scope assignments change meaning,** from "edit the
+    Applications under it" to "deploy into it". The migration lists the
+    affected assignments.
+  - **"An Application is inside an environment" stops being true.**
+    Environment-scoped Application lists need rethinking.
+- **From direct reads without the observability package:** pod logs exist
+  only while the pod (and its previous instance) does, until spec 023.
+- **From the split and the role choices:** builds (022) and observability
+  (023) come later; Reader doesn't see logs (Log Reader does); and
+  promotion order is ours to enforce correctly.
 
 ## Explicitly NOT done (020)
 
-- Builds (021) and observability (022), except the framework and the
+- Builds (022) and observability (023), except the framework and the
   greyed-out sections.
 - Remote data planes (a gateway-backed provider later).
 - OpenChoreo's RBAC, scaffolder, and AI assistant or RCA, as in spec.md.

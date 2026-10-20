@@ -90,13 +90,28 @@ Leftovers on this machine (scratch only, all reversible):
   T011 to free the port. `serendip.db*` in the repo root is now
   git-ignored.
 
-**Next: OpenChoreo's UI features in our own console** (started
-2026-10-20, the user). Backstage stays out (dependency weight and
-supply-chain risk), so the useful features of OpenChoreo's portal get
-rebuilt in our console, in our design language, through Serendip's API
-(constitution 7) and capability-shaped interfaces in `core/` (rule 1).
-Step one is an inventory of OpenChoreo's UI features and what each one
-needs (planes, CRDs, API), then a spec (020).
+**Next: spec 021, Serendip's own MCP server and CLI** (the user,
+2026-10-20). It comes before spec 020. Constitution rule 7 already
+requires both, as clients of the same API, RBAC and approvals, but
+neither exists yet in `cmd/`. MCP is the AI side of "an AI and human
+platform": agents use their spec 018 identities, and destructive tools
+become Approval requests (spec 019).
+
+**Then spec 020, OpenChoreo's portal features in our console** (no
+Backstage). The spec and plan are drafted in
+`specs/020-openchoreo-console-features/`; the plan awaits approval and is
+on hold until 021. It covers:
+- the Azure-style environment model (a Project as the subscription, an
+  Environment as the resource group), with per-environment overrides;
+- direct Kubernetes access to OpenChoreo, not its API;
+- a runtime view, promotion, schema forms, topology and a platform view;
+- an optional-package framework.
+
+Builds are spec 022 and observability (OpenSearch and Prometheus for
+now) is spec 023.
+- **RP-018 is fixed** (`96f285d`): OpenChoreo's API was open to every pod.
+- **Remember, later:** an admin-only escape hatch so OpenChoreo's `occ`
+  works (see memory and plan.md "What we give up").
 
 **On hold** (the user, 2026-10-20), none started:
 - **Small follow-ups from the register:**

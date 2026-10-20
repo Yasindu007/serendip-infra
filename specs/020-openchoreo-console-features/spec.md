@@ -1,7 +1,10 @@
 # Spec 020: OpenChoreo's portal features in Serendip's own console
 
 Status: Draft, 2026-10-20. Scope reviewed by the user; split agreed
-(see "Delivery"). The plan is awaiting approval.
+(see "Delivery"). The plan is awaiting approval. **On hold until spec 021
+(Serendip's own MCP server and CLI) is done:** the user's order,
+2026-10-20, so 020's new actions land in the console, CLI and MCP
+together.
 
 ## Problem
 
@@ -52,8 +55,8 @@ This spec is the shared design. Delivery splits:
 | Spec | Delivers | Acceptance criteria |
 |---|---|---|
 | **020 (this spec)** | Items 1–5, 10–13, and the **package framework**: installing and removing an optional package (items 6 and 8, as mechanics), readiness, and the greyed-out treatment | 1–7, 10–13 |
-| **021** | The builds package (items 6–7) | 8 |
-| **022** | The observability package (items 8–9) | 9 |
+| **022** | The builds package (items 6–7) | 8 |
+| **023** | The observability package (items 8–9) | 9 |
 
 Before any of this, RP-018 (OpenChoreo's API open to any pod in the
 cluster), found while researching this spec, was fixed on its own
@@ -70,7 +73,7 @@ cluster), found while researching this spec, was fixed on its own
    - **Pod logs:** recent log lines from its running pods, and a live
      follow while the page is open. These come from the running pods, not
      from a log store, so no observability package is needed.
-2. **Environments and promotion:**
+2. **Environments and promotion**, with per-environment settings:
    - **The deployment pipeline:** its environments (for example
      development, staging, production) and the promotion order between
      them.
@@ -79,6 +82,12 @@ cluster), found while researching this spec, was fixed on its own
    - **Actions:** deploy a release to the first environment, promote it to
      the next one, roll back to an earlier release, restart a rollout, and
      turn auto-deploy on or off.
+   - **Per-environment overrides:** what differs between environments
+     for the same release: environment variables, replicas, resource
+     limits, and the trait parameters each component type marks as
+     per-environment. One Application runs in many environments, so
+     without overrides every environment would run identical
+     configuration.
    - **Promotion is destructive in one sense:** it replaces what an
      environment runs. Whether a promotion needs an approval is decided
      by policy, as for any action. Roles decide, and an approval is the
@@ -215,6 +224,10 @@ cluster), found while researching this spec, was fixed on its own
 2. **Promotion.** With a pipeline development → staging → production, a
    person deploys a release to development and promotes it to staging,
    then production.
+   - Production runs with an override (for example more replicas, or a
+     different environment variable) that development doesn't have, and
+     promotion carries the release without carrying over the other
+     environment's overrides.
    - Each environment shows the release it runs and its state.
    - A rollback returns an environment to the earlier release.
    - Every step is audited.
@@ -253,7 +266,9 @@ cluster), found while researching this spec, was fixed on its own
     covers them. Logs need their own action. Package install and removal
     need platform-level actions.
 11. **Interface parity.** Everything the console does is an API call
-    shown in its "Same request through the API" panel (constitution 7).
+    shown in its "Same request through the API" panel, and is also a
+    Serendip CLI command and MCP tool (spec 021's surfaces, extended here)
+    (constitution 7).
 12. **Footprint.**
     - edge-1 without packages shows no regression against spec 019's
       simulated-T470 run.
