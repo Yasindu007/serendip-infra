@@ -81,6 +81,12 @@ func TestDelete_EveryRouteRecordsAPolicyApproval(t *testing.T) {
 			if st.RequestedBy.Principal == nil || st.RequestedBy.Actor == "" {
 				t.Errorf("requestedBy = %+v, want the caller", st.RequestedBy)
 			}
+			// The delete's own audit row names its Approval (criterion 10).
+			var decision string
+			if err := w.db.QueryRow(`SELECT policy_decision FROM audit_log WHERE resource_id = ? AND after IS NULL`, tt.target.ID).Scan(&decision); err != nil ||
+				decision != "approved: "+a.Metadata.ID+" by policy ("+st.Decision.Evidence+")" {
+				t.Errorf("delete audit decision = %q (%v), want it to name approval %s", decision, err, a.Metadata.ID)
+			}
 		})
 	}
 }

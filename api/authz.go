@@ -374,6 +374,9 @@ func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 				}
 			}
 			ctx = store.WithApproval(ctx, in)
+			// The delete's audit rows name the Approval that allowed them,
+			// as an executed request's do (spec 019 criterion 10).
+			ctx = audit.WithPolicyDecision(ctx, fmt.Sprintf("approved: %s by policy (%s)", in.Approval.Metadata.ID, evidence))
 			w = &approvalHeaderWriter{ResponseWriter: w, id: in.Approval.Metadata.ID}
 		}
 		h(w, r.WithContext(ctx))
