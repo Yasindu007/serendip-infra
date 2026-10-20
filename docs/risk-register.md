@@ -39,6 +39,7 @@ purpose), **Closed** (fixed).
 | RP-016 | Migration 0006 marks old approvals settled without an audit row | Audit | Decided | Spec 019 T012 |
 | RP-017 | The approvals paging cursor can reveal IDs the caller can't read | Data exposure (low) | Open | Spec 019 T012 |
 | RP-018 | OpenChoreo's API answered any pod in the cluster, unauthenticated | Security (high) | Closed | Spec 020 research |
+| RP-019 | A local AI assistant can read its person's CLI sign-in and act as them | Security (medium) | Accepted | Spec 021 T001 |
 
 ---
 
@@ -314,3 +315,24 @@ purpose), **Closed** (fixed).
   relabels them would silently re-open the API. `VERSIONS.md` requires a
   re-check on every OpenChoreo upgrade. A foundations-time check that the
   selector matches a pod would be stronger, later.
+
+## RP-019 — A local AI assistant can read its person's CLI sign-in
+
+- **Kind:** security, medium. **Status:** Accepted, 2026-10-20.
+  **Found:** spec 021 T001.
+- **What:** `serendip mcp` runs as the person's own OS user and exchanges
+  the person's CLI token for a delegated one, so the AI's calls carry
+  spec 018's agent guardrails. But an AI assistant that can run commands
+  as the same user (Claude Code can) could read the person's token file
+  and call the API as the person, without the guardrails.
+- **Why accepted:** any local design shares this. A separate agent secret
+  on disk would be just as readable, and so is the person's browser
+  session. The guardrails protect against an assistant's mistakes when
+  it uses Serendip's tools, not against a hostile process running as the
+  person.
+- **Mitigations:**
+  - the token file is owner-only (0600 or an owner-only ACL);
+  - exchanged tokens last 5 minutes, and logout ends them;
+  - audit records which calls were delegated.
+- **Revisit:** if Serendip gains an OS-keychain store for the CLI, or when
+  hosted assistants (no local file) become the main path.

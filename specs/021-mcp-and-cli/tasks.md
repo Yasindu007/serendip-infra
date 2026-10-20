@@ -7,7 +7,7 @@ Ordered. `[P]` = parallel-safe within its block, `[A]` = subagent-eligible
 Dependency sketch: T001 → T002 → (T003 ∥ T004) → T005 → T006 → (T007 ∥
 T008) → T009 → T010 → T011 → T012 → T013.
 
-## T001 — Spike: ThunderID agents, PKCE loopback, and MCP clients
+## T001 — Spike: ThunderID agents, PKCE loopback, and MCP clients ✅ 2026-10-20
 
 - **Do**, on `serendip-t018`:
   1. **The token exchange proof of concept** (plan decision 1, first):

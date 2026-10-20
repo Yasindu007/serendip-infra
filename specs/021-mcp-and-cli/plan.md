@@ -1,6 +1,6 @@
 # Plan 021: Serendip's own MCP server and CLI
 
-Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
+Status: Approved 2026-10-20. Spec: `spec.md` (approved 2026-10-20).
 
 ## What the research found (2026-10-20)
 
@@ -69,6 +69,44 @@ Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
   the secret is shown only on create or update, and the owner can't be
   deleted while the agent exists.
 
+## Spike findings (T001, 2026-10-20, on `serendip-t018`)
+
+Observed against ThunderID 1.0.1 with throwaway clients, deleted
+afterwards; claims read, tokens never printed.
+
+1. **Token exchange works, from a public client too.** The exchanged
+   token keeps `sub` = the person and `iss`, and carries `grant_type:
+   urn:ietf:params:oauth:grant-type:token-exchange`.
+   - **`client_id` and `aud` are the exchanging client.** The scope is
+     the subject token's, and a request for more (`system`) is silently
+     dropped.
+   - **Lifetime** is the exchanging client's access token setting (600 s
+     in the spike). **No refresh token** is issued.
+   - **`act` appears only with an `actor_token`** (and the client's
+     `includeActClaim`). An actor token needs `client_credentials`, so a
+     confidential client, so a secret on disk. Without one, there's no
+     `act`.
+   - **`resource=` must name a registered resource server;** `aud`
+     otherwise defaults to the client.
+   - **Chaining** (exchanging an exchanged token) is allowed, and keeps
+     the same person and client.
+   - **Logout stops it:** once the person's refresh token is revoked,
+     ThunderID refuses to exchange the person's access token too ("Invalid
+     subject_token"); it revokes the token family. Revoking the access
+     token does the same.
+2. **CLI sign-in through the `serendip` client works as planned.**
+   Authorization code with PKCE on `http://127.0.0.1:8250/callback`, and
+   refresh. **Refresh rotates:** each refresh issues a new refresh token,
+   and reusing the old one is refused. `/oauth2/revoke` works from the
+   public client (200), and a revoked refresh token is refused afterwards.
+3. **Claude Code 2.1.304 speaks 2026-07-28,** over stdio and HTTP.
+   - It opens with `server/discover`, not `initialize`; then `tools/list`
+     and `tools/call`.
+   - Over HTTP it sends `Mcp-Protocol-Version`, `Mcp-Method`, `Mcp-Name`
+     (on calls) and the configured `Authorization` header. **It sends no
+     `Origin`.**
+   - It **declares elicitation** (`form` and `url`) and `roots`.
+
 ## Decisions
 
 1. **A person-launched AI: token exchange ("on behalf of") first,
@@ -95,12 +133,26 @@ Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
        within agent guardrails, and never more;
      - **less to build:** no agent creation through ThunderID, no new
        management-channel writes, and no agent routes in the API.
-   - **What T001 must prove:**
-     - ThunderID 1.0.1 issues the exchanged token with an actor (`act`)
-       claim Serendip can rely on.
-     - It works from the public CLI client, or from a small confidential
-       actor client.
-     - The token's audience is Serendip's API.
+   - **T001 result: token exchange, with the exchanging client as the
+     marker instead of `act`** (spike finding 1).
+     - **A dedicated public client, `serendip-mcp`,** registered by
+       `serendipd` like `serendip`. Its only grant is token exchange, so
+       it can't sign anyone in directly. `serendip mcp` exchanges the
+       person's token through it.
+     - **Serendip trusts the signed `client_id`, not `act`:**
+       - **`serendip`**, not exchanged: the person.
+       - **`serendip-mcp`**, exchanged: **delegated**, with the person as
+         subject and `serendip-mcp` as actor. An `serendip-mcp` token that
+         isn't an exchange is refused.
+       - **Anything else** is refused, as today (the audience check).
+     - **No actor token, so no secret on disk.** Which assistant it is
+       (Claude Code, an IDE) is only a declared label in audit.
+     - **Lifetime:** the exchanged token lasts 5 minutes, and `serendip
+       mcp` re-exchanges as needed. Logout stops new exchanges, so the AI
+       loses access within 5 minutes.
+     - **`act` is honoured later:** if a token does carry one (an actor
+       token, from a future agent), the verifier records it as the actor.
+       Nothing depends on it in v1.
    - **If it doesn't work, the fallback** is a separate agent identity per
      AI, sponsored by the person:
      - `serendip agents create` makes a ThunderID agent owned by the
@@ -135,6 +187,9 @@ Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
    - **Tokens** are kept in the user's configuration directory (0600) and
      refreshed with the refresh token. `serendip logout` revokes them
      (`/oauth2/revoke`) and deletes the file.
+   - **T001 confirmed** loopback PKCE, rotating refresh, and revocation as
+     a public client (spike finding 2). The CLI stores the rotated refresh
+     token each time.
    - **Spec amendment:** the spec's "device code" becomes this paste-back
      fallback, because ThunderID 1.0.1 has no device grant.
    - **Scripts** use `SERENDIP_API_KEY` or `SERENDIP_TOKEN` from the
@@ -187,6 +242,9 @@ Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
    - **Either way, the server decides.** An agent's delete is still a
      `needs approval` request that a person decides (spec 019).
      Elicitation is a convenience, not a safety boundary.
+   - **T001:** Claude Code 2.1.304 declares elicitation (`form`), so
+     the confirmation path is real for it. Other clients still get the
+     fallback.
 
 6. **One shared catalogue drives the CLI, MCP and parity** (spec open
    question 5).
