@@ -34,6 +34,8 @@ purpose), **Closed** (fixed).
 | RP-011 | A delete path could skip its Approval | Correctness | Closed | Spec 019 planning |
 | RP-012 | An index over every kind taxed every write | Performance | Closed | Spec 019 T009 |
 | RP-013 | An applied migration was edited | Process | Closed | Spec 019 T009 |
+| RP-014 | Writing a new Secret's value can answer 409 after writing it | Correctness | Open | Spec 019 T011 |
+| RP-015 | The console shows an agent's sponsor as a subject ID | Usability | Open | Spec 019 T011 |
 
 ---
 
@@ -219,3 +221,28 @@ purpose), **Closed** (fixed).
 - **Fixed:** 0006 restored unchanged; the fix moved to 0007, with a test
   of the migrated schema.
 - **Rule:** a committed migration is never edited; fixes go in a new one.
+
+## RP-014 — Writing a new Secret's value can answer 409 after writing it
+
+- **Kind:** correctness. **Status:** Open. **Found:** spec 019 T011, live;
+  the code is from spec 009.
+- **What:** `SecretReconciler.WriteValue` writes the value to the Secrets
+  provider, then updates the Secret's status (`Reachable`). On a Secret
+  created moments earlier, the reconciler's first status update can land
+  in between, so the second update loses on `resourceVersion` and the API
+  answers **409**. But the value *was* written.
+- **Impact:** a client is told the write failed when it succeeded. A
+  retry writes the same value again, so nothing is lost; it's a confusing
+  answer, not data loss.
+- **Fix when touched:** on `ErrConflict`, re-read the Secret and retry
+  the status update (the value write itself is already done), or set the
+  condition through the reconciler instead.
+
+## RP-015 — The console shows an agent's sponsor as a subject ID
+
+- **Kind:** usability. **Status:** Open. **Found:** spec 019 T011.
+- **What:** on the Approvals pages, "Sponsor:" shows the person's subject
+  (for example `01900000-…0030`), which is how an Approval records it.
+- **Fix when touched:** resolve it through the directory the Access
+  control page already uses (`GET /v1/authorization/directory`), falling
+  back to the ID.

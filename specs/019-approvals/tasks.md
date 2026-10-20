@@ -261,7 +261,7 @@ T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
     - the API-equivalent text matching the requests in the browser's
       network log.
 
-## T011 — Real-cluster verification
+## T011 — Real-cluster verification — DONE 2026-10-20 except the harness re-run (`verification.md`: checks 1–9 PASS live on kind with the real Agent Manager agent, including the console walk-through moved from T010. The simulated-T470 harness run was interrupted: the host slept or was starved, then was low on memory. It needs a re-run on a quiet host. New register entries: RP-014 and RP-015)
 
 - **Do**:
   - Check host RAM. Then `docker start serendip-t018 amp-local` (spec 018
