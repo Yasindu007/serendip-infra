@@ -60,7 +60,7 @@ criteria the unit and end-to-end tests already cover are listed at the end.
 | 7 | Stale target | **PASS** |
 | 8 | Audit trail of an agent's approved delete | **PASS** |
 | 9 | Console: delete a Component and a Secret, Approvals page | **PASS** |
-| 10 | The edge-1 harness, through the new delete path, on the simulated T470 | **Interrupted**; see "Harness" |
+| 10 | The edge-1 harness, through the new delete path, on the simulated T470 | **PASS** (re-run) |
 
 ### 1. Secret DELETE erases its value (criterion 15)
 
@@ -181,25 +181,32 @@ Signed in through ThunderID as `admin`.
 - **Rail:** Overview, Applications, Secrets, Approvals (with the waiting
   count), and "Volumes (not available yet)".
 
-### 10. Harness (simulated T470): interrupted, to re-run
+### 10. Harness (simulated T470)
 
-- **The run:** `cmd/bench-edge1` from `784e326`, on a fresh kind cluster
-  `bench-t470` with the T470 CPU limits (`--cpus 2 --cpuset-cpus 0-3`).
-  `serendip-t018` was stopped to free port 30080, and Agent Manager was
-  stopped to free memory.
-- **What it reached:**
-  - the cold start, which installed the whole stack in **5 m 32 s**;
-  - 12 idle samples (the node at about 1.39–1.40 GiB and 245–255 mcores);
-  - deploying the 3-Component workload.
-- **Then:** the next log line, the warm restart, came 2 h 17 m later. That
-  suggests the host slept or was starved during the workload step, so
-  this run can't be trusted either way. Claude Code then stopped the
-  harness because the host was low on memory, before it wrote
-  `result.json`. No verdict is drawn from it.
-- **To do:** re-run the harness on a quiet host, with `serendip-t018` and
-  Agent Manager stopped, then record the result here and in the T009
-  summary. The DELETE path the harness uses is already covered live by
-  checks 1, 2 and 9.
+- **First attempt:** interrupted. The host slept or was starved during
+  the workload step (a 2 h 17 m gap), then Claude Code stopped the
+  harness because the host was low on memory, before `result.json`. No
+  verdict was drawn from it.
+- **The re-run:** on a fresh `bench-t470` cluster, with only that
+  cluster running (`serendip-t018` and Agent Manager stopped), and
+  Windows kept awake for the run. Results:
+  `profiles/edge-1/bench/results/2026-10-20-spec019-simulated-t470/run1/`
+  (the summary opens with "SIMULATION").
+
+| Measure | Result |
+|---|---|
+| Whole edge-1 stack at idle | **1.29 GiB** node total, 238 mcores mean |
+| `serendipd` | 27.4 MiB RSS, 0% CPU: **rule 4 PASS** |
+| `serendipd` with 3 console tabs polling | 29.3 MiB, 0.08% CPU, 0 errors: **PASS** |
+| With 3 light Components | 1.47 GiB node total |
+| 16 GB headroom | 1398 MiB projected (10% of the budget): **fits comfortably** |
+| Cold start / warm restart / Component to Serving | 300 s / 33 s / 32 s each |
+| Compared with spec 018 (`2026-10-19-spec018-reuse`) | every group within tolerance: **PASS** (`compare-vs-spec018.md`) |
+
+- **Delete path:** the harness deleted its workload through the new
+  path: a policy-approved DELETE, recorded as an Approval.
+- **Agent Manager** isn't part of edge-1, the lowest profile, which must
+  fit a T470. It runs beside Serendip, idling at about 5 GiB (spec 018).
 
 ## Findings (added to `docs/risk-register.md`)
 

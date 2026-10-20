@@ -261,7 +261,7 @@ T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
     - the API-equivalent text matching the requests in the browser's
       network log.
 
-## T011 — Real-cluster verification — DONE 2026-10-20 except the harness re-run (`verification.md`: checks 1–9 PASS live on kind with the real Agent Manager agent, including the console walk-through moved from T010. The simulated-T470 harness run was interrupted: the host slept or was starved, then was low on memory. It needs a re-run on a quiet host. New register entries: RP-014 and RP-015)
+## T011 — Real-cluster verification — DONE 2026-10-20 (the harness re-run passed: the stack at 1.29 GiB idle, `serendipd` 27.4 MiB, everything within tolerance of spec 018. `verification.md`: checks 1–9 PASS live on kind with the real Agent Manager agent, including the console walk-through moved from T010. The simulated-T470 harness run was interrupted: the host slept or was starved, then was low on memory. It needs a re-run on a quiet host. New register entries: RP-014 and RP-015)
 
 - **Do**:
   - Check host RAM. Then `docker start serendip-t018 amp-local` (spec 018
@@ -289,7 +289,14 @@ T007a → T008 → (T009 ∥ T010) → T011 → T012 → T013 → T014.
   JSON, audit rows, `kubectl`/`bao` showing the workload and value gone).
   Stop the containers afterwards.
 
-## T012 — Final reviews
+## T012 — Final reviews — DONE 2026-10-20 (contract-guardian PASS, go-reviewer PASS, `/security-review`: nothing at confidence 8 or above. Fixes:
+  - the approvals list caches existence checks and decisions per request;
+  - a policy-approved cascade DELETE records the checked set as its expected radius, so a changed tree is refused as stale;
+  - `fail` stops if the Approval itself is gone, and a cancelled context skips the retry status write;
+  - `CleanedUp` and `Verified` now claim only what they checked;
+  - a test pins `?cascade=true` being ignored on access-management deletes.
+
+  New register entries: RP-016 (0006's data fix isn't audited) and RP-017 (the paging cursor can reveal unreadable approval IDs). `go test -race ./...` is green)
 
 - **Do**: run `contract-guardian`, `go-reviewer` and `/security-review`
   on the whole spec diff. Fix the findings, with a fix commit for each

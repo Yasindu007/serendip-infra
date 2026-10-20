@@ -36,6 +36,8 @@ purpose), **Closed** (fixed).
 | RP-013 | An applied migration was edited | Process | Closed | Spec 019 T009 |
 | RP-014 | Writing a new Secret's value can answer 409 after writing it | Correctness | Open | Spec 019 T011 |
 | RP-015 | The console shows an agent's sponsor as a subject ID | Usability | Open | Spec 019 T011 |
+| RP-016 | Migration 0006 marks old approvals settled without an audit row | Audit | Decided | Spec 019 T012 |
+| RP-017 | The approvals paging cursor can reveal IDs the caller can't read | Data exposure (low) | Open | Spec 019 T012 |
 
 ---
 
@@ -246,3 +248,34 @@ purpose), **Closed** (fixed).
 - **Fix when touched:** resolve it through the directory the Access
   control page already uses (`GET /v1/authorization/directory`), falling
   back to the ID.
+
+## RP-016 — Migration 0006 marks old approvals settled without an audit row
+
+- **Kind:** audit (constitution 8). **Status:** Decided. **Found:** spec
+  019 T012 (contract review).
+- **What:** migration 0006 sets `status.settled` on approvals recorded
+  before the field existed (rejected, expired, failed, or executed and
+  verified). That's a data fix by the migration itself: no audit row, no
+  `resourceVersion` bump.
+- **Why accepted:** it touches only the reconciler's internal bookkeeping
+  flag, never a decision or what was removed; it runs once per database,
+  in the migration's own transaction; and the migration is in the
+  repository, so what it did is on record.
+- **Revisit when:** a migration needs to change anything a person decided
+  or a resource's desired state. That must be audited like any change.
+
+## RP-017 — The approvals paging cursor can reveal IDs the caller can't read
+
+- **Kind:** data exposure, low. **Status:** Open. **Found:** spec 019 T012
+  (security review, confidence 6 of 10; below the reporting bar).
+- **What:** `GET /v1/approvals` cuts a page, then filters it by read
+  access (RP-006). `Serendip-Next-After` is the last ID of the *unfiltered*
+  page. With `?limit=1` and a filter (`?requester=`, `?targetId=`,
+  `?phase=`), a caller who can read none of the matches can still learn
+  that they exist, their IDs, and roughly how many there are by walking
+  the cursor.
+- **What doesn't leak:** any approval's content (target, reason, blast
+  radius). Approval IDs are random.
+- **Fix when touched:** an opaque cursor (for example the page's last
+  `created_at` and a sequence, not an ID), or filtering before cutting
+  with a scope-aware query (RP-006's fix).
