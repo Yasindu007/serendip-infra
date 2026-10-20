@@ -53,3 +53,5 @@ costs nothing.
 - Risks, performance costs and trade-offs that are accepted rather than fixed
   (or fixed in a way worth remembering) go in `docs/risk-register.md` as they
   are found, not only in a spec's plan.md or a benchmark summary.
+- What Serendip builds itself, adopts, or considered and rejected goes in
+  `docs/build-vs-adopt.md` whenever a spec makes such a choice.

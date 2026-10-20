@@ -71,50 +71,47 @@ Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
 
 ## Decisions
 
-1. **A person-launched AI gets its own agent identity, sponsored by that
-   person** (spec open question 1).
-   - **How it works:**
-     - A person creates an agent through Serendip, for example `serendip
-       agents create laptop-assistant`.
-     - Serendip creates it in **its own ThunderID** as an agent owned by
-       that person, through the management channel (ADR 0015, which gains
-       its first write).
-     - The client secret is returned **once**, and the CLI stores it in the
-       person's configuration (mode 0600).
-     - The local MCP server (`serendip mcp`) gets a `client_credentials`
-       token with it and acts as `agent:local/<id>`, with spec 018's
-       guardrails and the person as sponsor.
-   - **Serendip's own ThunderID becomes a built-in agent issuer** (alias
-     `local`). It's routed by issuer like `SERENDIP_AGENT_ISSUERS`, and
-     only its agent tokens become agents; its people stay people.
-   - **What the agent may do** comes from **role assignments**, made like
-     any other. It starts with **none**, since "a valid token grants
-     nothing" (spec 018).
-     - In v1 someone who may assign roles grants them: on edge-1 that's
-       the Owner.
-     - A rule letting a sponsor grant their own agent the roles they
-       themselves hold is a later spec, recorded as an RP entry.
-   - **Why this option:**
-     - **The AI is provably never the person.** It's a different
-       principal, with its own audit identity and guardrails.
-     - **It reuses spec 018's model unchanged** (agent principal, sponsor,
-       guardrails) and ThunderID's own agent resource. That's
-       Azure-like: a managed identity per app.
-   - **Rejected:**
-     - **Token exchange (the person's token for a delegated one).**
-       ThunderID supports it, but `act` is unverified. "Capped at the
-       person's roles" would need a new intersection rule in the policy
-       engine, and the result would still look like the person to the
-       verifier unless we invent delegation claims. Revisit when
-       on-behalf-of is its own spec.
-     - **Serendip issuing tokens itself:** that's building an identity
-       provider, and ThunderID already does it.
-   - **New API routes:** `POST /v1/agents` (create an agent with yourself
-     as sponsor; any signed-in person), `GET /v1/agents` (yours, or
-     everyone's for those who can read access management),
-     `DELETE /v1/agents/{id}` (removing an agent and revoking its
-     credentials goes through an Approval, spec 019), and
-     `POST /v1/agents/{id}/secret` (rotation).
+1. **A person-launched AI: token exchange ("on behalf of") first,
+   decided by T001's proof of concept, with a separate agent identity as
+   the fallback.** Revised 2026-10-20 at the user's question; the first
+   draft had it the other way round.
+   - **The preferred design (token exchange, RFC 8693, which ThunderID
+     supports):**
+     - **The exchange:** the person signs in (decision 2). `serendip mcp`
+       exchanges their token for a short-lived token for Serendip's API,
+       with the AI client as the **actor**.
+     - **Serendip's verifier** treats a token whose actor is an AI client
+       as a **delegated principal**: the person, acting through an agent.
+     - **The policy engine** decides it **as the person** (their own
+       roles, so it's capped at them automatically), **then applies
+       spec 018's agent guardrails**: never access management, and every
+       delete needs an Approval.
+     - **Audit** records the person as the subject and the AI as the
+       actor.
+   - **Why it's better for this case:**
+     - **no long-lived secret on disk:** the token dies with the person's
+       session, and signing out revokes it;
+     - **no role-granting friction:** the AI can do what the person can,
+       within agent guardrails, and never more;
+     - **less to build:** no agent creation through ThunderID, no new
+       management-channel writes, and no agent routes in the API.
+   - **What T001 must prove:**
+     - ThunderID 1.0.1 issues the exchanged token with an actor (`act`)
+       claim Serendip can rely on.
+     - It works from the public CLI client, or from a small confidential
+       actor client.
+     - The token's audience is Serendip's API.
+   - **If it doesn't work, the fallback** is a separate agent identity per
+     AI, sponsored by the person:
+     - `serendip agents create` makes a ThunderID agent owned by the
+       person, through the management channel.
+     - It acts as `agent:local/<id>` with its own role assignments, which
+       start empty.
+     - It needs agent routes, management-channel writes, and an on-disk
+       secret (0600). It remains right for **autonomous or hosted**
+       agents, which spec 018's agent issuers already cover.
+   - **Rejected either way: Serendip issuing tokens itself.** That's
+     building an identity provider.
 
 2. **CLI sign-in: authorization code with PKCE on the fixed loopback
    `127.0.0.1:8250`, with a paste-back fallback.**
@@ -151,24 +148,26 @@ Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
      one more credential path, and a second place to get authorization
      wrong.
 
-4. **MCP implementation: the standard library, not the SDK** (spec open
-   question 3). This is a judgement call, made deliberately (constitution
-   4).
-   - **What we need is narrow:**
-     - JSON-RPC over stdio and one POST endpoint;
-     - `server/discover`, `tools/list` and `tools/call`;
-     - and for older clients, `initialize`, `notifications/initialized`
-       and `ping`, plus tolerating `Mcp-Session-Id`.
-   - **What the SDK would add is mostly unused:** OAuth client support,
-     schema generation, a JWT library, and `x/oauth2`. We already verify
-     tokens ourselves (`providers/identity/oidc`), and our tool schemas are
-     hand-written. Its upgrade churn would also be ours to track.
-   - **Estimate:** 800–1,200 lines in a new top-level package `mcp/`
-     (protocol only, no Serendip logic), table-tested against recorded
-     message exchanges for both protocol generations.
-   - **Revisit if** the protocol's churn or a client incompatibility
-     costs more than adopting the SDK would. That switch would need an ADR
-     (it's in the risk register).
+4. **MCP implementation: the official Go SDK** (spec open question 3).
+   Revised 2026-10-20 at the user's priority: "less work, less to
+   maintain".
+   - **Why:** the protocol is churning. 2026-07-28 removed the handshake
+     and sessions, and clients still speak 2025-11-25 and earlier.
+     Tracking several generations ourselves is the upkeep that bites. The
+     SDK already speaks five protocol versions, is maintained by the MCP
+     project with Google, and is v1.x.
+   - **Weight (constitution 4, ADR required):** `go.mod` gains 8 direct
+     and 3 indirect modules. Go only links what we import, so we don't
+     import its auth or OAuth packages, and we verify tokens ourselves.
+     Updates are a version bump plus our recorded-exchange tests.
+   - **Contained:** a thin adapter registers the catalogue's tools with the
+     SDK. Nothing else in Serendip imports it, so replacing it later is an
+     ADR, not a rewrite.
+   - **Rejected:** a hand-written stdlib protocol layer (about 1,000
+     lines, plus tracking every spec revision), and `mark3labs/mcp-go`
+     (community-maintained, no 2026-07-28 support).
+   - **Note:** the SDK accepts 2026-07-28 over HTTP only in
+     `Stateless` mode, which fits `/mcp` (decision 3).
 
 5. **Elicitation is optional, never required.**
    - **A destructive tool's confirmation** uses `input_required`
@@ -217,20 +216,22 @@ Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
   - `cmd/serendip/` (new): CLI commands from the catalogue, login, config,
     and the `mcp` subcommand.
   - `cmd/serendipd`: wire `/mcp`, and the built-in `local` agent issuer.
-- **mcp (new top-level, stdlib):** JSON-RPC, stdio, HTTP transport, both
-  protocol generations, and discovery and tools dispatch from the
-  catalogue.
+- **mcp (new top-level):** a thin adapter from the catalogue to the MCP Go
+  SDK (stdio and streamable HTTP). It's the only importer of the SDK.
 - **api:**
   - `api/catalog/` (new, with the parity test);
-  - `api/agents.go`, the agent routes;
+  - the delegated-principal handling (token exchange), or the agent
+    routes if T001 picks the fallback;
   - the `/mcp` handler and RFC 9728 metadata;
   - the declared-interface audit;
   - route-table rules.
-- **providers:** `providers/identity/thunderid` (create, rotate and
-  delete agents through the management channel).
+- **providers:** `providers/identity/oidc` and `thunderid`: the
+  token-exchange client, and actor-claim verification. Agent creation
+  through the management channel only on the fallback.
 - **core:**
-  - `core/identity`: an `AgentRegistry` interface for creating, rotating
-    and deleting agents; capability-shaped, with no product names.
+  - `core/identity`: the delegated principal (subject plus actor);
+  - `core/policy`: decide as the subject, then apply agent guardrails to
+    a delegated principal;
   - `core/audit`: declared interfaces.
 - **docs:**
   - an ADR for decisions 1, 3 and 4: the agent identity per AI and the
@@ -261,9 +262,11 @@ Status: Draft, awaiting approval. Spec: `spec.md` (approved 2026-10-20).
 ## Explicitly NOT done
 
 Everything in spec "Scope — OUT", plus:
-- token exchange and on-behalf-of delegation;
-- a sponsor-delegation rule for granting one's own agent roles;
-- the MCP Go SDK;
+- whichever of token exchange or separate agent identities T001 doesn't
+  pick (both are recorded in `docs/build-vs-adopt.md`);
+- a sponsor-delegation rule for granting one's own agent roles (only
+  relevant on the fallback);
+- a hand-written MCP protocol layer;
 - MCP resources and prompts (tools only);
 - `headersHelper` packaging for Claude Code's remote mode (documented
   manually).

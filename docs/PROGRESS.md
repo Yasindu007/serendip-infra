@@ -9,7 +9,8 @@ current picture.
 Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 `docs/constitution.md` (non-negotiable rules, changes almost never),
 `docs/risk-register.md` (known risks, performance costs and trade-offs,
-with when to revisit each).
+with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
+builds, adopts or rejected, and why).
 
 Last updated: 2026-10-20
 

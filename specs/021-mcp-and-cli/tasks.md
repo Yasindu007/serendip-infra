@@ -10,12 +10,19 @@ T008) → T009 → T010 → T011 → T012 → T013.
 ## T001 — Spike: ThunderID agents, PKCE loopback, and MCP clients
 
 - **Do**, on `serendip-t018`:
-  1. **Agents:** create an agent in Serendip's ThunderID through the
-     management channel (`POST /agents` with `owner` set to a person),
-     get a `client_credentials` token, and record its claims (`iss`,
-     `sub`, `aud`, `grant_type`, owner visibility).
-     - Check whether a non-admin token can call `POST /agents`.
-     - Check whether `resource=` sets `aud`.
+  1. **The token exchange proof of concept** (plan decision 1, first):
+     - Enable token exchange on a client, and configure ThunderID's
+       trusted token-exchange issuers.
+     - Exchange a signed-in person's token, with an actor token for an
+       "AI client", for a token with `resource=` set to Serendip's API.
+     - **Record:** the `act` claim (present? its shape?), `sub`, `aud`,
+       scopes and lifetime; whether a public client can do it or an actor
+       client must be confidential; and what revoking the person's token
+       does to the exchanged one.
+     - **Decide:** token exchange, or the fallback (separate agent
+       identities). If the fallback, also record ThunderID agent creation
+       (`POST /agents` with an owner; can a non-admin call it?) and its
+       token claims.
   2. **CLI sign-in:** authorization code with PKCE through the `serendip`
      client on `127.0.0.1:8250/callback`, then refresh, then
      `/oauth2/revoke` as a public client.
@@ -42,49 +49,49 @@ T008) → T009 → T010 → T011 → T012 → T013.
   added to `routeTable()` without an entry (checked by adding one in a
   test-only mux).
 
-## T003 [P] — The `mcp` protocol package
-
-- **Do**: `mcp/` (stdlib only):
-  - JSON-RPC 2.0;
-  - the stdio transport;
-  - the streamable HTTP handler (POST only, header checks, `Origin`
-    validation, JSON responses);
-  - `server/discover`, `tools/list` (paginated, with `ttlMs` and
-    `cacheScope`) and `tools/call`;
-  - for older clients, `initialize`, `notifications/initialized`, `ping`,
-    and tolerating `Mcp-Session-Id`;
-  - tool errors as `isError` results;
-  - optional elicitation.
-- **Files**: `mcp/*.go`, `mcp/*_test.go` and `mcp/testdata/` (recorded
-  exchanges for both protocol generations).
-- **Verify**:
-  - `go test ./mcp/...`, table-driven over recorded requests: correct
-    responses, rejected bad headers or origins, and both generations.
-  - `bash .claude/scripts/check-imports.sh`. `mcp/` imports nothing from
-    `core/` or `providers/`.
-
-## T004 [P] — Agent identities through Serendip
+## T003 [P] — The MCP SDK adapter and its ADR
 
 - **Do**:
-  - Add `core/identity.AgentRegistry` (create with a sponsor, rotate,
-    delete, list).
-  - Implement it in the ThunderID provider over the management channel.
-  - Add the built-in `local` agent issuer.
-  - Add the API routes `POST/GET /v1/agents`,
-    `POST /v1/agents/{id}/secret` and `DELETE /v1/agents/{id}` (through an
-    Approval), with their route rules and audit.
-- **Files**: `core/identity/*.go`, `providers/identity/thunderid/agents.go`
-  and tests, `api/agents.go` and tests, `api/authz.go`,
-  `cmd/serendipd/wiring.go`.
+  - Write the ADR for adopting `github.com/modelcontextprotocol/go-sdk`
+    (pinned version, what it buys, maintainers, licence, transitive
+    modules, the packages we don't import).
+  - Build `mcp/`, a thin adapter that registers the catalogue's tools
+    (names, schemas, annotations) with the SDK, over stdio and streamable
+    HTTP (`Stateless` for `/mcp`), with optional elicitation.
+- **Files**: `docs/decisions/00NN-mcp-go-sdk.md`, `go.mod`, `go.sum`,
+  `mcp/*.go`, `mcp/*_test.go`.
 - **Verify**:
-  - `go test ./...`. Tests cover:
-    - creating an agent with yourself as sponsor (anyone signed in);
-    - a sponsor that isn't the caller, refused;
-    - the secret returned once;
-    - delete through an Approval;
-    - the `local` agent token resolving to `agent:local/<id>` with that
-      sponsor;
-    - a `local` *person* token staying a person.
+  - `go test ./mcp/...`: tools are listed with their annotations, calls
+    dispatch, and both a 2025-11-25 client and a 2026-07-28 client are
+    served, over recorded exchanges.
+  - `go mod why` shows only the imported SDK packages.
+  - `bash .claude/scripts/check-imports.sh`. Nothing outside `mcp/`
+    imports the SDK.
+
+## T004 [P] — The AI's identity (as T001 decided)
+
+- **Do**, for **token exchange** (preferred):
+  - In the verifier, recognise a token with an actor claim from an AI
+    client as a delegated principal (subject plus actor).
+  - In `core/policy`, decide as the subject, then apply agent guardrails.
+  - Record the subject and actor in audit.
+  - In the CLI, perform the exchange.
+- **Do**, for the **fallback** instead: `core/identity.AgentRegistry`,
+  ThunderID agent creation through the management channel, the built-in
+  `local` agent issuer, and the `/v1/agents` routes (delete through an
+  Approval).
+- **Files**: `core/identity`, `core/policy`, `providers/identity/oidc`
+  and `thunderid`, `api/middleware.go`, and the tests (fallback:
+  `api/agents.go`).
+- **Verify**: `go test ./...`. Tests cover:
+  - a delegated token deciding as its person;
+  - an access-management action refused;
+  - a delete answering "needs approval";
+  - an actor-less exchanged token treated as the person, only if T001
+    shows that's safe, otherwise refused;
+  - audit carrying both identities.
+
+  (Fallback tests: as in the first draft of this plan.)
 - **Then**: run `contract-guardian` on T003–T004.
 
 ## T005 — The CLI
@@ -99,7 +106,8 @@ T008) → T009 → T010 → T011 → T012 → T013.
   - `--dry-run`, which prints the request;
   - `--show-value` for secrets;
   - approvals in the flow ("needs approval: file it? `--reason`");
-  - `agents create|list|rotate|delete`, storing the agent's credentials.
+  - the token exchange for `serendip mcp` (or `agents
+    create|list|rotate|delete` on the fallback).
 - **Files**: `cmd/serendip/*.go` and tests.
 - **Verify**:
   - `go test ./cmd/serendip/...`, against an in-process `serendipd`
@@ -110,10 +118,10 @@ T008) → T009 → T010 → T011 → T012 → T013.
 
 ## T006 — `serendip mcp` (stdio)
 
-- **Do**: the stdio MCP server in the CLI, with tools from the catalogue,
-  run as the agent from the local credentials (`client_credentials` to
-  Serendip's ThunderID). Add `--no-secret-values`, and the declared `mcp`
-  interface.
+- **Do**: the stdio MCP server in the CLI, with tools from the catalogue
+  through the SDK adapter. It runs with the exchanged, delegated token
+  (or the agent's credentials on the fallback). Add `--no-secret-values`,
+  and the declared `mcp` interface.
 - **Files**: `cmd/serendip/mcp.go` and tests.
 - **Verify**: `go test`. A recorded stdio session lists tools, reads an
   Application, and files a delete request. The tools omit secret values
@@ -169,8 +177,8 @@ T008) → T009 → T010 → T011 → T012 → T013.
 ## T011 — Real use
 
 - **Do**, on `serendip-t018`:
-  - a person runs `serendip login` against the real ThunderID, then
-    `serendip agents create`;
+  - a person runs `serendip login` against the real ThunderID (with
+    `serendip agents create` too, on the fallback);
   - Claude Code is connected to `serendip mcp` (stdio) and lists
     Applications, reads a Component, and files a delete request, which
     the person approves in the console or CLI before it executes;
@@ -192,7 +200,9 @@ T008) → T009 → T010 → T011 → T012 → T013.
 ## T013 [A] — Docs, ADR, close
 
 - **Do**:
-  - Write the ADR for decisions 1, 3 and 4.
+  - Write the ADR for decisions 1 and 3 (the SDK's ADR is T003's).
+  - Update `docs/build-vs-adopt.md` with what was taken and what was
+    rejected.
   - Update `ai-operations.md` and `identity.md`.
   - Write the CLI and MCP reference, with client configuration examples
     that contain no credentials.
