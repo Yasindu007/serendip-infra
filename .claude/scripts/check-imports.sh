@@ -30,3 +30,13 @@ if [ -n "$agent_violations" ]; then
   exit 1
 fi
 echo "agent/ import boundaries clean (core/id only, no api/)"
+
+# ADR 0017: only mcp/ imports the MCP Go SDK, so replacing it stays a
+# change to one package.
+sdk_violations=$(grep -rln --include="*.go" '"github.com/modelcontextprotocol/go-sdk' . 2>/dev/null | grep -v '^\./mcp/' || true)
+if [ -n "$sdk_violations" ]; then
+  echo "IMPORT VIOLATIONS: the MCP Go SDK is imported outside mcp/ (ADR 0017):"
+  echo "$sdk_violations"
+  exit 1
+fi
+echo "MCP SDK confined to mcp/"

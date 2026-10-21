@@ -221,10 +221,13 @@ afterwards; claims read, tokens never printed.
      Tracking several generations ourselves is the upkeep that bites. The
      SDK already speaks five protocol versions, is maintained by the MCP
      project with Google, and is v1.x.
-   - **Weight (constitution 4, ADR required):** `go.mod` gains 8 direct
-     and 3 indirect modules. Go only links what we import, so we don't
-     import its auth or OAuth packages, and we verify tokens ourselves.
-     Updates are a version bump plus our recorded-exchange tests.
+   - **Weight (constitution 4, ADR 0017):** `go.mod` gains 9 modules,
+     all permissively licensed. **Corrected in T003:** the SDK's `auth`
+     package and `golang.org/x/oauth2` *are* linked, because the `mcp`
+     package imports them itself. We never call them, and verify tokens
+     ourselves. `golang-jwt` isn't linked. The SDK adds at most about
+     2.4 MB to a stripped binary. Updates are a version bump plus our
+     recorded-exchange tests.
    - **Contained:** a thin adapter registers the catalogue's tools with the
      SDK. Nothing else in Serendip imports it, so replacing it later is an
      ADR, not a rewrite.
@@ -245,6 +248,16 @@ afterwards; claims read, tokens never printed.
    - **T001:** Claude Code 2.1.304 declares elicitation (`form`), so
      the confirmation path is real for it. Other clients still get the
      fallback.
+   - **Amended in T003: elicitation is deferred,** and so is the
+     `confirm: true` fallback.
+     - In 2026-07-28, elicitation in a stateless server is an
+       `input_required` round trip, not a simple server call.
+     - It isn't a safety boundary: the API's approvals are. An agent's
+       delete always answers "needs approval".
+     - Clients already ask before running a tool marked destructive
+       (Claude Code does).
+     - A confirmation step would add a round trip and code, but no
+       protection. ADR 0017 records this, and a later spec can add it.
 
 6. **One shared catalogue drives the CLI, MCP and parity** (spec open
    question 5).

@@ -12,7 +12,7 @@ console, CLI and MCP) and integrates everything else.
 - **Accepted risks and costs** of these choices live in
   `docs/risk-register.md`.
 
-Last updated: 2026-10-20.
+Last updated: 2026-10-21.
 
 ## Built (Serendip's own code)
 
@@ -30,6 +30,7 @@ Last updated: 2026-10-20.
 | Web console | React and Vite, our own design system, two runtime dependencies | Spec 016, ADR 0012 |
 | OpenChoreo portal features | Rebuilt in our console instead of Backstage | Spec 020 |
 | CLI | `cmd/serendip`, a client of the API | Spec 021 |
+| Operation catalogue | `api/catalog`: one list of actions the CLI and MCP both build from, with a route parity test | Spec 021 |
 | Benchmark harness | `cmd/bench-edge1` | Spec 013 |
 
 ## Adopted (other projects, integrated)
@@ -42,13 +43,13 @@ Last updated: 2026-10-20.
 | `sigs.k8s.io/yaml` | Kubeconfig parsing | ADR 0008 | |
 | OpenChoreo (control and data planes) | Application platform | ADR 0005 | Driven through its CRDs directly, not its API (spec 020) |
 | `helm` (shelled out) | Installing OpenChoreo | ADR 0010 | Per-capability exception |
-| ThunderID | Identity (OIDC) | ADR 0006 | Also the agent issuer in WSO2 Agent Manager (spec 018) |
+| ThunderID | Identity (OIDC) | ADR 0006 | Also the agent issuer in WSO2 Agent Manager (spec 018). Its token exchange (RFC 8693) carries a person's assistant (spec 021) |
 | OpenBao | Secrets and PKI | ADR 0009 | |
 | kgateway | Gateway | ADR 0011 | |
 | local-path provisioner | Storage (edge-1) | ADR 0002 | Longhorn at 3 nodes |
 | cert-manager | OpenChoreo dependency | Spec 010 | |
 | WSO2 Agent Manager | AI agent identities (POC, beside Serendip) | Spec 018 | Not part of edge-1 |
-| MCP Go SDK (`modelcontextprotocol/go-sdk`) | MCP protocol | Spec 021 (proposed; needs an ADR) | Chosen over hand-written, to avoid maintaining protocol churn ourselves |
+| MCP Go SDK (`modelcontextprotocol/go-sdk` v1.8.0) | MCP protocol (stdio and streamable HTTP) | ADR 0017, spec 021 | Chosen over hand-written, to avoid maintaining protocol churn ourselves. 9 modules, at most +2.4 MB; confined to `mcp/` |
 
 ## Rejected (considered and turned down)
 
@@ -66,6 +67,8 @@ Last updated: 2026-10-20.
 | One Application per Environment | Deployments into environments (Azure-style) | Fights OpenChoreo's model; duplicates configuration | Spec 020 plan decision 2 |
 | A hand-written MCP protocol layer | The MCP Go SDK | Two-plus protocol generations to track ourselves | Spec 021 (reversed 2026-10-20) |
 | Serendip issuing its own tokens | ThunderID | Building an identity provider | Spec 021 plan decision 1 |
+| `mark3labs/mcp-go` | The official MCP Go SDK | Community-maintained, no 2026-07-28 support when checked | ADR 0017 |
+| ThunderID's `act` claim (an actor token) to mark an AI | A dedicated exchange-only client, `serendip-mcp` | An actor token needs a confidential client, so a secret on disk | Spec 021 T001 |
 | OpenSearch and Prometheus as the edge-1 default | Optional package only (spec 023); a lighter backend for edge-1 later | Too heavy for a 16 GB T470 | Spec 020 |
 
 ## Open (decided later)
@@ -73,5 +76,4 @@ Last updated: 2026-10-20.
 | Question | Options | Where |
 |---|---|---|
 | Observability backend default | OpenObserve, SigNoz, OpenSearch | `capability-model.md`, after a T470 benchmark |
-| A person-launched AI's identity | Token exchange "on behalf of" (preferred if the POC works) or a separate agent identity | Spec 021 T001 |
 | Self-service autonomous agents in Serendip's own ThunderID | A small spec after 020 (both identity kinds: exchange for a person's assistant, own identity for autonomous agents) | Spec 021 plan decision 1 |

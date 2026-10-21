@@ -49,7 +49,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
   added to `routeTable()` without an entry (checked by adding one in a
   test-only mux).
 
-## T003 [P] — The MCP SDK adapter and its ADR
+## T003 [P] — The MCP SDK adapter and its ADR ✅ 2026-10-21
 
 - **Do**:
   - Write the ADR for adopting `github.com/modelcontextprotocol/go-sdk`
