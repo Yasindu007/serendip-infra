@@ -40,6 +40,7 @@ purpose), **Closed** (fixed).
 | RP-017 | The approvals paging cursor can reveal IDs the caller can't read | Data exposure (low) | Open | Spec 019 T012 |
 | RP-018 | OpenChoreo's API answered any pod in the cluster, unauthenticated | Security (high) | Closed | Spec 020 research |
 | RP-019 | A local AI assistant can read its person's CLI sign-in and act as them | Security (medium) | Accepted | Spec 021 T001 |
+| RP-020 | The catalogue's parity test checks routes, not parameter names | Correctness (low) | Accepted | Spec 021 T002 |
 
 ---
 
@@ -336,3 +337,21 @@ purpose), **Closed** (fixed).
   - audit records which calls were delegated.
 - **Revisit:** if Serendip gains an OS-keychain store for the CLI, or when
   hosted assistants (no local file) become the main path.
+
+## RP-020 — The catalogue's parity test checks routes, not parameters
+
+- **Kind:** correctness, low. **Status:** Accepted, 2026-10-21.
+  **Found:** spec 021 T002 review.
+- **What:** `api/catalog` describes each operation's query parameters and
+  body by hand. The parity test proves every route has a CLI command and
+  an MCP tool (or a reason not to), but not that their parameter names
+  match what the handler reads. Handlers ignore unknown query parameters,
+  so a misspelt filter would silently filter nothing.
+- **Found that way:** the review caught two missing filters
+  (`principalType`/`principalId` on role assignments, `label.*` on lists)
+  and a required `type` on directory search. All three are fixed.
+- **Mitigations:** spec 021 T009's end-to-end tests drive the CLI and MCP
+  against a real `serendipd`, which exercises each operation's request.
+  A new route's catalogue entry is reviewed with its handler.
+- **Revisit:** if a parameter mismatch reaches a user, or when the API
+  gains an OpenAPI description the catalogue could be checked against.

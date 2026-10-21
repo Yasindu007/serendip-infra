@@ -34,7 +34,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
 - **Verify**: each item has observed evidence. Scratch clients are
   removed afterwards.
 
-## T002 — Spec amendment and the catalogue
+## T002 — Spec amendment and the catalogue ✅ 2026-10-21
 
 - **Do**:
   - Amend spec.md: the device code becomes the paste-back fallback

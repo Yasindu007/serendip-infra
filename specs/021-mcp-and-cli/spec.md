@@ -66,8 +66,10 @@ mind.
 
 7. **Sign-in as a person:**
    - **Through the identity provider,** with a browser on the same
-     machine, or with a device code shown on screen when there's no
-     browser. No tokens are copied by hand.
+     machine, or, when there's no browser, by opening the sign-in link
+     anywhere and pasting back the address it lands on. No tokens are
+     copied by hand. (Amended 2026-10-21: ThunderID 1.0.1 has no device
+     authorization grant; plan decision 2.)
    - **The session is stored** only in the user's own configuration,
      readable by them alone.
    - **Sign-out** revokes it.
@@ -152,8 +154,8 @@ mind.
 - **New programs:** the CLI, and the MCP server (or a mode of one
   program).
 - **Identity:**
-  - CLI sign-in for people (a desktop and device-friendly OIDC flow
-    against the human issuer);
+  - CLI sign-in for people (an OIDC flow for desktops and for machines
+    without a browser, against the human issuer);
   - how a person-launched AI gets an agent identity (on-behalf-of, which
     `identity.md` lists as not done).
 - **The API:** no new authority. Possibly small additions the clients
@@ -165,7 +167,8 @@ mind.
 ## Acceptance criteria
 
 1. **CLI sign-in:** a person signs in from the CLI through the identity
-   provider (browser, or device code), runs a command, and signs out.
+   provider (browser, or the paste-back fallback), runs a command, and
+   signs out.
    Their session file is readable only by them.
 2. **CLI parity:** every route in today's API is reachable through a CLI
    command, or listed as deliberately not exposed, with a reason. A test
