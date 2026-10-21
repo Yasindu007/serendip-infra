@@ -106,3 +106,28 @@ idle. The simulated-T470 figure is about 10.7 MiB and 0.2 mcores (spec 015 T008)
 
 Any of these may change in a minor release; re-verify them on an upgrade.
 
+
+## AI assistants through token exchange (spec 021, verified on 1.0.1)
+
+- **Token exchange (RFC 8693) works from a public client** (T001). The
+  exchanged token keeps the person's `sub`, `iss`, scope and groups; its
+  `client_id` and `aud` are the exchanging client, and `grant_type` is
+  `urn:ietf:params:oauth:grant-type:token-exchange`. Asking for more scope
+  is silently dropped. No refresh token is issued.
+- **Lifetime** is the exchanging client's access token `validityPeriod`
+  (`serendip-mcp`: 300 s, `DelegatedTokenLifetime`).
+- **Revoking the person's refresh token** (logout) makes ThunderID refuse
+  further exchanges of their tokens ("Invalid subject_token"): it revokes
+  the token family.
+- **`act` appears only with an `actor_token`,** which needs a confidential
+  client. Serendip doesn't use it: the signed `client_id` marks delegation.
+- **A public client can't have token exchange as its only grant** (APP-1037,
+  "native flow not allowed for single-page applications"), so
+  `serendip-mcp` also allows `authorization_code`. serendipd refuses a
+  `serendip-mcp` token that isn't from an exchange (verified live, T004).
+- **Fresh installs** declare `serendip-mcp` in a second bootstrap file,
+  `71-serendip-mcp-client.yaml`, imported after the `serendip` client.
+  **Not yet verified on a fresh install:** check on the next one.
+- **Existing installs** get it from `cmd/serendip-identity-redirects`,
+  which creates it when missing and never changes it when present
+  (verified live, T004: created once, not duplicated on a second run).

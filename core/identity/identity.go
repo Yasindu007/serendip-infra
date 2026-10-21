@@ -35,6 +35,11 @@ type Principal struct {
 	// provider reports them in the access token. Empty when the provider
 	// doesn't send them.
 	Groups []string
+	// Via is set when a person acts through an AI assistant: the client
+	// their token was exchanged for (spec 021 plan decision 1). The person's
+	// roles decide, with an agent's guardrails, so the AI is never the
+	// person and never more than them. Only for a person.
+	Via string
 }
 
 // Authenticator verifies a bearer credential.
@@ -112,11 +117,16 @@ func AgentID(p Principal) string {
 	return p.Issuer + "/" + p.Subject
 }
 
-// Actor is the audit actor for p: "person:<name>" for a person, and
-// "agent:<issuer alias>/<subject>" for an agent.
+// Actor is the audit actor for p: "person:<name>" for a person,
+// "agent:<issuer alias>/<subject>" for an agent, and
+// "agent:<via>/<subject>" for a person acting through an AI assistant, whose
+// audit record names the person as sponsor.
 func Actor(p Principal) string {
 	if p.Kind == KindAgent {
 		return AgentActorPrefix + AgentID(p)
+	}
+	if p.Via != "" {
+		return AgentActorPrefix + p.Via + "/" + p.Subject
 	}
 	return ActorPrefix + p.Name
 }

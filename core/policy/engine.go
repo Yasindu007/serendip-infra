@@ -24,6 +24,16 @@ type Principal struct {
 	// Groups are the group names the caller belongs to, from the identity
 	// provider. Assignments to any of them apply to the caller.
 	Groups []string
+	// Via is set when a person acts through an AI assistant (spec 021): the
+	// person's own assignments apply, and so do an agent's guardrails.
+	Via string
+}
+
+// guarded reports whether p meets the agent guardrails: an agent, or a
+// person acting through an AI assistant. Either way access management is
+// denied and every delete needs an approval (constitution 5).
+func (p Principal) guarded() bool {
+	return p.Type == resource.PrincipalAgent || p.Via != ""
 }
 
 // Action is what the caller wants to do. Data marks a data-plane action
@@ -363,7 +373,7 @@ func (e *Engine) applicable(ctx context.Context, p Principal, target resource.Sc
 // meets the guardrails: access-management actions are denied whatever its
 // roles say, and a delete its roles allow needs an approval.
 func (e *Engine) Decide(ctx context.Context, p Principal, a Action, target resource.Scope) (Decision, error) {
-	if p.Type == resource.PrincipalAgent && managesAccess(a) {
+	if p.guarded() && managesAccess(a) {
 		return Decision{Effect: Deny, Reason: reasonAgentManagesAccess}, nil
 	}
 	cands, err := e.applicable(ctx, p, target)
@@ -376,7 +386,7 @@ func (e *Engine) Decide(ctx context.Context, p Principal, a Action, target resou
 				ev := &Evidence{
 					AssignmentID: c.id, RoleDefinitionID: c.spec.RoleDefinitionID, RoleName: c.role.RoleName, Scope: c.spec.Scope,
 				}
-				if p.Type == resource.PrincipalAgent && isDelete(a) {
+				if p.guarded() && isDelete(a) {
 					return Decision{Effect: NeedsApproval, Evidence: ev, Reason: reasonAgentDelete}, nil
 				}
 				return Decision{Effect: Allow, Evidence: ev}, nil
@@ -397,7 +407,7 @@ func (e *Engine) EffectivePermissions(ctx context.Context, p Principal, target r
 	var out []resource.Permission
 	for _, c := range cands {
 		for _, perm := range c.role.Permissions {
-			if p.Type == resource.PrincipalAgent {
+			if p.guarded() {
 				// What Decide will answer: an agent never manages access.
 				// (Its deletes still need an approval, which the refusal's
 				// problem type tells a client.)
@@ -485,7 +495,7 @@ func isSelf(p resource.PrincipalRef, caller Principal) bool {
 // checkDelegated checks caller's right to perform a on spec. newRole is the
 // role being granted when creating an assignment, nil when removing one.
 func (e *Engine) checkDelegated(ctx context.Context, caller Principal, a Action, spec resource.RoleAssignmentSpec, newRole *resource.RoleDefinitionSpec) error {
-	if caller.Type == resource.PrincipalAgent {
+	if caller.guarded() {
 		return fmt.Errorf("%w: %s", ErrForbidden, reasonAgentManagesAccess)
 	}
 	creating := newRole != nil
@@ -599,7 +609,7 @@ func (e *Engine) RoleInUse(ctx context.Context, roleID string) (bool, error) {
 // GrantedAnywhere reports whether some assignment that applies to p, at any
 // scope, grants a: whether p can do it somewhere, such as assign roles.
 func (e *Engine) GrantedAnywhere(ctx context.Context, p Principal, a Action) (bool, error) {
-	if p.Type == resource.PrincipalAgent && managesAccess(a) {
+	if p.guarded() && managesAccess(a) {
 		return false, nil
 	}
 	if err := e.refresh(ctx); err != nil {

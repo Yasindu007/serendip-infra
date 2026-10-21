@@ -135,10 +135,18 @@ afterwards; claims read, tokens never printed.
        management-channel writes, and no agent routes in the API.
    - **T001 result: token exchange, with the exchanging client as the
      marker instead of `act`** (spike finding 1).
-     - **A dedicated public client, `serendip-mcp`,** registered by
-       `serendipd` like `serendip`. Its only grant is token exchange, so
-       it can't sign anyone in directly. `serendip mcp` exchanges the
-       person's token through it.
+     - **A dedicated public client, `serendip-mcp`.** `serendip mcp`
+       exchanges the person's token through it. **As built (T004):**
+       - **Declared like `serendip`:** in the bootstrap file for fresh
+         installs (`71-serendip-mcp-client.yaml`), and created when missing
+         by the operator tool `cmd/serendip-identity-redirects` for
+         existing ones. **`serendipd` gains no write path** to the identity
+         provider (ADR 0015 stays read-only).
+       - **ThunderID requires a public client to allow the authorization
+         code grant** (APP-1037), so token exchange can't be its only
+         grant. Signing in to `serendip-mcp` directly gives a token
+         `serendipd` refuses, since it must come from an exchange
+         (verified live).
      - **Serendip trusts the signed `client_id`, not `act`:**
        - **`serendip`**, not exchanged: the person.
        - **`serendip-mcp`**, exchanged: **delegated**, with the person as

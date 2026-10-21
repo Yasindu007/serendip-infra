@@ -93,6 +93,11 @@ type PrincipalRef struct {
 	// Sponsor is the person accountable for an agent. Required for, and
 	// only allowed on, an agent.
 	Sponsor *PrincipalRef `json:"sponsor,omitempty"`
+	// Via marks a person acting through an AI assistant (spec 021): the
+	// client they acted through. Recorded on approvals, so the person can
+	// decide what their assistant asked for. Never on a role assignment:
+	// roles are the person's own.
+	Via string `json:"via,omitempty"`
 }
 
 // Delegation constrains what the holder of this assignment may assign to
@@ -253,6 +258,8 @@ func validatePrincipal(p PrincipalRef) error {
 		return fmt.Errorf("%w: principal.id: required, at most %d characters, no control characters", ErrValidation, maxPrincipalIDLen)
 	}
 	switch {
+	case p.Via != "":
+		return fmt.Errorf("%w: principal.via: roles are assigned to the person, never to their assistant", ErrValidation)
 	case p.Type == PrincipalAgent && p.Sponsor == nil:
 		return fmt.Errorf("%w: principal: an agent needs a sponsor (the person accountable for it)", ErrValidation)
 	case p.Type != PrincipalAgent && p.Sponsor != nil:

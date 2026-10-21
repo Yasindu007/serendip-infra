@@ -68,7 +68,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
   - `bash .claude/scripts/check-imports.sh`. Nothing outside `mcp/`
     imports the SDK.
 
-## T004 [P] — The AI's identity (as T001 decided)
+## T004 [P] — The AI's identity (as T001 decided) ✅ 2026-10-22
 
 - **Do**, for **token exchange** (preferred):
   - In the verifier, recognise a token with an actor claim from an AI

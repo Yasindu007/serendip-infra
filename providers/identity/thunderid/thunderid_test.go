@@ -124,8 +124,30 @@ func TestValues(t *testing.T) {
 	}
 
 	scripts := lookup(t, v, "bootstrap", "scripts").(map[string]any)
-	if len(scripts) != 1 {
-		t.Fatalf("bootstrap scripts = %v, want exactly %s", scripts, bootstrapFile)
+	if len(scripts) != 2 || scripts[bootstrapFile] == nil || scripts[delegateBootstrapFile] == nil {
+		t.Fatalf("bootstrap scripts = %v, want exactly %s and %s", scripts, bootstrapFile, delegateBootstrapFile)
+	}
+	if bootstrapFile >= delegateBootstrapFile {
+		t.Errorf("%s must sort before %s: bootstrap files are imported in name order", bootstrapFile, delegateBootstrapFile)
+	}
+	var delegate any
+	if err := json.Unmarshal([]byte(scripts[delegateBootstrapFile].(string)), &delegate); err != nil {
+		t.Fatalf("delegate bootstrap file is not valid JSON/YAML: %v", err)
+	}
+	dcfg := lookup(t, delegate, "inboundAuthConfig").([]any)[0].(map[string]any)["config"]
+	for _, c := range []struct {
+		path []string
+		want any
+	}{
+		{[]string{"clientId"}, DelegateClientID},
+		{[]string{"publicClient"}, true},
+		{[]string{"tokenEndpointAuthMethod"}, "none"},
+		{[]string{"grantTypes"}, []any{"authorization_code", tokenExchangeGrant}},
+		{[]string{"token", "accessToken", "userConfig", "validityPeriod"}, float64(DelegatedTokenLifetime)},
+	} {
+		if got := lookup(t, dcfg, c.path...); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("delegate client %s = %v, want %v", strings.Join(c.path, "."), got, c.want)
+		}
 	}
 	var app any
 	if err := json.Unmarshal([]byte(scripts[bootstrapFile].(string)), &app); err != nil {

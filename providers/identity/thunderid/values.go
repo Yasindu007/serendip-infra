@@ -25,6 +25,17 @@ const (
 	// (the future UI and CLI) log in through. Fixed, so nothing has to be
 	// stored to recognise it (decision 4).
 	ClientID = "serendip"
+	// DelegateClientID is the public client a person's token is exchanged
+	// for when they act through an AI assistant (RFC 8693, specs/021
+	// plan.md decision 1). serendipd treats its tokens as the person with
+	// agent guardrails, and only when they come from an exchange.
+	// ThunderID requires a public client to allow the authorization code
+	// grant too (spec 021 T004); a token from signing in to it directly is
+	// refused by serendipd.
+	DelegateClientID = "serendip-mcp"
+	// DelegatedTokenLifetime is how long an exchanged token lasts, in
+	// seconds: how long an assistant outlives its person's sign-out at most.
+	DelegatedTokenLifetime = 300
 	// LoopbackRedirectURI is the client's only redirect URI: a fixed
 	// loopback, used by verification now and a CLI later. ThunderID matches
 	// redirect URIs exactly, and bootstrap files are only imported on first
@@ -56,6 +67,11 @@ const (
 	clientAppID = "01900000-0000-7000-8000-0000000005e1"
 
 	bootstrapFile = "70-serendip-client.yaml"
+
+	// delegateAppID and delegateBootstrapFile declare the serendip-mcp
+	// client; files are imported in name order, after the serendip client.
+	delegateAppID         = "01900000-0000-7000-8000-0000000005e2"
+	delegateBootstrapFile = "71-serendip-mcp-client.yaml"
 )
 
 // tokenAttributes are the user attributes copied into access tokens:
@@ -116,12 +132,55 @@ func clientDocument(console ConsoleRedirects) map[string]any {
 	}
 }
 
+// delegateClientDocument is the bootstrap resource declaring the
+// serendip-mcp client, in the shape T001's exchanging client was created
+// and used with (specs/021 plan.md "Spike findings" 1).
+func delegateClientDocument() map[string]any {
+	return map[string]any{
+		"resource_type":             "application",
+		"id":                        delegateAppID,
+		"name":                      "Serendip AI assistants",
+		"description":               "A person's AI assistant acting for them, through token exchange",
+		"type":                      "browser",
+		"ouId":                      defaultOUID,
+		"authFlowId":                defaultAuthFlowID,
+		"signOutFlowId":             defaultSignOutFlowID,
+		"isRegistrationFlowEnabled": false,
+		"allowedUserTypes":          []string{"Person"},
+		"inboundAuthConfig":         []any{map[string]any{"type": "oauth2", "config": delegateOAuthConfig()}},
+	}
+}
+
+func delegateOAuthConfig() map[string]any {
+	return map[string]any{
+		"clientId":                DelegateClientID,
+		"redirectUris":            []string{LoopbackRedirectURI},
+		"grantTypes":              []string{"authorization_code", tokenExchangeGrant},
+		"responseTypes":           []string{"code"},
+		"pkceRequired":            true,
+		"tokenEndpointAuthMethod": "none",
+		"publicClient":            true,
+		"includeActClaim":         false,
+		"token": map[string]any{
+			"accessToken": map[string]any{
+				"userConfig": map[string]any{"validityPeriod": DelegatedTokenLifetime, "attributes": tokenAttributes},
+			},
+		},
+	}
+}
+
+const tokenExchangeGrant = "urn:ietf:params:oauth:grant-type:token-exchange"
+
 // values renders the chart values for issuer (decision 1), as JSON (valid
 // YAML for helm -f).
 func values(issuer string, console ConsoleRedirects) ([]byte, error) {
 	client, err := json.Marshal(clientDocument(console))
 	if err != nil {
 		return nil, fmt.Errorf("render client document: %w", err)
+	}
+	delegate, err := json.Marshal(delegateClientDocument())
+	if err != nil {
+		return nil, fmt.Errorf("render delegate client document: %w", err)
 	}
 	sqlite := map[string]string{"type": "sqlite"}
 	v := map[string]any{
@@ -147,7 +206,7 @@ func values(issuer string, console ConsoleRedirects) ([]byte, error) {
 				"passwordRef": map[string]string{"name": AdminSecretName, "key": AdminSecretKey},
 			},
 		},
-		"bootstrap": map[string]any{"scripts": map[string]string{bootstrapFile: string(client)}},
+		"bootstrap": map[string]any{"scripts": map[string]string{bootstrapFile: string(client), delegateBootstrapFile: string(delegate)}},
 	}
 	return json.MarshalIndent(v, "", "  ")
 }

@@ -106,8 +106,14 @@ func authMiddleware(apiKeys map[string]string, authn identity.Authenticator, con
 			return ctx, nil
 		}
 		recordSeen(ctx, principals, sqlite.KnownPrincipal{Type: resource.PrincipalPerson, ID: p.Subject, DisplayName: p.Name, Groups: p.Groups})
-		ctx = withCaller(ctx, policy.Principal{Type: resource.PrincipalPerson, ID: p.Subject, Groups: p.Groups})
-		return audit.WithSubject(audit.WithActor(ctx, identity.Actor(p)), p.Subject), nil
+		ctx = withCaller(ctx, policy.Principal{Type: resource.PrincipalPerson, ID: p.Subject, Groups: p.Groups, Via: p.Via})
+		ctx = audit.WithSubject(audit.WithActor(ctx, identity.Actor(p)), p.Subject)
+		if p.Via != "" {
+			// A person acting through an AI assistant (spec 021): audited as
+			// the assistant, with the person accountable for it.
+			ctx = audit.WithSponsor(ctx, p.Subject)
+		}
+		return ctx, nil
 	}
 	// serve resolves p and runs next, or answers 503 when it can't.
 	serve := func(w http.ResponseWriter, r *http.Request, next http.Handler, ctx context.Context, p identity.Principal) {

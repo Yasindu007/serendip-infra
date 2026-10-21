@@ -41,6 +41,8 @@ purpose), **Closed** (fixed).
 | RP-018 | OpenChoreo's API answered any pod in the cluster, unauthenticated | Security (high) | Closed | Spec 020 research |
 | RP-019 | A local AI assistant can read its person's CLI sign-in and act as them | Security (medium) | Accepted | Spec 021 T001 |
 | RP-020 | The catalogue's parity test checks routes, not parameter names | Correctness (low) | Accepted | Spec 021 T002 |
+| RP-021 | An AI assistant keeps access up to 5 minutes after its person signs out | Security (low) | Accepted | Spec 021 T004 |
+| RP-022 | A fresh install's `serendip-mcp` bootstrap file isn't verified yet | Correctness | Open | Spec 021 T004 |
 
 ---
 
@@ -355,3 +357,41 @@ purpose), **Closed** (fixed).
   A new route's catalogue entry is reviewed with its handler.
 - **Revisit:** if a parameter mismatch reaches a user, or when the API
   gains an OpenAPI description the catalogue could be checked against.
+
+## RP-021 — An AI assistant outlives its person's sign-out by minutes
+
+- **Kind:** security, low. **Status:** Accepted, 2026-10-21.
+  **Found:** spec 021 T004 contract review.
+- **What:** a person's assistant acts with a token exchanged for the
+  `serendip-mcp` client. Signing out revokes the person's refresh token,
+  and ThunderID then refuses further exchanges (spec 021 T001). But an
+  exchanged token already issued is a JWT that `serendipd` verifies
+  locally, so it stays valid until it expires.
+- **Bound:** the client issues 300-second tokens
+  (`thunderid.DelegatedTokenLifetime`), and `serendipd` refuses any
+  delegated token living over 1 hour (`oidc.MaxDelegatedLifetime`),
+  whatever the client is configured to issue. The operator tool never
+  edits an existing `serendip-mcp` client, so an operator who raises its
+  lifetime gets up to that hour.
+- **Why accepted:** the same holds for every JWT access token Serendip
+  verifies, people's included (1 hour). The assistant's window is
+  shorter, and it can never do more than the person, under agent
+  guardrails.
+- **Revisit:** if Serendip gains token introspection or a revocation list,
+  or an incident needs an assistant cut off at once. Until then, removing
+  the person's role assignments cuts it off immediately.
+
+## RP-022 — A fresh install's `serendip-mcp` bootstrap file isn't verified
+
+- **Kind:** correctness. **Status:** Open, 2026-10-21. **Found:** spec 021
+  T004.
+- **What:** fresh installs declare `serendip-mcp` in a second ThunderID
+  bootstrap file, `71-serendip-mcp-client.yaml`. ThunderID imports
+  bootstrap files once, in name order (`VERSIONS.md`). The document's
+  shape was accepted live through the management API, but a fresh install
+  importing it hasn't been run.
+- **Impact if wrong:** a fresh install has no `serendip-mcp` client.
+  `serendip mcp` can't exchange tokens, and says so; nothing else breaks.
+  The operator tool `cmd/serendip-identity-redirects` creates it.
+- **Close:** on the next fresh identity install (a new kind cluster, or the
+  real T470 run), check that ThunderID lists the client.

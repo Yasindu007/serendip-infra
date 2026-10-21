@@ -22,6 +22,13 @@ type fakeThunder struct {
 	app  map[string]any
 	puts int
 	put  map[string]any
+	// noDelegate leaves the serendip-mcp client out of the application
+	// list; created collects what was POSTed.
+	noDelegate bool
+	created    []map[string]any
+	// listStatus and createStatus, when set, fail those calls.
+	listStatus, createStatus int
+	touched                  []string // other applications' paths requested
 }
 
 func newFakeThunder(t *testing.T, redirects, postLogout []any) (*fakeThunder, *httptest.Server) {
@@ -85,6 +92,33 @@ func (f *fakeThunder) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{"access_token": "mgmt-token", "token_type": "Bearer"})
+	case r.URL.Path == "/applications":
+		if r.Header.Get("Authorization") != "Bearer mgmt-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.Method == http.MethodGet && f.listStatus != 0 {
+			http.Error(w, "list failed", f.listStatus)
+			return
+		}
+		if r.Method == http.MethodPost && f.createStatus != 0 {
+			http.Error(w, "create failed", f.createStatus)
+			return
+		}
+		if r.Method == http.MethodPost {
+			var doc map[string]any
+			json.NewDecoder(r.Body).Decode(&doc)
+			f.created = append(f.created, doc)
+			f.noDelegate = false
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(doc)
+			return
+		}
+		apps := []any{map[string]any{"id": clientAppID, "clientId": ClientID}}
+		if !f.noDelegate {
+			apps = append(apps, map[string]any{"id": "other-id", "clientId": DelegateClientID})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"totalResults": len(apps), "applications": apps})
 	case r.URL.Path == "/applications/"+clientAppID:
 		if r.Header.Get("Authorization") != "Bearer mgmt-token" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -98,6 +132,9 @@ func (f *fakeThunder) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(f.app)
 	default:
+		if strings.HasPrefix(r.URL.Path, "/applications/") {
+			f.touched = append(f.touched, r.Method+" "+r.URL.Path)
+		}
 		http.NotFound(w, r)
 	}
 }
@@ -271,5 +308,85 @@ func TestRedirectsAccepted(t *testing.T) {
 				t.Error("a read-only check wrote to the client")
 			}
 		})
+	}
+}
+
+func TestEnsureClient_CreatesTheDelegateClientOnce(t *testing.T) {
+	f, srv := newFakeThunder(t, []any{LoopbackRedirectURI}, []any{LoopbackRedirectURI})
+	f.noDelegate = true
+	for range 2 {
+		if err := run(t, srv, f.password); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.created) != 1 {
+		t.Fatalf("created %d applications, want exactly 1", len(f.created))
+	}
+	doc := f.created[0]
+	if _, ok := doc["id"]; ok {
+		t.Error("the created application carries a client-chosen id")
+	}
+	if _, ok := doc["resource_type"]; ok {
+		t.Error("the created application carries the bootstrap file's resource_type")
+	}
+	cfg := doc["inboundAuthConfig"].([]any)[0].(map[string]any)["config"].(map[string]any)
+	if cfg["clientId"] != DelegateClientID || cfg["publicClient"] != true || cfg["tokenEndpointAuthMethod"] != "none" {
+		t.Errorf("delegate client = %v", cfg)
+	}
+	if grants := cfg["grantTypes"].([]any); !slices.Contains(grants, any(tokenExchangeGrant)) {
+		t.Errorf("grant types = %v, want token exchange", grants)
+	}
+	life := cfg["token"].(map[string]any)["accessToken"].(map[string]any)["userConfig"].(map[string]any)["validityPeriod"]
+	if life != float64(DelegatedTokenLifetime) {
+		t.Errorf("exchanged token lifetime = %v, want %d", life, DelegatedTokenLifetime)
+	}
+}
+
+func TestEnsureClient_DelegateClientFailures(t *testing.T) {
+	tests := []struct {
+		name               string
+		list, create       int
+		wantErr, wantFixed bool
+	}{
+		{name: "the list fails", list: http.StatusInternalServerError, wantErr: true, wantFixed: true},
+		{name: "creating fails", create: http.StatusBadRequest, wantErr: true, wantFixed: true},
+		{name: "it was created meanwhile", create: http.StatusConflict, wantFixed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// An older client missing "groups", so the serendip client needs a fix.
+			f, srv := newFakeThunder(t, []any{LoopbackRedirectURI}, []any{LoopbackRedirectURI})
+			uc := userConfig(f.config())
+			f.mu.Lock()
+			uc["attributes"] = []any{"username"}
+			f.noDelegate, f.listStatus, f.createStatus = true, tt.list, tt.create
+			f.mu.Unlock()
+			err := run(t, srv, f.password)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tt.wantErr)
+			}
+			if err != nil && strings.Contains(err.Error(), f.password) {
+				t.Error("the error carries the password")
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if fixed := f.puts == 1; fixed != tt.wantFixed {
+				t.Errorf("serendip client fixed = %v, want %v", fixed, tt.wantFixed)
+			}
+		})
+	}
+}
+
+func TestEnsureClient_LeavesAnExistingDelegateClientAlone(t *testing.T) {
+	f, srv := newFakeThunder(t, []any{LoopbackRedirectURI}, []any{LoopbackRedirectURI})
+	if err := run(t, srv, f.password); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.created) != 0 || len(f.touched) != 0 {
+		t.Errorf("created %v and touched %v; an existing serendip-mcp must be left as it is", f.created, f.touched)
 	}
 }

@@ -139,7 +139,9 @@ func noRedirects(hc *http.Client) *http.Client {
 //   - the console's callback and post-logout URIs, when given (empty ones
 //     are skipped);
 //   - every token attribute a fresh install copies into access tokens,
-//     including "groups" (specs/017-authorization plan.md decision 9).
+//     including "groups" (specs/017-authorization plan.md decision 9);
+//   - the serendip-mcp client for AI assistants (specs/021 plan.md
+//     decision 1), created when missing, never changed when present.
 //
 // Bootstrap files are imported only on first install, so an install that
 // predates either change needs this once. baseURL must reach ThunderID
@@ -157,6 +159,15 @@ func ensureClient(ctx context.Context, base string, hc *http.Client, issuer, pas
 	if err != nil {
 		return err
 	}
+	// The serendip client's own fixes come first, so a failure creating the
+	// delegate client can't hold them back.
+	if err := updateClient(ctx, base, hc, token, redirectURI, postLogoutURI); err != nil {
+		return err
+	}
+	return ensureDelegateClient(ctx, base, hc, token)
+}
+
+func updateClient(ctx context.Context, base string, hc *http.Client, token, redirectURI, postLogoutURI string) error {
 	appURL := base + "/applications/" + clientAppID
 	var app map[string]any
 	if err := callJSON(ctx, hc, http.MethodGet, appURL, token, nil, &app); err != nil {
@@ -384,4 +395,37 @@ func callJSON(ctx context.Context, hc *http.Client, method, target, bearer strin
 		return nil
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, maxManagementBody)).Decode(out)
+}
+
+// ensureDelegateClient creates the serendip-mcp client when no application
+// has its client ID. One that exists is left as it is: an operator may
+// have tuned it, and nothing here removes or narrows.
+func ensureDelegateClient(ctx context.Context, base string, hc *http.Client, token string) error {
+	var list struct {
+		Applications []struct {
+			ClientID string `json:"clientId"`
+		} `json:"applications"`
+	}
+	if err := callJSON(ctx, hc, http.MethodGet, base+"/applications", token, nil, &list); err != nil {
+		return fmt.Errorf("thunderid: list applications: %w", err)
+	}
+	for _, a := range list.Applications {
+		if a.ClientID == DelegateClientID {
+			return nil
+		}
+	}
+	doc := delegateClientDocument()
+	delete(doc, "resource_type")
+	delete(doc, "id")
+	err := callJSON(ctx, hc, http.MethodPost, base+"/applications", token, doc, nil)
+	// A conflict means it exists after all: on a list page not read, or
+	// created by a concurrent run.
+	var se *statusError
+	if errors.As(err, &se) && se.code == http.StatusConflict {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("thunderid: create the %s client: %w", DelegateClientID, err)
+	}
+	return nil
 }

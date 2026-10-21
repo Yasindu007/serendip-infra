@@ -40,7 +40,7 @@ func policyApproval(ctx context.Context, caller policy.Principal, ru rule, resou
 func requesterOf(ctx context.Context, caller policy.Principal) resource.ApprovalActor {
 	return resource.ApprovalActor{
 		Actor:     audit.ActorFrom(ctx),
-		Principal: &resource.PrincipalRef{Type: caller.Type, ID: caller.ID},
+		Principal: &resource.PrincipalRef{Type: caller.Type, ID: caller.ID, Via: caller.Via},
 		Subject:   audit.SubjectFrom(ctx),
 		Sponsor:   audit.SponsorFrom(ctx),
 	}

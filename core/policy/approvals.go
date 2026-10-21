@@ -30,10 +30,12 @@ func MayDecide(approver Principal, requester *resource.PrincipalRef) error {
 	default:
 		return ErrApproverGuardrail
 	}
-	if approver.ID == "" {
+	if approver.ID == "" || approver.Via != "" {
 		return ErrApproverGuardrail
 	}
-	if requester != nil && requester.Type == approver.Type && requester.ID == approver.ID {
+	// A person may decide what their AI assistant asked for (Via set), as a
+	// sponsor decides their agent's request.
+	if requester != nil && requester.Type == approver.Type && requester.ID == approver.ID && requester.Via == "" {
 		return ErrSelfApproval
 	}
 	return nil

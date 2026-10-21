@@ -226,10 +226,12 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 			// Keys come through the Service proxy; the issuer check is still
 			// against the public issuer URL tokens carry (plan.md decision 9).
 			v, err := oidc.NewVerifier(oidc.Config{
-				Issuer:     issuer,
-				Audience:   thunderid.ClientID,
-				JWKSURL:    thunderid.JWKSProxyURL(client),
-				HTTPClient: client.HTTPClient(),
+				Issuer:   issuer,
+				Audience: thunderid.ClientID,
+				// A person's AI assistant, through token exchange (spec 021).
+				DelegateClients: []string{thunderid.DelegateClientID},
+				JWKSURL:         thunderid.JWKSProxyURL(client),
+				HTTPClient:      client.HTTPClient(),
 			})
 			if err != nil {
 				return err

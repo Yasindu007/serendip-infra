@@ -10,6 +10,7 @@ import (
 
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/providers/identity/oidc"
+	"github.com/serendip-infra/serendip-infra/providers/identity/thunderid"
 )
 
 // agentIssuer is one trusted issuer of agent tokens
@@ -47,6 +48,11 @@ func parseAgentIssuers(raw, humanIssuer string) ([]agentIssuer, error) {
 		a := agentIssuer{alias: alias, issuer: parts[0], audience: parts[1]}
 		if !oidc.ValidIssuerAlias(a.alias) {
 			return nil, fmt.Errorf("SERENDIP_AGENT_ISSUERS: alias %q: want 1-32 of a-z, 0-9 and -", a.alias)
+		}
+		// Audit names a person's AI assistant "agent:<client>/<subject>"
+		// (spec 021), so an agent issuer can't take that client's name.
+		if a.alias == thunderid.DelegateClientID {
+			return nil, fmt.Errorf("SERENDIP_AGENT_ISSUERS: alias %q is reserved for people's AI assistants", a.alias)
 		}
 		if err := validIssuerURL(a.issuer); err != nil {
 			return nil, fmt.Errorf("SERENDIP_AGENT_ISSUERS %s: %w", a.alias, err)

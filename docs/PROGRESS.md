@@ -12,9 +12,47 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-10-20
+Last updated: 2026-10-21
 
 ## Current phase
+
+**Spec 021 (Serendip's MCP server and CLI): IN PROGRESS.** Plan approved
+2026-10-20, done before spec 020 by the user's order. Read
+`specs/021-mcp-and-cli/plan.md`, especially its "Spike findings" and
+decision 1, and `tasks.md`.
+
+- **Done:**
+  - **T001 (spike):** ThunderID token exchange works from a public client.
+    Claude Code 2.1.304 speaks MCP 2026-07-28 (`server/discover`, no
+    `Origin`).
+  - **T002 (`2ad4105`):** `api/catalog` (operations for the CLI and MCP),
+    with a route parity test. Spec amended: paste-back sign-in replaces
+    the device code.
+  - **T003 (`585f64c`):** `mcp/`, an adapter over the official MCP Go SDK
+    v1.8.0 (ADR 0017, confined to `mcp/`). Elicitation is deferred.
+  - **T004:** a person acting through an AI assistant.
+    It's a token exchanged for the `serendip-mcp` client, verified into
+    `identity.Principal.Via`. In policy, the person's roles plus agent
+    guardrails (`Principal.guarded()`); in audit,
+    `agent:serendip-mcp/<sub>` with the person as sponsor. The person can
+    approve what their assistant requested; the assistant never decides.
+    - `serendip-mcp` comes from a second ThunderID bootstrap file, or the
+      operator tool `cmd/serendip-identity-redirects`. It was **created on
+      `serendip-t018`** on 2026-10-21. serendipd gains no write path.
+- **Next:**
+  - **T005:** the CLI (`cmd/serendip`): login, catalogue commands,
+    approvals in the flow.
+  - **T006:** `serendip mcp` over stdio, which does the exchange.
+  - **T007:** `/mcp` in serendipd.
+  - **T008:** the declared interface in audit.
+  - Then T009–T013.
+- **New registers:**
+  - RP-019: a local assistant can read the person's CLI token file
+    (accepted).
+  - RP-020: parity checks routes, not parameter names.
+  - `docs/build-vs-adopt.md` is the built/adopted/rejected record.
+
+Previous phase, kept for context:
 
 **Spec 019 (Approvals): COMPLETE** (T001–T014 plus T007a, 2026-10-20).
 The spec, plan (with an "As built" section) and tasks are in

@@ -37,6 +37,7 @@ func TestParseAgentIssuers(t *testing.T) {
 		{raw: "a=https://a.example|aud|25h", wantErr: "maxLifetime"},
 		{raw: "a=https://a.example|aud|-1h", wantErr: "maxLifetime"},
 		{raw: "a=https://a.example|aud,a=https://b.example|aud", wantErr: "used twice"},
+		{raw: "serendip-mcp=https://a.example|aud", wantErr: "reserved for people's AI assistants"},
 		{raw: "a=https://a.example|aud,b=https://a.example|aud", wantErr: "listed twice"},
 		{raw: "a=https://a.example|aud,b=https://a.example/|aud", wantErr: "listed twice"},
 		{raw: "a=" + human + "/|aud", wantErr: "human identity issuer"},

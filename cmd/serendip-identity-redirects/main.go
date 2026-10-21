@@ -70,5 +70,6 @@ func run(args []string) error {
 		fmt.Printf("the serendip client accepts %s and %s\n", callback, postLogout)
 	}
 	fmt.Println("the serendip client's access tokens carry username, email, name and groups")
+	fmt.Println("the serendip-mcp client for AI assistants exists (created if it was missing)")
 	return nil
 }

@@ -57,6 +57,14 @@ type Config struct {
 	// MaxLifetime bounds an agent token's exp - iat, since the issuer can't
 	// revoke tokens. Defaults to 1 h; at most 24 h.
 	MaxLifetime time.Duration
+	// DelegateClients are clients a person's token is exchanged for when
+	// they act through an AI assistant (RFC 8693, spec 021 plan decision
+	// 1). A token issued to one becomes the person with Via set to the
+	// client, so the agent guardrails apply. It must come from a token
+	// exchange, carry the client as its audience, carry iat and live at
+	// most MaxDelegatedLifetime. A token exchanged for any other client is
+	// refused. People's issuers only.
+	DelegateClients []string
 	// Now is the clock; defaults to time.Now. For tests.
 	Now func() time.Time
 }
@@ -101,6 +109,11 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 		if cfg.IssuerAlias != "" || cfg.MaxLifetime != 0 {
 			return nil, errors.New("oidc: an issuer alias and a maximum lifetime are for agent issuers")
 		}
+		for _, c := range cfg.DelegateClients {
+			if c == "" || c == cfg.Audience || strings.ContainsFunc(c, func(r rune) bool { return r == '/' || unicode.IsSpace(r) || unicode.IsControl(r) }) {
+				return nil, fmt.Errorf("oidc: delegate client %q: want a client ID other than the audience, with no spaces or slashes", c)
+			}
+		}
 	case identity.KindAgent:
 		if !ValidIssuerAlias(cfg.IssuerAlias) {
 			return nil, fmt.Errorf("oidc: agent issuer alias %q: want 1-32 of a-z, 0-9 and -", cfg.IssuerAlias)
@@ -110,6 +123,9 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 		}
 		if cfg.MaxLifetime < 0 || cfg.MaxLifetime > MaxAgentTokenLifetime {
 			return nil, fmt.Errorf("oidc: agent token lifetime %s: want at most %s", cfg.MaxLifetime, MaxAgentTokenLifetime)
+		}
+		if len(cfg.DelegateClients) > 0 {
+			return nil, errors.New("oidc: delegate clients are for people's issuers")
 		}
 	default:
 		return nil, fmt.Errorf("oidc: unknown principal kind %d", cfg.Kind)
@@ -357,7 +373,14 @@ func (v *Verifier) checkClaims(payload []byte) (identity.Principal, error) {
 	if c.Iss != v.cfg.Issuer {
 		return identity.Principal{}, invalid(fmt.Sprintf("issuer %q", c.Iss))
 	}
-	if !audienceContains(c.Aud, v.cfg.Audience) {
+	// A delegate client's token is meant for that client: the exchange sets
+	// its audience to it (spec 021 T001 finding 1).
+	delegate := slices.Contains(v.cfg.DelegateClients, c.ClientID)
+	aud := v.cfg.Audience
+	if delegate {
+		aud = c.ClientID
+	}
+	if !audienceContains(c.Aud, aud) {
 		return identity.Principal{}, invalid("audience")
 	}
 	// client_id is what separates an access token from an ID token issued
@@ -378,11 +401,48 @@ func (v *Verifier) checkClaims(payload []byte) (identity.Principal, error) {
 	if c.GrantType == clientCredentials {
 		return identity.Principal{}, invalid("a client_credentials token is never a person")
 	}
+	via, err := v.delegation(c, delegate)
+	if err != nil {
+		return identity.Principal{}, err
+	}
 	groups, err := v.groups(payload)
 	if err != nil {
 		return identity.Principal{}, err
 	}
-	return identity.Principal{Subject: c.Sub, Name: displayName(c), Groups: groups}, nil
+	return identity.Principal{Subject: c.Sub, Name: displayName(c), Groups: groups, Via: via}, nil
+}
+
+const tokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange"
+
+// MaxDelegatedLifetime bounds a delegated token's exp - iat. Logging out
+// stops new exchanges, so this is how long an assistant can outlive its
+// person's session at most.
+const MaxDelegatedLifetime = time.Hour
+
+// delegation checks how a person's token was issued, and returns the
+// client they act through: empty for the person themselves. Only a token
+// exchange for a delegate client delegates; any other exchanged token is
+// refused, and a delegate client's token must come from an exchange (a
+// person signing in to it directly is not acting through an assistant).
+func (v *Verifier) delegation(c claims, delegate bool) (string, error) {
+	exchanged := c.GrantType == tokenExchange
+	switch {
+	case !delegate && !exchanged:
+		return "", nil
+	case !delegate:
+		return "", invalid(fmt.Sprintf("a token exchanged for client %q, which isn't a delegate", c.ClientID))
+	case !exchanged:
+		return "", invalid(fmt.Sprintf("a token for delegate client %q must come from a token exchange, not %q", c.ClientID, c.GrantType))
+	}
+	iat, ok := unixTime(c.Iat)
+	if !ok {
+		return "", invalid("a delegated token needs iat")
+	}
+	exp, _ := unixTime(c.Exp) // checkTimes required it
+	if life := exp.Sub(iat); life < 0 || life > MaxDelegatedLifetime+v.cfg.Leeway {
+		return "", invalid(fmt.Sprintf("a delegated token lives %s, not within the %s maximum", life, MaxDelegatedLifetime))
+	}
+	return c.ClientID, nil
 }
 
 const clientCredentials = "client_credentials"

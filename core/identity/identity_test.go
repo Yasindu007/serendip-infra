@@ -15,13 +15,14 @@ func TestActor(t *testing.T) {
 		{identity.Principal{Subject: "0190-0030", Name: "admin"}, "person:admin"},
 		{identity.Principal{Subject: "s", Name: "a@example.com"}, "person:a@example.com"},
 		{identity.Principal{Kind: identity.KindAgent, Issuer: "am-dev", Subject: "01a1", Name: "01a1"}, "agent:am-dev/01a1"},
+		{identity.Principal{Subject: "0190-0030", Name: "admin", Via: "serendip-mcp"}, "agent:serendip-mcp/0190-0030"},
 	}
 	for _, tt := range tests {
 		if got := identity.Actor(tt.p); got != tt.want {
 			t.Errorf("Actor(%+v) = %q, want %q", tt.p, got, tt.want)
 		}
 		prefix := identity.ActorPrefix
-		if tt.p.Kind == identity.KindAgent {
+		if tt.p.Kind == identity.KindAgent || tt.p.Via != "" {
 			prefix = identity.AgentActorPrefix
 		}
 		if !strings.HasPrefix(identity.Actor(tt.p), prefix) {
