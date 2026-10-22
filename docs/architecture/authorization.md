@@ -58,11 +58,17 @@ Fixed IDs, the same on every install (`core/policy/builtins.go`):
 |---|---|---|
 | Owner | `*` | none |
 | Contributor | `*` except `serendip/authorization/*/write` and `serendip/authorization/*/delete` | none |
-| Reader | `*/read` | none |
-| User Access Administrator | `*/read`, `serendip/authorization/*` | none |
-| Role Based Access Control Administrator | `*/read`, role assignments write and delete | none |
+| Reader | `*/read` except `serendip/components/logs/read` | none |
+| User Access Administrator | `*/read`, `serendip/authorization/*`; no logs | none |
+| Role Based Access Control Administrator | `*/read`, role assignments write and delete; no logs | none |
 | Secrets Officer | `serendip/secrets/*` | `serendip/secrets/value/*` |
 | Secrets User | `serendip/secrets/read` | `serendip/secrets/value/read` |
+| Log Reader | `*/read`, including logs | none |
+
+**Logs are their own action** (`serendip/components/logs/read`, spec 020):
+they can carry sensitive data, so the read-only and access-management
+roles leave them out. Log Reader adds them; Owner and Contributor have
+them.
 
 Built-in roles can't be changed or deleted (400). **Custom roles**
 (`POST /v1/authorization/roleDefinitions`):

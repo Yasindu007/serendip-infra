@@ -17,12 +17,29 @@ const (
 	RBACAdministratorRoleID       = "0190d1c0-0000-7000-8000-000000000005"
 	SecretsOfficerRoleID          = "0190d1c0-0000-7000-8000-000000000006"
 	SecretsUserRoleID             = "0190d1c0-0000-7000-8000-000000000007"
+	LogReaderRoleID               = "0190d1c0-0000-7000-8000-000000000008"
 )
 
 // Actions the policy itself relies on.
 const (
 	ActionRoleAssignmentsWrite  = "serendip/authorization/roleAssignments/write"
 	ActionRoleAssignmentsDelete = "serendip/authorization/roleAssignments/delete"
+)
+
+// Actions on what Components run (specs/020-openchoreo-console-features
+// plan.md decision 9). Deployments use the usual
+// serendip/deployments/{read,write,delete}.
+const (
+	// ActionComponentRuntimeRead reads what a Component runs as, and its
+	// events.
+	ActionComponentRuntimeRead = "serendip/components/runtime/read"
+	// ActionComponentLogsRead reads a Component's logs. It's its own action,
+	// left out of the read-only roles, because logs can carry sensitive
+	// data (Log Reader grants it).
+	ActionComponentLogsRead = "serendip/components/logs/read"
+	// ActionPlatformRead reads the platform's description: where workloads
+	// run, and the component types and traits available.
+	ActionPlatformRead = "serendip/platform/read"
 )
 
 // builtInRoles mirror Azure's built-in roles of the same names and meaning
@@ -43,18 +60,23 @@ var builtInRoles = map[string]resource.RoleDefinitionSpec{
 	},
 	ReaderRoleID: {
 		RoleName:    "Reader",
-		Description: "Read resources at the scope, including Secret metadata. No changes, no Secret values.",
-		Permissions: []resource.Permission{{Actions: []string{"*/read"}}},
+		Description: "Read resources at the scope, including Secret metadata. No changes, no Secret values, no logs (Log Reader adds those).",
+		Permissions: []resource.Permission{{Actions: []string{"*/read"}, NotActions: []string{ActionComponentLogsRead}}},
 	},
 	UserAccessAdministratorRoleID: {
 		RoleName:    "User Access Administrator",
-		Description: "Read everything and manage access (role assignments and custom roles) at the scope. Can't change resources.",
-		Permissions: []resource.Permission{{Actions: []string{"*/read", "serendip/authorization/*"}}},
+		Description: "Read everything and manage access (role assignments and custom roles) at the scope. Can't change resources or read logs.",
+		Permissions: []resource.Permission{{Actions: []string{"*/read", "serendip/authorization/*"}, NotActions: []string{ActionComponentLogsRead}}},
 	},
 	RBACAdministratorRoleID: {
 		RoleName:    "Role Based Access Control Administrator",
-		Description: "Create and remove role assignments at the scope, limited by the delegation on its own assignment.",
-		Permissions: []resource.Permission{{Actions: []string{"*/read", ActionRoleAssignmentsWrite, ActionRoleAssignmentsDelete}}},
+		Description: "Create and remove role assignments at the scope, limited by the delegation on its own assignment. Can't read logs.",
+		Permissions: []resource.Permission{{Actions: []string{"*/read", ActionRoleAssignmentsWrite, ActionRoleAssignmentsDelete}, NotActions: []string{ActionComponentLogsRead}}},
+	},
+	LogReaderRoleID: {
+		RoleName:    "Log Reader",
+		Description: "Read resources at the scope, and Components' logs. No changes, no Secret values.",
+		Permissions: []resource.Permission{{Actions: []string{"*/read"}}},
 	},
 	SecretsOfficerRoleID: {
 		RoleName:    "Secrets Officer",

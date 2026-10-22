@@ -239,7 +239,7 @@ func TestAuthzAPI_PermissionsDefinitionsPrincipals(t *testing.T) {
 		BuiltIn  bool              `json:"builtIn"`
 	}
 	got = w.do("tok-nobody", "GET", authzPath+"roleDefinitions", nil)
-	if err := json.Unmarshal(got.Body.Bytes(), &defs); err != nil || len(defs) != 7 || !defs[0].BuiltIn {
+	if err := json.Unmarshal(got.Body.Bytes(), &defs); err != nil || len(defs) != len(policy.BuiltInRoles()) || !defs[0].BuiltIn {
 		t.Errorf("role definitions: %d %s", got.Code, got.Body)
 	}
 	w.expect("tok-nobody", "GET", authzPath+"roleDefinitions/"+policy.OwnerRoleID, nil, http.StatusOK)

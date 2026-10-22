@@ -40,6 +40,7 @@ func TestAgentMayHold(t *testing.T) {
 		policy.RBACAdministratorRoleID:       false,
 		policy.SecretsOfficerRoleID:          true,
 		policy.SecretsUserRoleID:             true,
+		policy.LogReaderRoleID:               true,
 	}
 	roles := policy.BuiltInRoles()
 	if len(roles) != len(want) {

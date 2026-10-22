@@ -79,7 +79,13 @@ Dependency sketch:
     plan's risk test).
   - The migration is idempotent on a migrated store.
 
-## T004 — Authorization: actions, the Log Reader role, route rules
+## T004 — Authorization: actions, the Log Reader role, route rules ✅ 2026-10-22
+
+**As built:** the actions and roles are in `core/policy/builtins.go`.
+Each route's rule lands with its route (T006, T007, T009), because the
+route-table test refuses a rule for a route that doesn't exist yet.
+"Write at the target Environment and read on the Component" is
+T006's route rule.
 
 - **Do:**
   - Add the actions in decision 9.

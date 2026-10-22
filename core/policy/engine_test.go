@@ -410,8 +410,53 @@ func TestBuiltInRolesAreValid(t *testing.T) {
 			t.Errorf("built-in %s (%s): %v", r.RoleName, id, err)
 		}
 	}
-	if len(policy.BuiltInRoles()) != 7 {
-		t.Errorf("%d built-in roles, want 7", len(policy.BuiltInRoles()))
+	if len(policy.BuiltInRoles()) != 8 {
+		t.Errorf("%d built-in roles, want 8", len(policy.BuiltInRoles()))
+	}
+}
+
+// Logs are their own action (spec 020 plan decision 9): the read-only and
+// access-management roles don't get them, Log Reader adds them, and the
+// roles that change things keep them.
+func TestLogsAreTheirOwnRead(t *testing.T) {
+	roles := policy.BuiltInRoles()
+	want := map[string]map[string]bool{
+		policy.ReaderRoleID:                  {policy.ActionComponentLogsRead: false, policy.ActionComponentRuntimeRead: true, policy.ActionPlatformRead: true, "serendip/deployments/read": true},
+		policy.LogReaderRoleID:               {policy.ActionComponentLogsRead: true, policy.ActionComponentRuntimeRead: true, policy.ActionPlatformRead: true, "serendip/deployments/write": false},
+		policy.UserAccessAdministratorRoleID: {policy.ActionComponentLogsRead: false, policy.ActionComponentRuntimeRead: true},
+		policy.RBACAdministratorRoleID:       {policy.ActionComponentLogsRead: false},
+		policy.ContributorRoleID:             {policy.ActionComponentLogsRead: true, "serendip/deployments/write": true, "serendip/deployments/delete": true},
+		policy.OwnerRoleID:                   {policy.ActionComponentLogsRead: true},
+		policy.SecretsUserRoleID:             {policy.ActionComponentLogsRead: false},
+	}
+	for id, actions := range want {
+		for a, ok := range actions {
+			if got := policy.Allows(roles[id].Permissions, policy.Action{Name: a}); got != ok {
+				t.Errorf("%s: %s = %v, want %v", roles[id].RoleName, a, got, ok)
+			}
+		}
+	}
+}
+
+func TestLogReaderDecides(t *testing.T) {
+	w := newWorld(t)
+	w.grant(alice, policy.ReaderRoleID, projA, nil)
+	bob := policy.Principal{Type: resource.PrincipalPerson, ID: "sub-bob"}
+	w.grant(bob, policy.LogReaderRoleID, projA, nil)
+	for _, tt := range []struct {
+		who  policy.Principal
+		a    string
+		want policy.Effect
+	}{
+		{alice, policy.ActionComponentLogsRead, policy.Deny},
+		{alice, policy.ActionComponentRuntimeRead, policy.Allow},
+		{bob, policy.ActionComponentLogsRead, policy.Allow},
+		{bob, "serendip/components/write", policy.Deny},
+	} {
+		d, err := w.engine.Decide(w.ctx, tt.who, policy.Action{Name: tt.a}, web)
+		if err != nil || d.Effect != tt.want {
+			t.Errorf("%s %s = %v, %v; want %v", tt.who.ID, tt.a, d.Effect, err, tt.want)
+		}
 	}
 }
 
