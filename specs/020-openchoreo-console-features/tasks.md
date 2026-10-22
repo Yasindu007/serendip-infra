@@ -9,7 +9,7 @@ Dependency sketch:
   → T011 → T012 → T013 → T014 → T015 → T016 → T017.
 - T012 (the console) can start once T006's routes exist.
 
-## T001 — Spike: environments, bindings and runtime on serendip-t018
+## T001 — Spike: environments, bindings and runtime on serendip-t018 ✅ 2026-10-22
 
 - **Do**, on `serendip-t018`, with scratch objects removed afterwards:
   1. **A second environment:** create an OpenChoreo `Environment`
@@ -101,6 +101,11 @@ Dependency sketch:
   - **Releases:** list `ComponentRelease`s, and generate one when needed.
   - **Stop auto-deploying** to the hard-coded `development` (the
     migration's Deployments take over).
+  - **The project-level binding:** a `ProjectReleaseBinding` per
+    (Application, Environment), created with the first Deployment there
+    and removed with the last (spike finding 1).
+  - **One `DeploymentPipeline` per Project.**
+  - **Creating a release** when auto-deploy is off (spike finding 5).
   - Record the pins and CR shapes in `VERSIONS.md`.
 - **Files:** `providers/application/openchoreo/{environments,deployments,releases}.go`
   and tests, `names.go`, `VERSIONS.md`.
@@ -128,6 +133,9 @@ Dependency sketch:
 ## T007 [P] — The runtime view: tree, events, pod logs
 
 - **Do:**
+  - **Kubernetes client additions:** a raw read that keeps every field
+    (Events lose theirs through `Object`), and a stream method with no
+    request timeout, for following logs (spike finding 6).
   - Provider and API for runtime objects and events.
   - **Pod logs:** recent lines, plus `follow=true` streaming chunked
     NDJSON (decision 8).
@@ -154,6 +162,10 @@ Dependency sketch:
 ## T009 [P] — Topology and the platform view
 
 - **Do:**
+  - **`ComponentSpec` gains `dependencies`:** the Component and the
+    endpoint it calls. They map to the Workload's
+    `dependencies.endpoints`, with the address in an environment variable
+    (spike finding 8).
   - Declared dependencies per Component (what it calls, and what calls
     it), and per Application.
   - **Read-only platform view:** data planes, environments, the pipeline,

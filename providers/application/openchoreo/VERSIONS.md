@@ -48,3 +48,23 @@ Notes:
   Re-check all three on every OpenChoreo upgrade. If Serendip ever calls
   the API, turn its OIDC security on rather than opening the policy.
 - Details: `docs/architecture/application-platform.md`.
+
+## Environments, promotion and runtime (spec 020 T001, verified on 1.3.1)
+
+- **An extra environment** needs an `Environment` (`dataPlaneRef`), plus
+  a `ProjectReleaseBinding` per project. That binding creates the
+  data-plane namespace; without it a `ReleaseBinding` fails with
+  "namespaces … not found".
+- **Promotion:** a `ReleaseBinding` with the same `releaseName`, Ready in
+  about 23 s. There's no pipeline enforcement upstream.
+- **Overrides:** `componentTypeEnvironmentConfigs` (schema-governed),
+  `workloadOverrides.container.env|files`, and `traitEnvironmentConfigs`.
+  They're delivered through an `env-configs` ConfigMap, and kept across
+  rollbacks.
+- **Releases:** `autoDeploy: true` creates `<component>-<content hash>`
+  releases and binds the first environment only. With it off, no release
+  is created.
+- **`RenderedRelease.status.resources`** lists kind, name, namespace and
+  `healthStatus`.
+- **Workload dependencies:** `spec.dependencies.endpoints[]`, resolved
+  into an address environment variable (`ConnectionsResolved`).

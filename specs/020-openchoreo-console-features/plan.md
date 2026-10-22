@@ -1,6 +1,6 @@
 # Plan 020: OpenChoreo's portal features in Serendip's own console
 
-Status: Draft, awaiting approval. Updated 2026-10-22 after spec 021
+Status: Approved 2026-10-22. Updated 2026-10-22 after spec 021
 (see "What changed since spec 021"). Spec: `spec.md` (draft, 2026-10-20).
 
 ## What changed since spec 021 (2026-10-22)
@@ -84,6 +84,80 @@ unless marked inferred.
   supported". The chart does have `backstage.enabled=false`, and the API
   and CLI are first-class.
 
+## Spike findings (T001, 2026-10-22, on `serendip-t018`, OpenChoreo 1.3.1)
+
+Observed with scratch objects, all removed afterwards; the running
+Components were restored exactly.
+
+1. **A second environment needs two bindings, not one.**
+   - **The `Environment` CR:** `spec.dataPlaneRef: {kind: DataPlane, name:
+     default}`, `isProduction`. It's Ready at once.
+   - **A `ReleaseBinding` alone fails:** "namespaces … not found". The
+     data-plane namespace for (project, environment) is created by a
+     **`ProjectReleaseBinding`** (`spec.environment`, `owner.projectName`,
+     `projectRelease`), which Serendip already creates for `development`.
+   - **With both,** the Component was Ready in staging in **about 23 s**,
+     in namespace `dp-<org>-<project>-<environment>-<hash>`.
+2. **Promotion is a `ReleaseBinding` with the same `releaseName`.**
+   - **No pipeline check upstream:** staging wasn't in the project's
+     `DeploymentPipeline`, and the binding was accepted. Serendip enforces
+     the order (decision 2).
+   - **Today's pipeline:** one, `serendip`, with `promotionPaths:
+     [{sourceEnvironmentRef: development, targetEnvironmentRefs: []}]`,
+     shared by every project (`project.spec.deploymentPipelineRef`).
+3. **Overrides** live on the `ReleaseBinding`:
+   - **`componentTypeEnvironmentConfigs`:** what the component type's
+     `environmentConfigs` schema allows. For Serendip's
+     `serendip-service` type that's `replicas` (integer, minimum 0),
+     `resources` (requests and limits: cpu, memory) and `imagePullPolicy`
+     (an enum).
+   - **`workloadOverrides.container.env[]`** (`key`, `value` or
+     `valueFrom.secretKeyRef`), and `files[]`.
+   - **`traitEnvironmentConfigs`,** keyed by trait instance.
+   - **Verified:** staging ran 2 replicas and `SPIKE_ENV=staging`, through
+     an `env-configs` ConfigMap (`envFrom`). Development was untouched (1
+     replica, no variable).
+4. **Rollback** is patching `releaseName` to an older release.
+   - Promoting staging to a new release took **about 15 s**; patching back
+     was immediate.
+   - **Overrides survived both directions.**
+   - **Undeploy:** `state: Undeploy`, or delete the binding.
+5. **Releases come from auto-deploy.**
+   - **With `autoDeploy: true`,** a workload change makes a new
+     `ComponentRelease` named `<component>-<content hash>` and rebinds the
+     first environment only. Identical content reuses the same name.
+   - **With it off,** a workload change makes **no** release, and the
+     existing binding keeps running.
+   - **A release is `{componentType (embedded spec), workload, owner}`,**
+     so Serendip can create one itself (decision 2 amended).
+6. **Runtime reads through `serendipd`'s own Kubernetes client:**
+   - **`RenderedRelease.status.resources`** lists kind, name, namespace
+     and `healthStatus` (here a ConfigMap, Deployment, Service and
+     NetworkPolicy).
+   - **Events: `Client.List` loses their fields.** `kubernetes.Object`
+     keeps only `metadata`/`spec`/`status`/`data`, but an Event's
+     `reason`, `message` and `involvedObject` are top-level. A raw read is
+     needed (T007).
+   - **Pod logs with `follow=true`** stream chunked `text/plain` through
+     the client's transport, once the client's request timeout is lifted.
+     The client has no stream method yet (T007).
+7. **Schemas:**
+   - **The only component type installed** is Serendip's own
+     `serendip-service` (a `ClusterComponentType`). It has an
+     `environmentConfigs` schema and **no `parameters`**.
+   - **No `ClusterTrait`s are installed.** Trait forms appear only once a
+     trait is installed; the edge-1 forms are the per-environment
+     overrides.
+   - **Keywords in use:** `type`, `properties`, `enum`, `minimum`,
+     `default`, `$defs` and `$ref`. A small stdlib validator covers them.
+8. **Dependencies** are declared on the Workload: `spec.dependencies.endpoints[]`
+   (`component`, `project`, `name` (the endpoint), `visibility`
+   (`project` or `namespace`), `envBindings.address` and others).
+   - **Verified:** the binding reported "All 1 connections resolved", and
+     the caller got `BACKEND_URL=http://cmp-….svc.cluster.local:80`.
+   - **Serendip's `ComponentSpec` has no dependencies yet** (T009 adds
+     them).
+
 ## Decisions
 
 1. **Close RP-018 first.** **Done** before spec 020, at the user's
@@ -147,7 +221,19 @@ unless marked inferred.
      - **A Project's promotion order** (its spec gains a `pipeline`: the
        Environment IDs in order, or promotion paths) **becomes an
        OpenChoreo `DeploymentPipeline`.**
-     - **A `Deployment` becomes a `ReleaseBinding`,** with its overrides.
+     - **A `Deployment` becomes a `ReleaseBinding`,** with its overrides,
+       plus the Application's **`ProjectReleaseBinding`** for that
+       Environment, which creates its data-plane namespace (spike finding
+       1). The latter is created with the Application's first Deployment
+       there, and removed with its last.
+     - **Each Serendip Project gets its own `DeploymentPipeline`,**
+       replacing today's shared `serendip` pipeline, so promotion order is
+       per Project.
+     - **Releases:** while auto-deploy is on (the default), OpenChoreo
+       makes them and binds the first environment. With it off, Serendip
+       creates a release itself on request: a `ComponentRelease` snapshot
+       named `<component>-<content hash>`, like OpenChoreo's (spike
+       finding 5).
      - **Components stop auto-deploying** to the hard-coded `development`.
        The first Deployment in the pipeline's first environment replaces
        it, and existing Components get one in their former Environment
