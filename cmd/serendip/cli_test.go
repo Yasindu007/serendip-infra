@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/policy"
+	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
@@ -95,6 +97,7 @@ type world struct {
 	t        *testing.T
 	api      *httptest.Server
 	issuer   *fakeIssuer
+	db       *sql.DB
 	dir      string
 	envID    string
 	appID    string
@@ -113,7 +116,7 @@ func newWorld(t *testing.T) *world {
 	if err := sqlite.Migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	w := &world{t: t, issuer: newFakeIssuer(t), dir: t.TempDir()}
+	w := &world{t: t, issuer: newFakeIssuer(t), dir: t.TempDir(), db: db}
 	org, _ := sqlite.NewStore[resource.OrganizationSpec, resource.OrganizationStatus](db, resource.KindOrganization).Create(ctx,
 		resource.Resource[resource.OrganizationSpec, resource.OrganizationStatus]{Metadata: resource.Metadata{Name: "org"}})
 	proj, _ := sqlite.NewStore[resource.ProjectSpec, resource.ProjectStatus](db, resource.KindProject).Create(ctx,
@@ -139,7 +142,7 @@ func newWorld(t *testing.T) *world {
 	assistant := owner
 	assistant.Via = "serendip-mcp"
 	authn := tokenAuthn{"at-1": owner, "at-2": owner, "tok-ai": assistant}
-	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-ops": "ops"}, authn, nil, nil, nil,
+	srv := api.NewServer(db, event.NewInProcessBus(), map[string]string{"key-ops": "ops"}, authn, &reconcile.SecretReconciler{}, nil, nil,
 		api.WithResourceMetadata(api.ResourceMetadata{
 			Issuer: func() string { return w.issuer.srv.URL }, CLIClient: "serendip", AssistantClient: "serendip-mcp",
 		}))

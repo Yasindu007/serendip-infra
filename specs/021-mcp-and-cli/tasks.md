@@ -158,7 +158,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
 - **Then**: run `contract-guardian` and `go-reviewer` on T005–T008, then
   commit.
 
-## T009 [A] — End-to-end acceptance tests
+## T009 [A] — End-to-end acceptance tests ✅ 2026-10-22
 
 - **Do**: tests for spec acceptance criteria 1–10 in process. A person
   CLI session, an agent CLI script, stdio MCP, and remote MCP, all against
