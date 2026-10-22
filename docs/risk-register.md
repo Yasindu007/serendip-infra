@@ -48,6 +48,7 @@ purpose), **Closed** (fixed).
 | RP-025 | An exchanged assistant token can be exchanged again after its person signs out | Security (medium) | Open | Spec 021 T012 security review |
 | RP-026 | Tokens other ThunderID clients receive may be exchangeable into Serendip access | Security (low) | Open | Spec 021 T012 security review |
 | RP-027 | Tokens aren't bound to the Serendip server they were issued for | Security (medium) | Mitigated | Spec 021 T012 security review |
+| RP-028 | Migration 0008 re-parents Applications and changes what Environment-scope assignments cover, without audit rows | Audit | Decided | Spec 020 T003 |
 
 ---
 
@@ -505,3 +506,32 @@ purpose), **Closed** (fixed).
 - **Full fix:** bind tokens to the server with RFC 8707 (`resource=`).
   ThunderID needs a registered resource server for that (spec 021 T001
   finding 1); then `serendipd` checks the audience is its own.
+
+## RP-028 — Migration 0008 changes ownership without audit rows
+
+- **Kind:** audit. **Status:** Decided, 2026-10-22. **Found:** spec 020
+  T003 contract review.
+- **What:** migration 0008 (Azure-style environments, spec 020 plan
+  decision 2) makes changes no person or reconciler made:
+  - **It moves each Application** from its Environment up to the
+    Environment's Project (owner references, graph edges, a version
+    bump).
+  - **It creates a Deployment per Component** in that Environment.
+  - **Role assignments at an Environment** then cover deployments into
+    it, not the Applications that were under it. That changes what a
+    person decided when they made the assignment.
+- **No audit row is written,** as with 0006 (RP-016). This goes further
+  than 0006, and RP-016 said to revisit "when a migration needs to change
+  anything a person decided".
+- **Why decided this way:**
+  - **The change is fixed SQL in the repository,** applied once per
+    database, in the migration's transaction.
+  - **Every affected role assignment, and every Application it couldn't
+    move,** is written to the permanent `migration_notes` table. It's
+    logged when the migration is applied (`sqlite.logMigrationNotes`), so
+    the record survives the log.
+  - **Writing audit rows from SQL** would mean building each resource's
+    before and after documents in SQL, which is easy to get subtly wrong.
+- **Revisit:** if an operator needs migration changes in the audit trail
+  itself, migrations should gain a Go step that writes proper audit
+  rows.

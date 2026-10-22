@@ -62,7 +62,7 @@ Dependency sketch:
 - **Verify:** `go test ./core/...`; validation is table-tested.
 - **Then:** `contract-guardian`.
 
-## T003 — Migration 0008: Applications move up to their Project
+## T003 — Migration 0008: Applications move up to their Project ✅ 2026-10-22
 
 - **Do:**
   - **Re-parent** every Application owned by an Environment to that

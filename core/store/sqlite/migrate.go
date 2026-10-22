@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"log"
 	"path"
 	"sort"
 	"strconv"
@@ -53,8 +54,37 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		if err := applyMigration(ctx, db, version, name); err != nil {
 			return err
 		}
+		if err := logMigrationNotes(ctx, db, version); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// logMigrationNotes logs what a migration just applied wrote to
+// migration_notes: what it changed that people need to know, such as role
+// assignments whose meaning changed (0008). Logged once, when applied.
+func logMigrationNotes(ctx context.Context, db *sql.DB, version int) error {
+	var exists int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'migration_notes'`).Scan(&exists); err != nil {
+		return fmt.Errorf("sqlite: look for migration notes: %w", err)
+	}
+	if exists == 0 {
+		return nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT note FROM migration_notes WHERE migration = ? ORDER BY rowid`, version)
+	if err != nil {
+		return fmt.Errorf("sqlite: read migration %d notes: %w", version, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var note string
+		if err := rows.Scan(&note); err != nil {
+			return fmt.Errorf("sqlite: read migration %d notes: %w", version, err)
+		}
+		log.Printf("sqlite: migration %d: %s", version, note)
+	}
+	return rows.Err()
 }
 
 func migrationFilenames() ([]string, error) {
