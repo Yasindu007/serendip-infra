@@ -1,6 +1,38 @@
 # Plan 020: OpenChoreo's portal features in Serendip's own console
 
-Status: Draft, awaiting approval. Spec: `spec.md` (draft, 2026-10-20).
+Status: Draft, awaiting approval. Updated 2026-10-22 after spec 021
+(see "What changed since spec 021"). Spec: `spec.md` (draft, 2026-10-20).
+
+## What changed since spec 021 (2026-10-22)
+
+- **Parity is mechanical now.** Every new route enters `api/catalog` as a
+  CLI command and an MCP tool, or is excluded with a reason, and
+  `TestCatalogueCoversEveryRoute` fails otherwise. Spec acceptance
+  criterion 11 is met by construction and checked by that test.
+  `docs/cli-and-mcp.md` is regenerated.
+- **AI callers already exist:** an agent (spec 018) or a person's
+  assistant (`Via`, spec 021). Both meet `Principal.guarded()`:
+  - **Undeploying and removing a package** are deletes, so through MCP
+    they wait for a person.
+  - **Deploy, promote and rollback are writes,** decided by roles for AI
+    and people alike (spec criterion 3).
+- **Live log following is a stream; an MCP tool answers once** (decision
+  8, amended):
+  - **The CLI** gets `--follow`, printing the NDJSON stream line by line.
+  - **MCP** gets the non-following read (recent lines, `since` and
+    `tailLines`). `follow=true` is excluded from MCP with that reason.
+- **The ADR for the environment model is 0019.** 0017 and 0018 went to
+  spec 021.
+- **Today's mapping, found while re-reading the code:**
+  - Each Serendip Application is an OpenChoreo Project (`app-<hash>`).
+  - Each Component auto-deploys to one hard-coded OpenChoreo environment,
+    `development` (spec 011 decision 5, `names.go`).
+  - **Serendip's Environments aren't mapped to anything in OpenChoreo
+    yet.** Decision 2 has to add that mapping, not just re-parent
+    Applications.
+  - **Nothing enforces which kind may own an Application,** so the
+    re-parenting is a data migration of owner references (`0008`, the
+    next free number), plus the provider change.
 
 ## What the research found (OpenChoreo 1.3.1, 2026-10-20)
 
@@ -109,6 +141,17 @@ unless marked inferred.
      - **Undeploying** (deleting a `Deployment`) is a delete, so it goes
        through an Approval (spec 019). Agents' undeploys wait for a
        person.
+   - **The mapping to OpenChoreo** (settled by T001 and T002):
+     - **A Serendip Environment becomes an OpenChoreo `Environment`,** on
+       the existing data plane.
+     - **A Project's promotion order** (its spec gains a `pipeline`: the
+       Environment IDs in order, or promotion paths) **becomes an
+       OpenChoreo `DeploymentPipeline`.**
+     - **A `Deployment` becomes a `ReleaseBinding`,** with its overrides.
+     - **Components stop auto-deploying** to the hard-coded `development`.
+       The first Deployment in the pipeline's first environment replaces
+       it, and existing Components get one in their former Environment
+       during migration, so nothing running stops.
    - **Pipeline enforcement is Serendip's.** Upstream has none, so
      Serendip checks that a promotion follows the pipeline's
      `promotionPaths`. Skipping an environment is refused (400).
@@ -215,7 +258,8 @@ unless marked inferred.
      "not recommended on this machine" with the numbers, and still lets an
      Owner install it. The lighter edge-1 backend is a later spec.
 
-8. **Live log following streams with `fetch`, not `EventSource`.**
+8. **Live log following streams with `fetch`, not `EventSource`.** (CLI
+   and MCP: see "What changed since spec 021".)
    - The console must send `X-Serendip-Csrf: 1` on cookie requests
      (ADR 0013), and `EventSource` can't set headers.
    - So `GET .../logs?follow=true` answers chunked NDJSON, and the
@@ -332,10 +376,11 @@ type ApplicationPlatformProvider interface {
   pipeline; the NetworkPolicy).
 - **api:**
   - deployments, runtime, logs (streaming), schema, pipeline and platform
-    routes;
+    routes, each with an `api/catalog` entry (CLI and MCP);
   - `provider-instances` gets real behaviour;
   - readiness for optional capabilities;
   - route-table rules.
+- **cmd/serendip:** `--follow` streaming for logs.
 - **ui:**
   - a Deploy tab with the environment pipeline, plus promote and
     rollback;
@@ -346,7 +391,8 @@ type ApplicationPlatformProvider interface {
   - a Packages page;
   - the "unavailable" treatment.
 - **docs:**
-  - ADR 0017 (the environment model and direct-Kubernetes access);
+  - ADR 0019 (the environment model and direct-Kubernetes access);
+  - `docs/cli-and-mcp.md`, regenerated from the catalogue;
   - `application-platform.md`, `authorization.md`, `resource-model.md`;
   - the risk register (RP-018 and anything new).
 
