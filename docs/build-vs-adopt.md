@@ -49,7 +49,7 @@ Last updated: 2026-10-21.
 | local-path provisioner | Storage (edge-1) | ADR 0002 | Longhorn at 3 nodes |
 | cert-manager | OpenChoreo dependency | Spec 010 | |
 | WSO2 Agent Manager | AI agent identities (POC, beside Serendip) | Spec 018 | Not part of edge-1 |
-| MCP Go SDK (`modelcontextprotocol/go-sdk` v1.8.0) | MCP protocol (stdio and streamable HTTP) | ADR 0017, spec 021 | Chosen over hand-written, to avoid maintaining protocol churn ourselves. 9 modules, at most +2.4 MB; confined to `mcp/` |
+| MCP Go SDK (`modelcontextprotocol/go-sdk` v1.8.0) | MCP protocol (stdio and streamable HTTP) | ADR 0017, spec 021 | Chosen over hand-written, to avoid maintaining protocol churn ourselves. 9 modules, at most +2.4 MB; confined to `mcp/` (its `golang.org/x/sys` is also used directly by the CLI for an owner-only folder ACL on Windows) |
 
 ## Rejected (considered and turned down)
 

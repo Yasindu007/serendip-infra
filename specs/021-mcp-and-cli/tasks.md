@@ -168,14 +168,14 @@ T008) → T009 → T010 → T011 → T012 → T013.
   `api/mcp_acceptance_test.go`.
 - **Verify**: `go test -race ./...` is green.
 
-## T010 — Footprint
+## T010 — Footprint ✅ 2026-10-22
 
 - **Do**: measure `serendipd`'s idle memory with `/mcp` enabled against
   spec 019's baseline, and the stdio `serendip mcp` process at idle.
 - **Files**: `profiles/edge-1/bench/results/2026-10-xx-spec021-mcp/`.
 - **Verify**: rule 4 passes, and the numbers are recorded.
 
-## T011 — Real use
+## T011 — Real use ✅ 2026-10-22
 
 - **Do**, on `serendip-t018`:
   - a person runs `serendip login` against the real ThunderID (with

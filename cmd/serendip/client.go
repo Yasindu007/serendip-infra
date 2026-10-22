@@ -112,9 +112,8 @@ type credentials struct {
 }
 
 // configDir is where the CLI keeps its files: SERENDIP_CONFIG_DIR, or
-// "serendip" under the user's configuration directory. On Windows that is
-// under %AppData%, which the user profile already restricts to its owner
-// and administrators; a SERENDIP_CONFIG_DIR elsewhere must be as private.
+// "serendip" under the user's configuration directory. Every save makes
+// it private to its owner (makePrivate), wherever it is.
 func configDir(env func(string) string) (string, error) {
 	if d := env("SERENDIP_CONFIG_DIR"); d != "" {
 		return d, nil
@@ -159,6 +158,9 @@ func saveCredentials(dir string, c *credentials) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	if err := makePrivate(dir); err != nil {
+		return err
+	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
@@ -168,8 +170,8 @@ func saveCredentials(dir string, c *credentials) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	// On Windows Chmod only sets the read-only flag; the directory's ACL is
-	// what keeps the file private there.
+	// On Windows Chmod only sets the read-only flag; the file inherits the
+	// owner-only access list makePrivate gave its folder.
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return err

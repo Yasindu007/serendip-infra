@@ -52,7 +52,14 @@ Facts below were taken from the module cache and a build on 2026-10-21.
 | `golang.org/x/time` | v0.15.0 | BSD-3-Clause | Yes (`rate`) |
 | `golang.org/x/sys` | v0.41.0 | BSD-3-Clause | Yes (`cpu`) |
 
-That's **9 modules, all permissively licensed**. The SDK's JWT dependency
+That's **9 modules, all permissively licensed**.
+
+**Amended 2026-10-22 (spec 021 T011):** `cmd/serendip` also imports
+`golang.org/x/sys/windows` directly. It sets an owner-only access list on
+the CLI's configuration folder, because a folder's permissions on Windows
+come from its parents, and `%AppData%` can grant other accounts read
+access. The module was already in `go.mod` through the SDK; nothing new is
+downloaded. The SDK's JWT dependency
 (`golang-jwt`) is **not** linked.
 
 - **Correction:** spec 021's plan first said its OAuth code wouldn't be

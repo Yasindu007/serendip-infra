@@ -209,9 +209,11 @@ afterwards; claims read, tokens never printed.
        Windows doesn't, and a local install publishes
        `identity.localhost`.
      - **Credentials** are `credentials.json` (0600) under the user's
-       configuration directory, written by atomic rename. On Windows that's
-       `%AppData%`, which the user profile already restricts to its owner
-       and administrators, so no custom ACL code was added.
+       configuration directory, written by atomic rename. **Corrected in
+       T011:** `%AppData%` is *not* necessarily owner-only (on the
+       development machine a sandbox group can read it). So every save
+       gives the folder a protected, owner-only access list on Windows,
+       and 0700 elsewhere (`cmd/serendip/private_*.go`).
      - **Refreshes are serialised by a lock file:** rotated refresh tokens
        are single-use, and ThunderID revokes the family on a replay.
      - **A Secret's value is never taken from the command line,** only
