@@ -97,7 +97,7 @@ T006's route rule.
 - **Verify:** `go test ./core/policy/ ./api/`. The route-table and
   delete-action tests cover the new routes.
 
-## T005 — The OpenChoreo provider: environments, pipelines, deployments
+## T005 — The OpenChoreo provider: environments, pipelines, deployments ✅ 2026-10-23
 
 - **Do:**
   - **Environment** to OpenChoreo `Environment`, on the existing data

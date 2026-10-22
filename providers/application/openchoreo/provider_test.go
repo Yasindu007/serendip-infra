@@ -22,7 +22,8 @@ func testApp() resource.Application {
 }
 
 func testComp(spec resource.ComponentSpec) resource.Component {
-	return resource.Component{Metadata: resource.Metadata{ID: testCompID, Name: "web"}, Spec: spec}
+	return resource.Component{Metadata: resource.Metadata{ID: testCompID, Name: "web",
+		OwnerRefs: []resource.OwnerRef{{Kind: resource.KindApplication, ID: testAppID}}}, Spec: spec}
 }
 
 var webSpec = resource.ComponentSpec{
@@ -39,8 +40,8 @@ func readyStatus(status, reason string) json.RawMessage {
 	}})
 }
 
-func TestEnsureApplication_FreshCreatesProjectAndBinding(t *testing.T) {
-	api := newFakeAPI()
+func TestEnsureApplication_CreatesTheProjectOnly(t *testing.T) {
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 
 	ready, reason, _, err := p.EnsureApplication(context.Background(), testApp())
@@ -50,7 +51,6 @@ func TestEnsureApplication_FreshCreatesProjectAndBinding(t *testing.T) {
 	if ready || reason != reconcile.ReasonProgressing {
 		t.Errorf("fresh EnsureApplication = (%v, %q), want (false, Progressing)", ready, reason)
 	}
-
 	proj, ok := api.objects[nsItem("projects", projectName(testAppID))]
 	if !ok {
 		t.Fatal("Project not created")
@@ -60,38 +60,63 @@ func TestEnsureApplication_FreshCreatesProjectAndBinding(t *testing.T) {
 		Type                  struct{ Kind, Name string }
 	}
 	json.Unmarshal(proj.Spec, &projSpec)
+	// No Project owner: the shared pipeline of before spec 020.
 	if projSpec.DeploymentPipelineRef.Name != deploymentPipeline || projSpec.Type.Kind != "ClusterProjectType" || projSpec.Type.Name != projectTypeName {
 		t.Errorf("Project spec = %s", proj.Spec)
 	}
 	if proj.Metadata.Labels[labelSerendipID] != testAppID || proj.Metadata.Labels[labelSerendipName] != "shop" {
 		t.Errorf("Project labels = %v", proj.Metadata.Labels)
 	}
-
-	prb, ok := api.objects[nsItem("projectreleasebindings", projectReleaseBindingName(testAppID))]
-	if !ok {
-		t.Fatal("ProjectReleaseBinding not created")
-	}
-	var prbSpec struct {
-		Owner       ownerRef `json:"owner"`
-		Environment string   `json:"environment"`
-	}
-	json.Unmarshal(prb.Spec, &prbSpec)
-	if prbSpec.Owner.ProjectName != projectName(testAppID) || prbSpec.Environment != environmentName {
-		t.Errorf("ProjectReleaseBinding spec = %s", prb.Spec)
+	// Where it runs is each Deployment's business: no environment binding.
+	for key := range api.objects {
+		if strings.Contains(key, "/projectreleasebindings/") {
+			t.Errorf("EnsureApplication created %s", key)
+		}
 	}
 }
 
-func TestEnsureApplication_ReadyBinding(t *testing.T) {
-	api := newFakeAPI()
+func TestEnsureApplication_UsesItsProjectsPipeline(t *testing.T) {
+	api := newFakeAPI().withComponentType()
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
+	app := testApp()
+	app.Metadata.OwnerRefs = []resource.OwnerRef{{Kind: resource.KindProject, ID: "proj-1"}}
+	if _, _, _, err := p.EnsureApplication(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	var projSpec struct {
+		DeploymentPipelineRef struct{ Name string } `json:"deploymentPipelineRef"`
+	}
+	json.Unmarshal(api.objects[nsItem("projects", projectName(testAppID))].Spec, &projSpec)
+	if projSpec.DeploymentPipelineRef.Name != pipelineName("proj-1") {
+		t.Errorf("pipeline = %q, want the Project's own", projSpec.DeploymentPipelineRef.Name)
+	}
+	if _, ok := api.objects[nsItem("deploymentpipelines", pipelineName("proj-1"))]; !ok {
+		t.Error("the Project's pipeline wasn't created for the Application to reference")
+	}
+	// An existing pipeline, with paths written by the Project, is left alone.
+	key := nsItem("deploymentpipelines", pipelineName("proj-1"))
+	pl := api.objects[key]
+	pl.Spec = mustJSON(map[string]any{"promotionPaths": []any{map[string]any{"sourceEnvironmentRef": map[string]string{"name": "env-x"}}}})
+	api.objects[key] = pl
+	if _, _, _, err := p.EnsureApplication(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(api.objects[key].Spec), "env-x") {
+		t.Errorf("the existing pipeline was overwritten: %s", api.objects[key].Spec)
+	}
+}
+
+func TestEnsureApplication_ReadyProject(t *testing.T) {
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := p.EnsureApplication(context.Background(), testApp()); err != nil {
 		t.Fatal(err)
 	}
-	key := nsItem("projectreleasebindings", projectReleaseBindingName(testAppID))
+	key := nsItem("projects", projectName(testAppID))
 	obj := api.objects[key]
-	obj.Status = readyStatus("True", "Ready")
+	obj.Status = readyStatus("True", "Reconciled")
 	api.objects[key] = obj
-	api.calls = nil
+	api.calls, api.writes = nil, 0
 
 	ready, reason, _, err := p.EnsureApplication(context.Background(), testApp())
 	if err != nil {
@@ -100,21 +125,48 @@ func TestEnsureApplication_ReadyBinding(t *testing.T) {
 	if !ready || reason != reconcile.ReasonDeployed {
 		t.Errorf("EnsureApplication = (%v, %q), want (true, Deployed)", ready, reason)
 	}
-	if api.count(http.MethodPost) != 0 || api.writes != 2 {
-		t.Errorf("second ensure stored something (writes %d, calls %v), want only the first ensure's 2", api.writes, api.calls)
+	if api.count(http.MethodPost) != 0 || api.writes != 0 {
+		t.Errorf("second ensure stored something (writes %d, calls %v)", api.writes, api.calls)
+	}
+}
+
+// Before spec 020 every Application had a binding to one environment. It's
+// kept while one of its Components still runs there, and removed once
+// their Deployments have taken over.
+func TestEnsureApplication_RemovesTheLegacyBindingWhenUnused(t *testing.T) {
+	api := newFakeAPI().withComponentType()
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
+	legacyPRB := nsItem("projectreleasebindings", projectReleaseBindingName(testAppID))
+	legacyBinding := nsItem("releasebindings", releaseBindingName(testCompID))
+	api.put(legacyPRB, kubernetes.Object{Metadata: kubernetes.ObjectMeta{Name: projectReleaseBindingName(testAppID)}})
+	api.put(legacyBinding, kubernetes.Object{Metadata: kubernetes.ObjectMeta{Name: releaseBindingName(testCompID)},
+		Spec: mustJSON(map[string]any{"environment": environmentName, "owner": ownerRef{ProjectName: projectName(testAppID), ComponentName: componentName(testCompID)}})})
+
+	if _, _, _, err := p.EnsureApplication(context.Background(), testApp()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := api.objects[legacyPRB]; !ok {
+		t.Fatal("the legacy binding went while a Component still runs there")
+	}
+	delete(api.objects, legacyBinding)
+	if _, _, _, err := p.EnsureApplication(context.Background(), testApp()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := api.objects[legacyPRB]; ok {
+		t.Error("the unused legacy binding wasn't removed")
 	}
 }
 
 func TestEnsureComponent_FreshCreatesComponentAndWorkload(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 
 	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
 	if err != nil {
 		t.Fatalf("EnsureComponent() = %v", err)
 	}
-	if ready || reason != reconcile.ReasonProgressing {
-		t.Errorf("fresh EnsureComponent = (%v, %q), want (false, Progressing) while no ReleaseBinding exists", ready, reason)
+	if !ready || reason != "Released" {
+		t.Errorf("fresh EnsureComponent = (%v, %q), want (true, Released): it runs nowhere until deployed", ready, reason)
 	}
 
 	comp, ok := api.objects[nsItem("components", componentName(testCompID))]
@@ -127,7 +179,7 @@ func TestEnsureComponent_FreshCreatesComponentAndWorkload(t *testing.T) {
 		ComponentType struct{ Kind, Name string }
 	}
 	json.Unmarshal(comp.Spec, &compSpec)
-	if compSpec.Owner.ProjectName != projectName(testAppID) || !compSpec.AutoDeploy ||
+	if compSpec.Owner.ProjectName != projectName(testAppID) || compSpec.AutoDeploy ||
 		compSpec.ComponentType.Kind != "ClusterComponentType" || compSpec.ComponentType.Name != "deployment/serendip-service" {
 		t.Errorf("Component spec = %s", comp.Spec)
 	}
@@ -149,7 +201,7 @@ func TestEnsureComponent_FreshCreatesComponentAndWorkload(t *testing.T) {
 }
 
 func TestEnsureComponent_UnchangedWorkloadStoresNothing(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
@@ -169,28 +221,26 @@ func TestEnsureComponent_UnchangedWorkloadStoresNothing(t *testing.T) {
 	}
 }
 
-func TestEnsureComponent_ChangedSpecIsAppliedAndReportsProgressing(t *testing.T) {
-	api := newFakeAPI()
+func TestEnsureComponent_ChangedSpecIsANewRelease(t *testing.T) {
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
 	}
 	wlPath := nsItem("workloads", componentName(testCompID))
 	genBefore := api.objects[wlPath].Metadata.Generation
+	before, _ := p.Releases(context.Background(), testComp(webSpec))
 
 	changed := resource.ComponentSpec{
 		Image: "nginx:1.28-alpine",
 		Ports: []resource.ComponentPort{{Name: "metrics", Port: 9090}},
 	}
-	// A Ready binding for the previous release must not make the update
-	// look Deployed in the same pass that changed the Workload.
-	api.put(nsItem("releasebindings", releaseBindingName(testCompID)), kubernetes.Object{Status: readyStatus("True", "Ready")})
-	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(changed))
+	ready, reason, msg, err := ensureComp(p, context.Background(), testApp(), testComp(changed))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ready || reason != reconcile.ReasonProgressing {
-		t.Errorf("after change = (%v, %q), want (false, Progressing)", ready, reason)
+	if !ready || reason != "Released" {
+		t.Errorf("after change = (%v, %q), want (true, Released)", ready, reason)
 	}
 	if api.objects[wlPath].Metadata.Generation == genBefore {
 		t.Error("Workload generation unchanged; the spec change was not applied")
@@ -206,62 +256,14 @@ func TestEnsureComponent_ChangedSpecIsAppliedAndReportsProgressing(t *testing.T)
 	if _, ok := got.Endpoints["http"]; ok || got.Endpoints["metrics"].Port != 9090 || got.Endpoints["metrics"].Type != "TCP" {
 		t.Errorf("endpoints = %+v, want only metrics", got.Endpoints)
 	}
-
-	// The next pass with no further change is not "rolling out" again.
-	api.put(nsItem("releasebindings", releaseBindingName(testCompID)), kubernetes.Object{})
-	if _, _, msg, _ := ensureComp(p, context.Background(), testApp(), testComp(changed)); msg == "rolling out updated workload" {
-		t.Error("unchanged second pass still reports a fresh rollout")
-	}
-}
-
-func TestEnsureComponent_ReleaseBindingStatusMapping(t *testing.T) {
-	tests := []struct {
-		status, reason string
-		wantReady      bool
-		wantReason     string
-	}{
-		{"True", "Ready", true, reconcile.ReasonDeployed},
-		{"False", "ResourcesProgressing", false, reconcile.ReasonProgressing},
-		{"False", "ResourcesNotReady", false, reconcile.ReasonProgressing},
-		{"False", "ResourcesDegraded", false, reconcile.ReasonDeployFailed},
-		{"False", "ResourceApplyFailed", false, reconcile.ReasonDeployFailed},
-		{"False", "RenderingFailed", false, reconcile.ReasonDeployFailed},
-		{"False", "EnvironmentNotFound", false, reconcile.ReasonDeployFailed},
-		{"False", "DataPlaneNotFound", false, reconcile.ReasonDeployFailed},
-		{"Unknown", "SomethingNew", false, reconcile.ReasonProgressing},
-	}
-	for _, tt := range tests {
-		t.Run(tt.reason, func(t *testing.T) {
-			api := newFakeAPI()
-			putBoundRelease(api, webSpec, readyStatus(tt.status, tt.reason))
-			p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
-
-			ready, reason, message, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if ready != tt.wantReady || reason != tt.wantReason {
-				t.Errorf("= (%v, %q), want (%v, %q)", ready, reason, tt.wantReady, tt.wantReason)
-			}
-			if !strings.Contains(message, tt.reason) || !strings.Contains(message, "upstream detail") {
-				t.Errorf("message = %q, want upstream reason and message carried", message)
-			}
-		})
-	}
-}
-
-func TestEnsureComponent_NoReadyConditionYetIsProgressing(t *testing.T) {
-	api := newFakeAPI()
-	putBoundRelease(api, webSpec, nil)
-	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
-	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
-	if err != nil || ready || reason != reconcile.ReasonProgressing {
-		t.Errorf("= (%v, %q, %v), want (false, Progressing, nil)", ready, reason, err)
+	after, _ := p.Releases(context.Background(), testComp(changed))
+	if len(before) != 1 || len(after) != 2 || !strings.Contains(msg, after[0].Name) && !strings.Contains(msg, after[1].Name) {
+		t.Errorf("releases before %v, after %v, message %q: want one new release, named", before, after, msg)
 	}
 }
 
 func TestEnsureComponent_ZeroPortsUnsupportedWithoutAPICalls(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(resource.ComponentSpec{Image: "busybox"}))
 	if err != nil || ready || reason != reconcile.ReasonUnsupported {
@@ -273,7 +275,7 @@ func TestEnsureComponent_ZeroPortsUnsupportedWithoutAPICalls(t *testing.T) {
 }
 
 func TestEnsureComponent_MovedBetweenApplicationsUnsupported(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err != nil {
 		t.Fatal(err)
@@ -286,7 +288,7 @@ func TestEnsureComponent_MovedBetweenApplicationsUnsupported(t *testing.T) {
 }
 
 func TestEnsureComponent_APIErrorReturned(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	api.failPath = namespacedPath("components")
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec)); err == nil {
@@ -295,7 +297,7 @@ func TestEnsureComponent_APIErrorReturned(t *testing.T) {
 }
 
 func TestDelete_RemovesObjectAndIgnoresNotFound(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, _, _, err := p.EnsureApplication(context.Background(), testApp()); err != nil {
 		t.Fatal(err)
@@ -328,7 +330,7 @@ func TestDelete_RemovesObjectAndIgnoresNotFound(t *testing.T) {
 }
 
 func TestDelete_APIErrorReturned(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	api.failPath = namespacedPath("components")
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if err := p.DeleteComponent(context.Background(), resource.Component{Metadata: resource.Metadata{ID: testCompID}}); err == nil {
@@ -356,44 +358,6 @@ func TestMapReady_UnparseableStatus(t *testing.T) {
 	ready, reason, message := mapReady(kubernetes.Object{Status: json.RawMessage(`{"conditions":"oops"}`)})
 	if ready || reason != reconcile.ReasonProgressing || !strings.Contains(message, "not parseable") {
 		t.Errorf("= (%v, %q, %q), want (false, Progressing, parse message)", ready, reason, message)
-	}
-}
-
-// putBoundRelease stores a ReleaseBinding pointing at a ComponentRelease
-// whose workload snapshot was cut from spec.
-func putBoundRelease(api *fakeAPI, spec resource.ComponentSpec, status json.RawMessage) {
-	api.put(nsItem("releasebindings", releaseBindingName(testCompID)), kubernetes.Object{
-		Metadata: kubernetes.ObjectMeta{Name: releaseBindingName(testCompID)},
-		Spec:     mustJSON(map[string]string{"releaseName": "rel-1"}),
-		Status:   status,
-	})
-	api.put(nsItem("componentreleases", "rel-1"), kubernetes.Object{
-		Spec: mustJSON(map[string]any{"workload": desiredWorkload(projectName(testAppID), componentName(testCompID), spec)}),
-	})
-}
-
-func TestEnsureComponent_ReadyBindingForStaleReleaseIsProgressing(t *testing.T) {
-	api := newFakeAPI()
-	old := webSpec
-	old.Image = "nginx:1.26-alpine"
-	putBoundRelease(api, old, readyStatus("True", "Ready"))
-	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
-
-	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
-	if err != nil || ready || reason != reconcile.ReasonProgressing {
-		t.Errorf("= (%v, %q, %v), want (false, Progressing, nil) while the bound release predates the spec", ready, reason, err)
-	}
-}
-
-func TestEnsureComponent_BoundReleaseMissingIsProgressing(t *testing.T) {
-	api := newFakeAPI()
-	putBoundRelease(api, webSpec, readyStatus("True", "Ready"))
-	delete(api.objects, nsItem("componentreleases", "rel-1"))
-	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
-
-	ready, reason, _, err := ensureComp(p, context.Background(), testApp(), testComp(webSpec))
-	if err != nil || ready || reason != reconcile.ReasonProgressing {
-		t.Errorf("= (%v, %q, %v), want (false, Progressing, nil)", ready, reason, err)
 	}
 }
 

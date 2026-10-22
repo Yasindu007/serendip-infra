@@ -106,6 +106,40 @@ func (f *fakeAPI) apply(t *testing.T, w http.ResponseWriter, r *http.Request) {
 
 func newFakeAPI() *fakeAPI { return &fakeAPI{objects: map[string]kubernetes.Object{}} }
 
+// collectionPlurals are the collections the fake lists from its objects.
+var collectionPlurals = []string{"releasebindings", "componentreleases", "projectreleasebindings", "deploymentpipelines", "environments"}
+
+// collection returns the objects directly under path, when path names one
+// of collectionPlurals. The caller holds f.mu.
+func (f *fakeAPI) collection(path string) ([]kubernetes.Object, bool) {
+	known := false
+	for _, plural := range collectionPlurals {
+		if path == namespacedPath(plural) {
+			known = true
+		}
+	}
+	if !known {
+		return nil, false
+	}
+	items := []kubernetes.Object{}
+	for key, obj := range f.objects {
+		if rest, ok := strings.CutPrefix(key, path+"/"); ok && !strings.Contains(rest, "/") {
+			items = append(items, obj)
+		}
+	}
+	return items, true
+}
+
+// withComponentType stores the component type releases embed, as the
+// platform defaults would have.
+func (f *fakeAPI) withComponentType() *fakeAPI {
+	f.objects[clusterPath("clustercomponenttypes")+"/"+componentTypeName] = kubernetes.Object{
+		APIVersion: apiVersion, Kind: "ClusterComponentType",
+		Metadata: kubernetes.ObjectMeta{Name: componentTypeName}, Spec: mustJSON(componentTypeSpec()),
+	}
+	return f
+}
+
 func (f *fakeAPI) put(path string, obj kubernetes.Object) { f.objects[path] = obj }
 
 func (f *fakeAPI) count(method string) int {
@@ -148,6 +182,13 @@ func (f *fakeAPI) handler(t *testing.T) http.HandlerFunc {
 			}
 			obj, ok := f.objects[r.URL.Path]
 			if !ok {
+				// A collection lists what's stored under it, as a real API
+				// server would.
+				if items, isList := f.collection(r.URL.Path); isList {
+					f.lastQuery = r.URL.RawQuery
+					json.NewEncoder(w).Encode(map[string]any{"items": items})
+					return
+				}
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}

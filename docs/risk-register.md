@@ -49,6 +49,7 @@ purpose), **Closed** (fixed).
 | RP-026 | Tokens other ThunderID clients receive may be exchangeable into Serendip access | Security (low) | Open | Spec 021 T012 security review |
 | RP-027 | Tokens aren't bound to the Serendip server they were issued for | Security (medium) | Mitigated | Spec 021 T012 security review |
 | RP-028 | Migration 0008 re-parents Applications and changes what Environment-scope assignments cover, without audit rows | Audit | Decided | Spec 020 T003 |
+| RP-029 | Release listing scans every release, and a component-type change re-releases every Component | Performance | Accepted | Spec 020 T005 review |
 
 ---
 
@@ -535,3 +536,25 @@ purpose), **Closed** (fixed).
 - **Revisit:** if an operator needs migration changes in the audit trail
   itself, migrations should gain a Go step that writes proper audit
   rows.
+
+## RP-029 — Release listing scans every release; a type change re-releases everything
+
+- **Kind:** performance. **Status:** Accepted, 2026-10-23. **Found:**
+  spec 020 T005 reviews.
+- **What:**
+  - **Listing a Component's releases reads every release in the
+    namespace,** and filters by owner in `serendipd`. Releases the
+    platform made before spec 020 carry no labels, so a label selector
+    would miss them, and they're valid rollback targets. Each release
+    embeds the whole component type spec. The legacy-binding cleanup also
+    lists every binding on each Application reconcile.
+  - **A release is named after its whole content,** the component type's
+    spec included. So an OpenChoreo upgrade that changes the component
+    type, or a Serendip change to the release format, gives every
+    Component a new release on its next reconcile. That's intended (the
+    release is a different thing), but it's a burst of writes.
+- **Why accepted:** edge-1 runs tens of Components with a few releases
+  each, so a list is small. Release creation is idempotent and rate-free.
+- **Revisit:** when a list costs measurable time on the T470, or
+  releases exceed a few hundred. Options are labelling legacy releases
+  once, pruning old releases, or a release index.

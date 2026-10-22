@@ -50,3 +50,33 @@ func serendipLabels(id, name string) map[string]string {
 	}
 	return labels
 }
+
+// Names for Environments, pipelines, deployments and releases (spec 020),
+// derived from Serendip IDs like the others. OpenChoreo shortens the
+// data-plane namespace it derives from project and environment names
+// itself (T001 spike), so these only need to be valid object names.
+
+// environmentObjectName is the OpenChoreo Environment for a Serendip
+// Environment.
+func environmentObjectName(envID string) string { return "env-" + shortHash(envID) }
+
+// pipelineName is the DeploymentPipeline for a Serendip Project.
+func pipelineName(projectID string) string { return "pl-" + shortHash(projectID) }
+
+// projectEnvBindingName is the ProjectReleaseBinding giving an
+// Application's project its data-plane namespace in one Environment.
+func projectEnvBindingName(project, envID string) string {
+	return project + "-" + environmentObjectName(envID)
+}
+
+// deploymentBindingName is the ReleaseBinding running a Component in one
+// Environment: a Serendip Deployment.
+func deploymentBindingName(compID, envID string) string {
+	return componentName(compID) + "-" + environmentObjectName(envID)
+}
+
+// releaseObjectName names a release after its content, so creating the
+// same release twice is a no-op.
+func releaseObjectName(compID string, content []byte) string {
+	return componentName(compID) + "-" + shortHash(string(content))
+}

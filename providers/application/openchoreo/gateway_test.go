@@ -30,7 +30,7 @@ func dataPlanePath() string {
 }
 
 func TestEnsureComponent_ExposureMapsToEndpointTypeAndVisibility(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, err := p.EnsureComponent(context.Background(), testApp(), testComp(exposedSpec)); err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestEnsureComponent_ExposureMapsToEndpointTypeAndVisibility(t *testing.T) {
 // server drops the field Serendip no longer applies, so no explicit null is
 // needed (or sent).
 func TestEnsureComponent_UnexposingAppliesWithoutVisibility(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	if _, err := p.EnsureComponent(context.Background(), testApp(), testComp(exposedSpec)); err != nil {
 		t.Fatal(err)
@@ -58,8 +58,9 @@ func TestEnsureComponent_UnexposingAppliesWithoutVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if obs.Reason != reconcile.ReasonProgressing {
-		t.Errorf("reason = %q, want Progressing right after the spec change", obs.Reason)
+	// A spec change is a new release, ready to deploy.
+	if !obs.Ready || obs.Reason != "Released" || !strings.Contains(obs.Message, "release "+componentName(testCompID)+"-") {
+		t.Errorf("after the change = (%v, %q, %q), want a new release", obs.Ready, obs.Reason, obs.Message)
 	}
 	wl := api.lastApply(t, nsItem("workloads", componentName(testCompID)))
 	if strings.Contains(string(wl.Spec), "visibility") {
@@ -80,10 +81,11 @@ type routeOpt struct {
 }
 
 // deployedExposed builds the cluster state of a deployed, exposed
-// Component and returns its observation.
-func deployedExposed(t *testing.T, o routeOpt) (reconcile.ComponentObservation, *fakeAPI) {
+// Component and returns what observeReachability makes of its binding
+// (Deploy asks only once the binding is Ready).
+func deployedExposed(t *testing.T, o routeOpt) (reconcile.Reachability, *fakeAPI) {
 	t.Helper()
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	api.lists = map[string][]kubernetes.Object{}
 
 	status := "True"
@@ -137,15 +139,23 @@ func deployedExposed(t *testing.T, o routeOpt) (reconcile.ComponentObservation, 
 	}
 	api.lists[routesPath] = routes
 
-	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
-	obs, err := p.EnsureComponent(context.Background(), testApp(), testComp(exposedSpec))
-	if err != nil {
-		t.Fatalf("EnsureComponent() = %v", err)
-	}
-	return obs, api
+	return observe(t, api), api
 }
 
-func TestEnsureComponent_ReachabilityObservation(t *testing.T) {
+// observe runs observeReachability over the stored binding and
+// application binding.
+func observe(t *testing.T, api *fakeAPI) reconcile.Reachability {
+	t.Helper()
+	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
+	binding := api.objects[nsItem("releasebindings", releaseBindingName(testCompID))]
+	reach, err := p.observeReachability(context.Background(), projectReleaseBindingName(testAppID), testComp(exposedSpec), binding, exposedPorts(exposedSpec))
+	if err != nil {
+		t.Fatalf("observeReachability() = %v", err)
+	}
+	return reach
+}
+
+func TestObserveReachability(t *testing.T) {
 	tests := []struct {
 		name       string
 		opt        routeOpt
@@ -160,27 +170,23 @@ func TestEnsureComponent_ReachabilityObservation(t *testing.T) {
 		{"acceptance unknown", routeOpt{accepted: "Unknown"}, false, reconcile.ReasonPending},
 		{"no URL published yet", routeOpt{noURL: true}, false, reconcile.ReasonPending},
 		{"cell namespace not reported", routeOpt{noCellNamespace: true}, false, reconcile.ReasonPending},
-		{"workload not deployed", routeOpt{bindingNotReady: true}, false, reconcile.ReasonPending},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			obs, _ := deployedExposed(t, tt.opt)
-			if obs.Reachable == nil {
-				t.Fatal("Reachable = nil, want an observation for an exposed component")
-			}
-			if obs.Reachable.Reachable != tt.wantReach || obs.Reachable.Reason != tt.wantReason {
-				t.Errorf("Reachable = {%v, %s, %q}, want {%v, %s}", obs.Reachable.Reachable, obs.Reachable.Reason, obs.Reachable.Message, tt.wantReach, tt.wantReason)
+			reach, _ := deployedExposed(t, tt.opt)
+			if reach.Reachable != tt.wantReach || reach.Reason != tt.wantReason {
+				t.Errorf("Reachable = {%v, %s, %q}, want {%v, %s}", reach.Reachable, reach.Reason, reach.Message, tt.wantReach, tt.wantReason)
 			}
 			if tt.wantReach {
-				if len(obs.Reachable.Endpoints) != 1 || obs.Reachable.Endpoints[0] != (resource.ComponentEndpointStatus{Name: "http", URL: testInvokeURL}) {
-					t.Errorf("Endpoints = %+v", obs.Reachable.Endpoints)
+				if len(reach.Endpoints) != 1 || reach.Endpoints[0] != (resource.ComponentEndpointStatus{Name: "http", URL: testInvokeURL}) {
+					t.Errorf("Endpoints = %+v", reach.Endpoints)
 				}
 			}
 		})
 	}
 }
 
-func TestEnsureComponent_RouteListUsesComponentAndVisibilitySelector(t *testing.T) {
+func TestObserveReachability_RouteListUsesComponentAndVisibilitySelector(t *testing.T) {
 	_, api := deployedExposed(t, routeOpt{})
 	sel, err := url.ParseQuery(api.lastQuery)
 	if err != nil {
@@ -193,9 +199,8 @@ func TestEnsureComponent_RouteListUsesComponentAndVisibilitySelector(t *testing.
 }
 
 func TestEnsureComponent_NotExposedMakesNoRouteCalls(t *testing.T) {
-	api := newFakeAPI()
+	api := newFakeAPI().withComponentType()
 	api.lists = map[string][]kubernetes.Object{routesPath: nil}
-	putBoundRelease(api, webSpec, readyStatus("True", "Ready"))
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 
 	obs, err := p.EnsureComponent(context.Background(), testApp(), testComp(webSpec))

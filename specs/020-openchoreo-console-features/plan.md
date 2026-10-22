@@ -229,11 +229,29 @@ Components were restored exactly.
      - **Each Serendip Project gets its own `DeploymentPipeline`,**
        replacing today's shared `serendip` pipeline, so promotion order is
        per Project.
-     - **Releases:** while auto-deploy is on (the default), OpenChoreo
-       makes them and binds the first environment. With it off, Serendip
-       creates a release itself on request: a `ComponentRelease` snapshot
-       named `<component>-<content hash>`, like OpenChoreo's (spike
-       finding 5).
+     - **Releases: Serendip creates every one, and auto-deploy is off**
+       (settled in T005, after a live check):
+       - **A release Serendip writes is accepted and runs.** A
+         `ComponentRelease` of `{componentType: {kind, name, spec copied
+         from the ClusterComponentType}, owner, workload}` (with no owner
+         inside the workload, which the CRD refuses) was Ready in a
+         scratch environment in 13 s.
+       - **So Components are created with `autoDeploy: false`:** the
+         platform neither makes releases nor binds the first environment
+         itself.
+       - **Each Component's spec change becomes a release named
+         `<component>-<content hash>`,** so the same spec is the same
+         release.
+       - **Serendip writes every binding.** That avoids two writers on one
+         binding (the platform's auto-deploy and Serendip's overrides), and
+         the ambiguous "first environment" of a pipeline without paths.
+       - **A Component's readiness changes meaning.** It's Ready once its
+         current spec is a release; running, health and endpoints belong
+         to each Deployment.
+       - **What ran before keeps running.** Turning auto-deploy off leaves
+         the existing `development` binding in place. A Deployment that's
+         Ready removes its Component's legacy binding, and an
+         Application's legacy project binding goes when none remain.
      - **Components stop auto-deploying** to the hard-coded `development`.
        The first Deployment in the pipeline's first environment replaces
        it, and existing Components get one in their former Environment

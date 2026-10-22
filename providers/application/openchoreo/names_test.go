@@ -2,6 +2,7 @@ package openchoreo
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,30 @@ func TestSerendipLabels(t *testing.T) {
 	}
 	if got := serendipLabels("id-1", "shop"); got[labelSerendipName] != "shop" {
 		t.Errorf("serendipLabels with name = %v", got)
+	}
+}
+
+// Spec 020's names are valid object names for any Serendip IDs.
+func TestDeploymentNamesAreObjectNames(t *testing.T) {
+	ids := []string{"01a1645c-bc2e-72fa-bcdc-bab12e0a62a4", "x", strings.Repeat("z", 128)}
+	label := regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	for _, a := range ids {
+		for _, b := range ids {
+			for _, n := range []string{
+				environmentObjectName(a), pipelineName(a),
+				projectEnvBindingName(projectName(a), b), deploymentBindingName(a, b),
+				releaseObjectName(a, []byte(b)),
+			} {
+				if len(n) > 63 || !label.MatchString(n) {
+					t.Errorf("%q isn't a valid object name", n)
+				}
+			}
+		}
+	}
+	if releaseObjectName("c", []byte("one")) == releaseObjectName("c", []byte("two")) {
+		t.Error("different content gave the same release name")
+	}
+	if deploymentBindingName("c", "dev") == deploymentBindingName("c", "prod") {
+		t.Error("two Environments gave one binding name")
 	}
 }

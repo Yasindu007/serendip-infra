@@ -68,3 +68,15 @@ Notes:
   `healthStatus`.
 - **Workload dependencies:** `spec.dependencies.endpoints[]`, resolved
   into an address environment variable (`ConnectionsResolved`).
+- **Serendip-made releases (spec 020 T005, verified):** a `ComponentRelease`
+  with `{componentType: {kind, name, spec}, owner, workload}` that
+  Serendip writes is accepted and runs. The embedded `spec` is the
+  `ClusterComponentType`'s, which is exactly what the controller embeds.
+  `workload` takes `container` and `endpoints` only; an `owner` there is
+  refused (strict decoding).
+- **A `DeploymentPipeline` with `promotionPaths: []`** is accepted and
+  Available.
+- **Since spec 020,** Serendip's Components have `autoDeploy: false`.
+  Serendip writes the releases and every binding (`<component>-env-<hash>`,
+  plus `<project>-env-<hash>` project bindings, and `pl-<hash>` pipelines
+  per Project).

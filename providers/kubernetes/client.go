@@ -31,6 +31,11 @@ type ObjectMeta struct {
 	// harmless (ignored), and it's what status.observedGeneration is
 	// compared against.
 	Generation int64 `json:"generation,omitempty"`
+	// CreationTimestamp is server-set and read-only (RFC 3339).
+	CreationTimestamp string `json:"creationTimestamp,omitempty"`
+	// DeletionTimestamp is set while an object with finalizers is being
+	// deleted (read-only).
+	DeletionTimestamp string `json:"deletionTimestamp,omitempty"`
 }
 
 // Object is the minimal envelope every Kubernetes API object shares.

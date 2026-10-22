@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"reflect"
 	"sort"
 	"strconv"
 
@@ -87,34 +86,85 @@ type objectStatus struct {
 	Conditions []condition `json:"conditions"`
 }
 
+// EnsureApplication makes app's platform project exist, following its
+// Serendip Project's own pipeline (spec 020). Where it runs is each
+// Deployment's business; the project only needs to exist. It also removes
+// the single-environment binding every Application had before spec 020,
+// once none of its Components still runs there.
 func (p *Provider) EnsureApplication(ctx context.Context, app resource.Application) (bool, string, string, error) {
 	project := projectName(app.Metadata.ID)
 	labels := serendipLabels(app.Metadata.ID, app.Metadata.Name)
 
-	if _, err := apply(ctx, p.client, namespacedPath("projects"), kubernetes.Object{
+	pipeline := deploymentPipeline // an Application not (yet) under a Project
+	for _, o := range app.Metadata.OwnerRefs {
+		if o.Kind == resource.KindProject {
+			pipeline = pipelineName(o.ID)
+			if err := p.ensurePipelineExists(ctx, o.ID); err != nil {
+				return false, "", "", err
+			}
+			break
+		}
+	}
+	obj, err := apply(ctx, p.client, namespacedPath("projects"), kubernetes.Object{
 		APIVersion: apiVersion, Kind: "Project",
 		Metadata: kubernetes.ObjectMeta{Name: project, Namespace: ControlPlaneNamespace, Labels: labels},
 		Spec: mustJSON(map[string]any{
-			"deploymentPipelineRef": map[string]string{"name": deploymentPipeline},
+			"deploymentPipelineRef": map[string]string{"name": pipeline},
 			"type":                  map[string]string{"kind": "ClusterProjectType", "name": projectTypeName},
-		}),
-	}); err != nil {
-		return false, "", "", err
-	}
-
-	binding, err := apply(ctx, p.client, namespacedPath("projectreleasebindings"), kubernetes.Object{
-		APIVersion: apiVersion, Kind: "ProjectReleaseBinding",
-		Metadata: kubernetes.ObjectMeta{Name: projectReleaseBindingName(app.Metadata.ID), Namespace: ControlPlaneNamespace, Labels: labels},
-		Spec: mustJSON(map[string]any{
-			"owner":       ownerRef{ProjectName: project},
-			"environment": environmentName,
 		}),
 	})
 	if err != nil {
 		return false, "", "", err
 	}
-	ready, reason, message := mapReady(binding)
+	if err := p.removeLegacyProjectBinding(ctx, project, app.Metadata.ID); err != nil {
+		return false, "", "", err
+	}
+	ready, reason, message := mapReady(obj)
 	return ready, reason, message, nil
+}
+
+// ensurePipelineExists creates a Project's pipeline empty when it doesn't
+// exist yet, so an Application can reference it before the Project's own
+// reconcile writes its promotion paths. An existing one is left alone.
+func (p *Provider) ensurePipelineExists(ctx context.Context, projectID string) error {
+	_, err := p.client.Get(ctx, namespacedPath("deploymentpipelines")+"/"+pipelineName(projectID))
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, kubernetes.ErrNotFound):
+		return fmt.Errorf("get pipeline %s: %w", pipelineName(projectID), err)
+	}
+	if _, err := p.client.Create(ctx, namespacedPath("deploymentpipelines"), pipelineObject(projectID, projectID, resource.Pipeline{})); err != nil {
+		// Created meanwhile, by the Project's own reconcile, is fine.
+		if _, gerr := p.client.Get(ctx, namespacedPath("deploymentpipelines")+"/"+pipelineName(projectID)); gerr == nil {
+			return nil
+		}
+		return fmt.Errorf("create pipeline %s: %w", pipelineName(projectID), err)
+	}
+	return nil
+}
+
+// removeLegacyProjectBinding deletes the project's binding to the single
+// environment of before spec 020 once no Component binding remains there:
+// each Deployment removes its Component's legacy binding when it's Ready.
+func (p *Provider) removeLegacyProjectBinding(ctx context.Context, project, appID string) error {
+	path := namespacedPath("projectreleasebindings") + "/" + projectReleaseBindingName(appID)
+	if _, err := p.client.Get(ctx, path); errors.Is(err, kubernetes.ErrNotFound) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("get ProjectReleaseBinding %s: %w", projectReleaseBindingName(appID), err)
+	}
+	bindings, err := p.client.List(ctx, namespacedPath("releasebindings"))
+	if err != nil {
+		return fmt.Errorf("list bindings: %w", err)
+	}
+	for _, b := range bindings {
+		var s bindingSpec
+		if json.Unmarshal(b.Spec, &s) == nil && s.Owner.ProjectName == project && s.Environment == environmentName {
+			return nil // a Component still runs there until its Deployment takes over
+		}
+	}
+	return p.deleteIgnoringNotFound(ctx, path)
 }
 
 func (p *Provider) DeleteApplication(ctx context.Context, app resource.Application) error {
@@ -123,48 +173,19 @@ func (p *Provider) DeleteApplication(ctx context.Context, app resource.Applicati
 	return p.deleteIgnoringNotFound(ctx, namespacedPath("projects")+"/"+projectName(app.Metadata.ID))
 }
 
+// reasonReleased is a Component's Ready reason once its current spec is a
+// release: ready to deploy, not running anywhere by itself.
+const reasonReleased = "Released"
+
+// EnsureComponent makes comp's platform component and workload match its
+// spec, and its current spec a release (spec 020). It runs nowhere by
+// itself: auto-deploy is off, and Deployments run releases in
+// Environments. So it's Ready once its current release exists, and
+// reachability belongs to each Deployment.
 func (p *Provider) EnsureComponent(ctx context.Context, app resource.Application, comp resource.Component) (reconcile.ComponentObservation, error) {
-	w, err := p.ensureWorkloadReady(ctx, app, comp)
-	if err != nil {
-		return reconcile.ComponentObservation{}, err
-	}
-	obs := reconcile.ComponentObservation{Ready: w.ready, Reason: w.reason, Message: w.message}
-
-	exposed := exposedPorts(comp.Spec)
-	if len(exposed) == 0 {
-		return obs, nil
-	}
-	if !w.ready {
-		obs.Reachable = &reconcile.Reachability{Reason: reconcile.ReasonPending, Message: "workload is not deployed"}
-		return obs, nil
-	}
-	reach, err := p.observeReachability(ctx, app, comp, w.binding, exposed)
-	if err != nil {
-		// A failed read about routes says nothing about the workload: keep
-		// its Ready result and report reachability as unknown-yet.
-		reach = reconcile.Reachability{Reason: reconcile.ReasonPending, Message: "could not observe routes: " + err.Error()}
-	}
-	obs.Reachable = &reach
-	return obs, nil
-}
-
-// workloadState is the workload half of an observation, plus the
-// ReleaseBinding it was read from (zero when none exists yet).
-type workloadState struct {
-	ready   bool
-	reason  string
-	message string
-	binding kubernetes.Object
-}
-
-func progressing(message string) workloadState {
-	return workloadState{reason: reconcile.ReasonProgressing, message: message}
-}
-
-func (p *Provider) ensureWorkloadReady(ctx context.Context, app resource.Application, comp resource.Component) (workloadState, error) {
 	if len(comp.Spec.Ports) == 0 {
-		return workloadState{reason: reconcile.ReasonUnsupported,
-			message: "components without ports are not supported by this provider yet"}, nil
+		return reconcile.ComponentObservation{Reason: reconcile.ReasonUnsupported,
+			Message: "components without ports are not supported by this provider yet"}, nil
 	}
 
 	project := projectName(app.Metadata.ID)
@@ -178,7 +199,7 @@ func (p *Provider) ensureWorkloadReady(ctx context.Context, app resource.Applica
 	switch {
 	case errors.Is(err, kubernetes.ErrNotFound):
 	case err != nil:
-		return workloadState{}, fmt.Errorf("get Component %s: %w", name, err)
+		return reconcile.ComponentObservation{}, fmt.Errorf("get Component %s: %w", name, err)
 	default:
 		var compSpec struct {
 			Owner ownerRef `json:"owner"`
@@ -186,11 +207,11 @@ func (p *Provider) ensureWorkloadReady(ctx context.Context, app resource.Applica
 		if len(existing.Spec) == 0 {
 			// Nothing to compare yet; the apply below sets the owner.
 		} else if err := json.Unmarshal(existing.Spec, &compSpec); err != nil {
-			return workloadState{}, fmt.Errorf("decode Component %s spec: %w", name, err)
+			return reconcile.ComponentObservation{}, fmt.Errorf("decode Component %s spec: %w", name, err)
 		}
 		if compSpec.Owner.ProjectName != "" && compSpec.Owner.ProjectName != project {
-			return workloadState{reason: reconcile.ReasonUnsupported,
-				message: "moving a component to a different application is not supported; delete it and create a new component under the target application"}, nil
+			return reconcile.ComponentObservation{Reason: reconcile.ReasonUnsupported,
+				Message: "moving a component to a different application is not supported; delete it and create a new component under the target application"}, nil
 		}
 	}
 	if _, err := apply(ctx, p.client, namespacedPath("components"), kubernetes.Object{
@@ -198,40 +219,21 @@ func (p *Provider) ensureWorkloadReady(ctx context.Context, app resource.Applica
 		Metadata: kubernetes.ObjectMeta{Name: name, Namespace: ControlPlaneNamespace, Labels: labels},
 		Spec: mustJSON(map[string]any{
 			"owner":         ownerRef{ProjectName: project},
-			"autoDeploy":    true,
+			"autoDeploy":    false,
 			"componentType": map[string]string{"kind": "ClusterComponentType", "name": componentTypeWorkload + "/" + componentTypeName},
 		}),
 	}); err != nil {
-		return workloadState{}, err
+		return reconcile.ComponentObservation{}, err
 	}
-
-	patched, err := p.ensureWorkload(ctx, project, name, labels, comp.Spec)
+	if err := p.ensureWorkload(ctx, project, name, labels, comp.Spec); err != nil {
+		return reconcile.ComponentObservation{}, err
+	}
+	rel, err := p.createRelease(ctx, project, comp)
 	if err != nil {
-		return workloadState{}, err
+		return reconcile.ComponentObservation{}, err
 	}
-	if patched {
-		// The ReleaseBinding still describes the previous release at this
-		// point; reading it now would report the old version as Deployed.
-		return progressing("rolling out updated workload"), nil
-	}
-
-	binding, err := p.client.Get(ctx, namespacedPath("releasebindings")+"/"+releaseBindingName(comp.Metadata.ID))
-	if errors.Is(err, kubernetes.ErrNotFound) {
-		return progressing("waiting for the platform to create the release binding"), nil
-	}
-	if err != nil {
-		return workloadState{}, fmt.Errorf("get ReleaseBinding %s: %w", releaseBindingName(comp.Metadata.ID), err)
-	}
-
-	current, err := p.bindingReleasesDesired(ctx, binding, desiredWorkload(project, name, comp.Spec))
-	if err != nil {
-		return workloadState{}, err
-	}
-	if !current {
-		return progressing("waiting for a release of the current spec to be bound"), nil
-	}
-	ready, reason, message := mapReady(binding)
-	return workloadState{ready: ready, reason: reason, message: message, binding: binding}, nil
+	return reconcile.ComponentObservation{Ready: true, Reason: reasonReleased,
+		Message: "release " + rel.Name + " is ready to deploy"}, nil
 }
 
 func exposedPorts(spec resource.ComponentSpec) []string {
@@ -256,17 +258,17 @@ type routeParentStatus struct {
 // the shared gateway accepted, and the platform has published an invoke URL
 // for it. URLs come from the platform's own report, never assembled here,
 // so status shows exactly the address the route really matches.
-func (p *Provider) observeReachability(ctx context.Context, app resource.Application, comp resource.Component, binding kubernetes.Object, exposed []string) (reconcile.Reachability, error) {
+func (p *Provider) observeReachability(ctx context.Context, prbName string, comp resource.Component, binding kubernetes.Object, exposed []string) (reconcile.Reachability, error) {
 	pending := func(format string, args ...any) reconcile.Reachability {
 		return reconcile.Reachability{Reason: reconcile.ReasonPending, Message: fmt.Sprintf(format, args...)}
 	}
 
-	prb, err := p.client.Get(ctx, namespacedPath("projectreleasebindings")+"/"+projectReleaseBindingName(app.Metadata.ID))
+	prb, err := p.client.Get(ctx, namespacedPath("projectreleasebindings")+"/"+prbName)
 	if errors.Is(err, kubernetes.ErrNotFound) {
 		return pending("application binding not found"), nil
 	}
 	if err != nil {
-		return reconcile.Reachability{}, fmt.Errorf("get ProjectReleaseBinding %s: %w", projectReleaseBindingName(app.Metadata.ID), err)
+		return reconcile.Reachability{}, fmt.Errorf("get ProjectReleaseBinding %s: %w", prbName, err)
 	}
 	var prbStatus struct {
 		Namespace string `json:"namespace"`
@@ -402,67 +404,21 @@ func findCondition(conds []condition, typ string) *condition {
 	return nil
 }
 
-// bindingReleasesDesired reports whether the ComponentRelease the binding
-// points at was cut from the desired workload. Right after a Workload
-// change the binding can still be Ready for the previous release; the
-// Component's own reconcile may run again before the platform reacts, so
-// "did I just patch" alone isn't enough to avoid reporting the old
-// version as Deployed.
-func (p *Provider) bindingReleasesDesired(ctx context.Context, binding kubernetes.Object, desired workloadSpec) (bool, error) {
-	if len(binding.Spec) == 0 {
-		return false, nil
-	}
-	var bindingSpec struct {
-		ReleaseName string `json:"releaseName"`
-	}
-	if err := json.Unmarshal(binding.Spec, &bindingSpec); err != nil {
-		return false, fmt.Errorf("decode ReleaseBinding %s spec: %w", binding.Metadata.Name, err)
-	}
-	if bindingSpec.ReleaseName == "" {
-		return false, nil
-	}
-	release, err := p.client.Get(ctx, namespacedPath("componentreleases")+"/"+bindingSpec.ReleaseName)
-	if errors.Is(err, kubernetes.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("get ComponentRelease %s: %w", bindingSpec.ReleaseName, err)
-	}
-	var releaseSpec struct {
-		Workload workloadSpec `json:"workload"`
-	}
-	if err := json.Unmarshal(release.Spec, &releaseSpec); err != nil {
-		return false, fmt.Errorf("decode ComponentRelease %s spec: %w", bindingSpec.ReleaseName, err)
-	}
-	return workloadsEqual(releaseSpec.Workload, desired), nil
-}
-
 func (p *Provider) DeleteComponent(ctx context.Context, comp resource.Component) error {
 	// The Component's own cleanup finalizer removes its Workload, releases,
 	// and live data-plane resources.
 	return p.deleteIgnoringNotFound(ctx, namespacedPath("components")+"/"+componentName(comp.Metadata.ID))
 }
 
-// ensureWorkload server-side-applies the Workload and reports whether an
-// existing Workload's spec just changed. That is read off metadata.generation
-// before and after: the API server bumps it only for a real spec change, and
-// a no-drift apply stores nothing. A fresh create is not a change -- there
-// is no previous release to mistake for the current one.
-func (p *Provider) ensureWorkload(ctx context.Context, project, name string, labels map[string]string, spec resource.ComponentSpec) (bool, error) {
-	before, err := p.client.Get(ctx, namespacedPath("workloads")+"/"+name)
-	existed := err == nil
-	if err != nil && !errors.Is(err, kubernetes.ErrNotFound) {
-		return false, fmt.Errorf("get Workload %s: %w", name, err)
-	}
-	after, err := apply(ctx, p.client, namespacedPath("workloads"), kubernetes.Object{
+// ensureWorkload server-side-applies the Workload. A no-drift apply stores
+// nothing.
+func (p *Provider) ensureWorkload(ctx context.Context, project, name string, labels map[string]string, spec resource.ComponentSpec) error {
+	_, err := apply(ctx, p.client, namespacedPath("workloads"), kubernetes.Object{
 		APIVersion: apiVersion, Kind: "Workload",
 		Metadata: kubernetes.ObjectMeta{Name: name, Namespace: ControlPlaneNamespace, Labels: labels},
 		Spec:     mustJSON(desiredWorkload(project, name, spec)),
 	})
-	if err != nil {
-		return false, err
-	}
-	return existed && after.Metadata.Generation != before.Metadata.Generation, nil
+	return err
 }
 
 func desiredWorkload(project, name string, spec resource.ComponentSpec) workloadSpec {
@@ -483,37 +439,6 @@ func desiredWorkload(project, name string, spec resource.ComponentSpec) workload
 		w.Container.Env = append(w.Container.Env, envVar{Key: k, Value: spec.Env[k]})
 	}
 	return w
-}
-
-// workloadsEqual compares the fields this provider sets, for telling whether
-// a ComponentRelease was cut from the desired workload (not for drift
-// detection on the Workload itself -- server-side apply does that).
-func workloadsEqual(a, b workloadSpec) bool {
-	return a.Container.Image == b.Container.Image &&
-		envEqual(a.Container.Env, b.Container.Env) &&
-		endpointsEqual(a.Endpoints, b.Endpoints)
-}
-
-func envEqual(a, b []envVar) bool {
-	if len(a) == 0 && len(b) == 0 {
-		return true
-	}
-	am := make(map[string]string, len(a))
-	for _, e := range a {
-		am[e.Key] = e.Value
-	}
-	bm := make(map[string]string, len(b))
-	for _, e := range b {
-		bm[e.Key] = e.Value
-	}
-	return reflect.DeepEqual(am, bm)
-}
-
-func endpointsEqual(a, b map[string]workloadEndpoint) bool {
-	if len(a) == 0 && len(b) == 0 {
-		return true
-	}
-	return reflect.DeepEqual(a, b)
 }
 
 // failureReasons are upstream Ready-condition reasons (ReleaseBinding and
