@@ -39,10 +39,16 @@ decision 1, and `tasks.md`.
     - `serendip-mcp` comes from a second ThunderID bootstrap file, or the
       operator tool `cmd/serendip-identity-redirects`. It was **created on
       `serendip-t018`** on 2026-10-21. serendipd gains no write path.
+  - **T005 and T006:** the CLI (`cmd/serendip`) and `serendip mcp`.
+    - **Login:** PKCE on loopback 8250, or paste-back, with the issuer
+      discovered from serendipd's new RFC 9728 endpoint
+      (`api/resource_metadata.go`).
+    - **Commands:** every catalogue command; exit codes; dry run; hidden
+      Secret values; `--reason` files a delete's approval request.
+    - **`serendip mcp`:** stdio, acting as the person through the
+      `serendip-mcp` token exchange.
+    - Hardened after a go-reviewer pass; see plan decision 2, "As built".
 - **Next:**
-  - **T005:** the CLI (`cmd/serendip`): login, catalogue commands,
-    approvals in the flow.
-  - **T006:** `serendip mcp` over stdio, which does the exchange.
   - **T007:** `/mcp` in serendipd.
   - **T008:** the declared interface in audit.
   - Then T009–T013.

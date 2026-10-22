@@ -198,6 +198,50 @@ afterwards; claims read, tokens never printed.
    - **T001 confirmed** loopback PKCE, rotating refresh, and revocation as
      a public client (spike finding 2). The CLI stores the rotated refresh
      token each time.
+   - **As built (T005):**
+     - **The CLI finds the identity provider from the server,** through
+       RFC 9728 Protected Resource Metadata at
+       `/.well-known/oauth-protected-resource`, plus two extension members
+       naming the CLI and assistant clients. Signing in needs only the
+       server's address. The endpoint arrived in T005, not T007, because
+       the CLI needs it first.
+     - **`*.localhost` names dial loopback** (RFC 6761). Go's resolver on
+       Windows doesn't, and a local install publishes
+       `identity.localhost`.
+     - **Credentials** are `credentials.json` (0600) under the user's
+       configuration directory, written by atomic rename. On Windows that's
+       `%AppData%`, which the user profile already restricts to its owner
+       and administrators, so no custom ACL code was added.
+     - **Refreshes are serialised by a lock file:** rotated refresh tokens
+       are single-use, and ThunderID revokes the family on a replay.
+     - **A Secret's value is never taken from the command line,** only
+       from `@file` or standard input.
+     - **Exit codes:** 0 ok, 1 error, 2 usage, 3 denied, 4 needs approval,
+       5 not found, 6 conflict, 7 server error, 8 not signed in.
+     - **Hardened after review** (go-reviewer, T005):
+       - **A stored sign-in goes only to the server it was made for.**
+       - **Plain `http` is refused** except to this machine, unless
+         `--insecure` is given.
+       - **The identity provider's endpoints must be on the issuer's
+         origin,** over https or loopback, before a browser opens one or a
+         refresh token is sent to one.
+       - **The refresh lock holds a nonce,** and is taken over only by
+         renaming it away, so two processes never refresh at once.
+       - **Logout holds the lock.**
+       - **A forged loopback request can't abort sign-in.**
+       - **Proxies are bypassed for `*.localhost`.**
+       - **Server-supplied text is stripped** of terminal control
+         characters.
+   - **`serendip mcp` (T006):**
+     - **It runs only as the signed-in person through the assistant
+       client.** It refuses `SERENDIP_API_KEY` and `SERENDIP_TOKEN`, which
+       would give the AI a full credential of its own.
+     - **Exchanged tokens are kept in memory** and exchanged again 30 s
+       before they expire.
+     - **The exchange is tried at start,** so a revoked sign-in fails
+       there, not at the first tool call.
+     - **Standard output carries only the protocol;** logs go to standard
+       error.
    - **Spec amendment:** the spec's "device code" becomes this paste-back
      fallback, because ThunderID 1.0.1 has no device grant.
    - **Scripts** use `SERENDIP_API_KEY` or `SERENDIP_TOKEN` from the

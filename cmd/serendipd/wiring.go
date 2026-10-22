@@ -40,7 +40,9 @@ type kubeWiring struct {
 	authn            *lazyAuthenticator
 	login            *lazyLogin
 	directory        *lazyDirectory
-	plan             setupPlan
+	// issuer is the human issuer once identity is set up, or "".
+	issuer func() string
+	plan   setupPlan
 	// adminSubject is the identity provider's bootstrap administrator,
 	// made Owner at "/" on first start (spec 017).
 	adminSubject string
@@ -287,7 +289,13 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		},
 		reensureEvery: reensureEvery,
 	}
-	return &kubeWiring{secretReconciler: secretReconciler, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject}, nil
+	issuer := func() string {
+		if v := verifier.Load(); v != nil {
+			return v.Issuer()
+		}
+		return ""
+	}
+	return &kubeWiring{secretReconciler: secretReconciler, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject, issuer: issuer}, nil
 }
 
 // ensureGatewayReady ensures the shared gateway and treats "not programmed

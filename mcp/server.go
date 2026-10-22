@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -104,6 +105,12 @@ func Tools(o Options) []catalog.Operation {
 // disconnects or ctx ends.
 func (s *Server) ServeStdio(ctx context.Context) error {
 	return s.sdk.Run(ctx, &sdk.StdioTransport{})
+}
+
+// ServeIO serves newline-delimited JSON-RPC on r and w until r ends or ctx
+// ends: stdio, with the streams given.
+func (s *Server) ServeIO(ctx context.Context, r io.ReadCloser, w io.WriteCloser) error {
+	return s.sdk.Run(ctx, &sdk.IOTransport{Reader: r, Writer: w})
 }
 
 // Connect serves one client over t, such as an in-memory transport.

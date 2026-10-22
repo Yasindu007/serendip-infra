@@ -136,6 +136,9 @@ func NewVerifier(cfg Config) (*Verifier, error) {
 	return &Verifier{cfg: cfg}, nil
 }
 
+// Issuer is the issuer every accepted token carries.
+func (v *Verifier) Issuer() string { return v.cfg.Issuer }
+
 // Warm fetches the issuer's keys once, regardless of RefreshInterval, and
 // reports whether that worked. Setup calls it so "ready" means tokens can
 // actually be verified.

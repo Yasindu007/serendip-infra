@@ -78,6 +78,13 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 
 	topMux := http.NewServeMux()
 	topMux.HandleFunc("GET /healthz", healthzHandler)
+	if o.metadata != nil {
+		origin := ""
+		if console != nil && console.Origin != nil {
+			origin = console.Origin.String()
+		}
+		topMux.HandleFunc("GET "+resourceMetadataPath, resourceMetadataHandler(*o.metadata, origin))
+	}
 	// Everything under /v1/ requires a resolved actor; /healthz doesn't
 	// go through AuthMiddleware at all -- it's mounted directly on
 	// topMux, not apiMux, so there's no bypass logic to get wrong inside
@@ -224,6 +231,7 @@ type ServerOption func(*serverOptions)
 
 type serverOptions struct {
 	directory identity.Directory
+	metadata  *ResourceMetadata
 }
 
 // WithDirectory lets the authorization routes read the identity provider's

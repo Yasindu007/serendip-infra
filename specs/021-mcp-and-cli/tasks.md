@@ -94,7 +94,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
   (Fallback tests: as in the first draft of this plan.)
 - **Then**: run `contract-guardian` on T003–T004.
 
-## T005 — The CLI
+## T005 — The CLI ✅ 2026-10-22
 
 - **Do**: `cmd/serendip`:
   - `login`: PKCE loopback with the paste-back fallback, a 0600 token
@@ -116,7 +116,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
     environment only, and token file permissions.
   - `go build`.
 
-## T006 — `serendip mcp` (stdio)
+## T006 — `serendip mcp` (stdio) ✅ 2026-10-22
 
 - **Do**: the stdio MCP server in the CLI, with tools from the catalogue
   through the SDK adapter. It runs with the exchanged, delegated token
@@ -134,7 +134,8 @@ T008) → T009 → T010 → T011 → T012 → T013.
     session middleware: bearer tokens only, with the same verifier and
     audience as the API.
   - Dispatch each tool in process through the authorizing mux.
-  - Publish RFC 9728 metadata at `/.well-known/oauth-protected-resource`.
+  - RFC 9728 metadata at `/.well-known/oauth-protected-resource` (done
+    in T005: `api/resource_metadata.go`).
   - Answer 401 with `WWW-Authenticate`.
   - Set the audit interface `mcp` authoritatively.
 - **Files**: `api/mcp_handler.go` and tests, `api/server.go`.

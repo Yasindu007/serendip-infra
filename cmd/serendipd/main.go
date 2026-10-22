@@ -28,6 +28,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 	"github.com/serendip-infra/serendip-infra/providers/identity/oidc"
+	"github.com/serendip-infra/serendip-infra/providers/identity/thunderid"
 )
 
 // resyncEvery/reconcileTimeout are specs/003-reconciliation-engine/plan.md's
@@ -142,7 +143,9 @@ func run() error {
 	}
 	var serverOpts []api.ServerOption
 	if kube != nil {
-		serverOpts = append(serverOpts, api.WithDirectory(kube.directory))
+		serverOpts = append(serverOpts, api.WithDirectory(kube.directory), api.WithResourceMetadata(api.ResourceMetadata{
+			Issuer: kube.issuer, CLIClient: thunderid.ClientID, AssistantClient: thunderid.DelegateClientID,
+		}))
 	}
 	srv := api.NewServer(db, bus, apiKeys, authn, secretReconciler, registry, webConsole, serverOpts...)
 	srv.Addr = addr
