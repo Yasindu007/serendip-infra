@@ -78,18 +78,25 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 
 	topMux := http.NewServeMux()
 	topMux.HandleFunc("GET /healthz", healthzHandler)
+	origin := ""
+	if console != nil && console.Origin != nil {
+		origin = console.Origin.String()
+	}
+	var metadataURL func(*http.Request) string
 	if o.metadata != nil {
-		origin := ""
-		if console != nil && console.Origin != nil {
-			origin = console.Origin.String()
-		}
 		topMux.HandleFunc("GET "+resourceMetadataPath, resourceMetadataHandler(*o.metadata, origin))
+		metadataURL = resourceMetadataURL(origin)
 	}
 	// Everything under /v1/ requires a resolved actor; /healthz doesn't
 	// go through AuthMiddleware at all -- it's mounted directly on
 	// topMux, not apiMux, so there's no bypass logic to get wrong inside
 	// a shared handler.
-	topMux.Handle("/v1/", apiHardening(authMiddleware(apiKeys, authn, console, sqlite.NewPrincipalRegistry(db), sponsorLookup(engine))(apiMux.mux)))
+	v1 := apiHardening(authMiddleware(apiKeys, authn, console, sqlite.NewPrincipalRegistry(db), sponsorLookup(engine))(apiMux.mux))
+	topMux.Handle("/v1/", v1)
+	if o.mcp {
+		// Without resource metadata a 401 names no document to read.
+		topMux.Handle(MCPPath, mcpEndpoint(v1, apiKeys, authn, metadataURL))
+	}
 	if console != nil {
 		// The console shell, its assets and /auth/* need no credential:
 		// after the cross-site return from login the browser withholds the
@@ -232,6 +239,7 @@ type ServerOption func(*serverOptions)
 type serverOptions struct {
 	directory identity.Directory
 	metadata  *ResourceMetadata
+	mcp       bool
 }
 
 // WithDirectory lets the authorization routes read the identity provider's

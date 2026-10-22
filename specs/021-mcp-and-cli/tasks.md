@@ -127,7 +127,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
   Application, and files a delete request. The tools omit secret values
   with the flag.
 
-## T007 [P] — `/mcp` in `serendipd` (remote)
+## T007 [P] — `/mcp` in `serendipd` (remote) ✅ 2026-10-22
 
 - **Do**:
   - Serve the streamable HTTP handler at `/mcp`, outside the console's
@@ -148,7 +148,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
   - a bad `Origin`: 403;
   - audit rows with `mcp`.
 
-## T008 [P] — The declared interface in audit
+## T008 [P] — The declared interface in audit ✅ 2026-10-22
 
 - **Do**: accept `X-Serendip-Client: cli|mcp` from a known set, and record
   it as declared.

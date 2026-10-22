@@ -36,7 +36,11 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-Id", reqID)
 
 		ctx := audit.WithRequestID(r.Context(), reqID)
-		ctx = audit.WithInterface(ctx, InterfaceName)
+		name := InterfaceName
+		if d := declaredInterface(r); d != "" {
+			name = d
+		}
+		ctx = audit.WithInterface(ctx, name)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

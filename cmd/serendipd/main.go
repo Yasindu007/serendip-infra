@@ -145,7 +145,7 @@ func run() error {
 	if kube != nil {
 		serverOpts = append(serverOpts, api.WithDirectory(kube.directory), api.WithResourceMetadata(api.ResourceMetadata{
 			Issuer: kube.issuer, CLIClient: thunderid.ClientID, AssistantClient: thunderid.DelegateClientID,
-		}))
+		}), api.WithMCP())
 	}
 	srv := api.NewServer(db, bus, apiKeys, authn, secretReconciler, registry, webConsole, serverOpts...)
 	srv.Addr = addr

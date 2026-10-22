@@ -48,10 +48,16 @@ decision 1, and `tasks.md`.
     - **`serendip mcp`:** stdio, acting as the person through the
       `serendip-mcp` token exchange.
     - Hardened after a go-reviewer pass; see plan decision 2, "As built".
+  - **T007 and T008:** `/mcp` in serendipd, for agents and delegated
+    assistants only, dispatched in process to `/v1` and audited as `mcp`.
+    `X-Serendip-Client: cli|mcp` is audited as `cli (declared)` or
+    `mcp (declared)`.
 - **Next:**
-  - **T007:** `/mcp` in serendipd.
-  - **T008:** the declared interface in audit.
-  - Then T009–T013.
+  - **T009:** acceptance tests.
+  - **T010:** footprint.
+  - **T011:** real use with Claude Code on serendip-t018.
+  - **T012:** reviews.
+  - **T013:** docs.
 - **New registers:**
   - RP-019: a local assistant can read the person's CLI token file
     (accepted).

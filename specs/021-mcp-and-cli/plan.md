@@ -261,6 +261,17 @@ afterwards; claims read, tokens never printed.
        and audit are identical by construction.
      - It publishes RFC 9728 metadata pointing at the agent issuers, and
        checks `Origin`.
+   - **As built (T007):** `api/mcp_handler.go`.
+     - **Who may use it:** only an agent, or a person acting through an AI
+       assistant (a delegated token). API keys and a person's own token
+       get 403; no token or a bad one gets 401 with
+       `WWW-Authenticate: Bearer resource_metadata=…`.
+     - **Each tool call** is dispatched in process to the same `/v1`
+       handler with only the caller's `Authorization`, under a 30 s
+       deadline. It gets its own request ID, and the audit interface `mcp`,
+       which no client can set.
+     - **The token is verified twice:** at the gate, and again by `/v1`,
+       which stays authoritative.
    - **Why not a separate MCP daemon:** one more process, one more port,
      one more credential path, and a second place to get authorization
      wrong.

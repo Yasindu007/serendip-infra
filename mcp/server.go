@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -40,6 +41,9 @@ type Response struct {
 	Status int
 	Header http.Header
 	Body   []byte
+	// Size is the whole body's length when Body holds only its start;
+	// zero means Body is whole.
+	Size int
 }
 
 // Options configure a server.
@@ -195,9 +199,14 @@ func result(r Response) *sdk.CallToolResult {
 		case len(body) == 0:
 			fmt.Fprintf(&b, "Done (HTTP %d).", r.Status)
 		case len(body) > MaxResult:
-			b.Grow(MaxResult + 128)
-			b.Write(body[:MaxResult])
-			fmt.Fprintf(&b, "\n\n[Truncated at %d of %d bytes: narrow the request, such as with a filter, limit or after.]", MaxResult, len(body))
+			cut := MaxResult
+			for cut > 0 && !utf8.RuneStart(body[cut]) {
+				cut-- // never split a character
+			}
+			size := max(r.Size, len(body))
+			b.Grow(cut + 128)
+			b.Write(body[:cut])
+			fmt.Fprintf(&b, "\n\n[Truncated at %d of %d bytes: narrow the request, such as with a filter, limit or after.]", cut, size)
 		default:
 			b.Write(body)
 		}
