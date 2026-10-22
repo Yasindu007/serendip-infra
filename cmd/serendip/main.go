@@ -117,12 +117,17 @@ func runWith(ctx context.Context, args []string, e env) int {
 	case "login":
 		o := e.login
 		o.insecure = g.insecure
+		o.dir = dir
 		for _, a := range rest[1:] {
-			if a != "--no-browser" {
+			switch a {
+			case "--no-browser":
+				o.noBrowser = true
+			case "--yes":
+				o.yes = true
+			default:
 				fmt.Fprintf(e.stderr, "serendip: login has no %s\n", a)
 				return exitUsage
 			}
-			o.noBrowser = true
 		}
 		c, err := login(ctx, hc, server, o)
 		if err != nil {

@@ -421,10 +421,11 @@ spec 009's own Scope-OUT:
 - **`Application`/`Component` wiring that injects a Secret's value
   into a running workload** — needs the Application Platform provider
   (OpenChoreo), which doesn't exist yet.
-- **AI-initiated secret access** — no AI operations engine exists yet
-  to be the caller.
-- **UI/CLI/MCP surfaces** — API only, same precedent as every prior
-  capability.
+- **AI-initiated secret access by an AI operations engine** — none
+  exists yet. An assistant or agent can use the value tools through MCP
+  with the data permission (`ai-operations.md`, spec 021).
+- **A console surface for values** — the CLI and MCP have value commands
+  (spec 021, `docs/cli-and-mcp.md`); the console doesn't.
 - **Multiple concurrent `SecretsProvider` instances / per-Environment
   provider selection** — one default provider via the registry, same
   as every capability so far.

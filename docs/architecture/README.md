@@ -16,8 +16,8 @@ standalone in under ~5 minutes and contain decisions, not exploration.
 | `storage.md` | Local → Longhorn(2 replicas) → external progression; primary vs backup storage separation; storage classes/policies; hardware-aware placement | Done |
 | `bootstrap-agent.md` | serendip-agent design: lives outside Kubernetes; hardware discovery, enrollment, bootstrap, emergency diagnostics | Done |
 | `operations.md` | Alert → Incident → Diagnosis → Recommendation → Approval → Action → Verification → Postmortem lifecycle; SLO/error budgets; change intelligence | Done |
-| `ai-operations.md` | Severity-based autonomy matrix, approval engine, what context AI receives, MCP surface | Done |
-| `identity.md` | Three identities (human, platform, workload); workload identity abstraction over Entra/Keycloak/Thunder/ServiceAccount; subjects and groups for authorization | Done |
+| `ai-operations.md` | Severity-based autonomy matrix, approval engine, what context AI receives, MCP surface (the `serendip` CLI, `serendip mcp`, `/mcp`; spec 021, ADRs 0017 and 0018; reference in `../cli-and-mcp.md`) | Done |
+| `identity.md` | Three identities (human, platform, workload); workload identity abstraction over Entra/Keycloak/Thunder/ServiceAccount; subjects and groups for authorization; agent identities; CLI sign-in and delegated AI assistants (`Via`) | Done |
 | `approvals.md` | The `Approval` kind: a record for every destructive action, decided by policy unless it needs a person; phases, conditions, routes, who may decide, execution with stale checks, clean-up and verification, audit, the console (ADR 0016) | Done |
 | `authorization.md` | Azure-RBAC model (ADR 0014): roles at scopes, inheritance, data actions, constrained delegation; enforcement in `api/authz.go`; evaluation; bootstrap and break-glass; the console's Access control (IAM) | Done |
 

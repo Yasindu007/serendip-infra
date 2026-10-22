@@ -12,57 +12,83 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-10-21
+Last updated: 2026-10-22
 
 ## Current phase
 
-**Spec 021 (Serendip's MCP server and CLI): IN PROGRESS.** Plan approved
-2026-10-20, done before spec 020 by the user's order. Read
-`specs/021-mcp-and-cli/plan.md`, especially its "Spike findings" and
-decision 1, and `tasks.md`.
+**Spec 021 (Serendip's MCP server and CLI): COMPLETE** (T001–T013,
+2026-10-22).
+- **Records:** spec, plan (with "Spike findings" and "As built" notes) and
+  tasks are in `specs/021-mcp-and-cli/`, and the live evidence is in
+  `verification.md`.
+- **ADRs:** 0017 (the official MCP Go SDK, confined to `mcp/`) and 0018 (a
+  person's AI acts through token exchange; `/mcp` inside serendipd).
+- **Reference:** `docs/cli-and-mcp.md`, with its tables generated from
+  `api/catalog` and checked by a test.
 
-- **Done:**
-  - **T001 (spike):** ThunderID token exchange works from a public client.
-    Claude Code 2.1.304 speaks MCP 2026-07-28 (`server/discover`, no
-    `Origin`).
-  - **T002 (`2ad4105`):** `api/catalog` (operations for the CLI and MCP),
-    with a route parity test. Spec amended: paste-back sign-in replaces
-    the device code.
-  - **T003 (`585f64c`):** `mcp/`, an adapter over the official MCP Go SDK
-    v1.8.0 (ADR 0017, confined to `mcp/`). Elicitation is deferred.
-  - **T004:** a person acting through an AI assistant.
-    It's a token exchanged for the `serendip-mcp` client, verified into
-    `identity.Principal.Via`. In policy, the person's roles plus agent
-    guardrails (`Principal.guarded()`); in audit,
-    `agent:serendip-mcp/<sub>` with the person as sponsor. The person can
-    approve what their assistant requested; the assistant never decides.
-    - `serendip-mcp` comes from a second ThunderID bootstrap file, or the
-      operator tool `cmd/serendip-identity-redirects`. It was **created on
-      `serendip-t018`** on 2026-10-21. serendipd gains no write path.
-  - **T005 and T006:** the CLI (`cmd/serendip`) and `serendip mcp`.
-    - **Login:** PKCE on loopback 8250, or paste-back, with the issuer
-      discovered from serendipd's new RFC 9728 endpoint
-      (`api/resource_metadata.go`).
-    - **Commands:** every catalogue command; exit codes; dry run; hidden
-      Secret values; `--reason` files a delete's approval request.
-    - **`serendip mcp`:** stdio, acting as the person through the
-      `serendip-mcp` token exchange.
-    - Hardened after a go-reviewer pass; see plan decision 2, "As built".
-  - **T007 and T008:** `/mcp` in serendipd, for agents and delegated
-    assistants only, dispatched in process to `/v1` and audited as `mcp`.
-    `X-Serendip-Client: cli|mcp` is audited as `cli (declared)` or
-    `mcp (declared)`.
-- **Next:**
-  - **T009:** acceptance tests.
-  - **T010:** footprint.
-  - **T011:** real use with Claude Code on serendip-t018.
-  - **T012:** reviews.
-  - **T013:** docs.
-- **New registers:**
-  - RP-019: a local assistant can read the person's CLI token file
-    (accepted).
-  - RP-020: parity checks routes, not parameter names.
-  - `docs/build-vs-adopt.md` is the built/adopted/rejected record.
+**What exists now:**
+- **`api/catalog`:** one list of every API action. A test fails if a
+  route has neither a CLI command nor an MCP tool, or a reason it's left
+  off.
+- **`cmd/serendip`, the CLI:**
+  - **Sign-in:** PKCE on loopback 8250 or paste-back. The identity
+    provider is found through serendipd's RFC 9728 document, and the first
+    sign-in to a server is confirmed.
+  - **Credentials:** an owner-only folder (a protected ACL on Windows), a
+    nonce refresh lock, logout that revokes, and a sign-in only ever sent
+    to its own server.
+  - **Commands:** every catalogue command, with exit codes, a dry run,
+    hidden Secret values, and `--reason` to file a delete's approval
+    request.
+- **`serendip mcp`:** stdio MCP for a person's AI assistant, acting as the
+  person through the `serendip-mcp` token exchange (5-minute tokens).
+  - **Policy:** the person's roles, plus agent guardrails
+    (`Principal.guarded()`, `Via`).
+  - **Audit:** `agent:serendip-mcp/<sub>`, with the person as sponsor.
+  - **Approvals:** the person may approve what their assistant asked for;
+    the assistant never decides.
+- **`/mcp` in serendipd:** agents and delegated assistants only, dispatched
+  in process to `/v1`, audited as `mcp`. `X-Serendip-Client` is audited as
+  `cli (declared)` or `mcp (declared)`.
+- **ThunderID's `serendip-mcp` client:** from bootstrap file
+  `71-serendip-mcp-client.yaml`, or the operator tool
+  `cmd/serendip-identity-redirects`. It exists on `serendip-t018`.
+  serendipd gained no write path.
+
+**Proven live on `serendip-t018`** (`verification.md`):
+- **Claude Code 2.1.304 through `serendip mcp`** listed and read; its
+  delete answered "needs approval"; it filed the request. The person
+  approved it from the CLI, and the approval reconciler executed it.
+- **`/mcp`** refused a person's own token and API keys.
+- **Footprint:** serendipd +0.7 MiB idle (rule 4 PASS); `serendip mcp`
+  17.8 MiB idle.
+
+**Open from spec 021** (risk register):
+- **RP-025, medium:** an exchanged token can be re-exchanged after
+  sign-out. The fix is ThunderID's `token_family: inherit`, which its
+  chart doesn't expose.
+- **RP-026, low:** other ThunderID clients' tokens may be exchangeable;
+  confirm DCR needs auth.
+- **RP-027, mitigated:** tokens aren't bound to the server's audience.
+  Confirm-on-first-use is in place; RFC 8707 is the full fix.
+- **RP-022:** the fresh-install bootstrap file is unverified.
+- **Accepted:** RP-019, RP-020, RP-021, RP-023 and RP-024.
+- **A person signing in through a real browser** (not the paste-back
+  stand-in) is still to be shown. The user can run `serendip login`
+  themselves.
+
+**Next:**
+- **Spec 020** (OpenChoreo console features), whose plan is awaiting
+  approval. Its new actions land in the console, CLI and MCP together
+  through `api/catalog`.
+- **Then** 022 (builds) and 023 (observability).
+- **Also queued:** the self-service autonomous agents spec, and the `occ`
+  admin escape hatch.
+
+**Leftovers on this machine:**
+- `serendip-t018` is still running.
+- Spec 021's scratch is under this session's scratchpad: `t011-021` holds
+  the store copy and the CLI config.
 
 Previous phase, kept for context:
 

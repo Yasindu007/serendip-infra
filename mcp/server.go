@@ -62,10 +62,10 @@ type Options struct {
 // use more, and the hardware this runs on shouldn't copy more.
 const MaxResult = 256 << 10
 
-// needsApproval is the API's problem type for a request that waits for a
+// NeedsApprovalProblem is the API's problem type for a request that waits for a
 // person (api.ProblemNeedsApproval; api imports this package, so it can't
 // be imported here).
-const needsApproval = "urn:serendip:problem:needs-approval"
+const NeedsApprovalProblem = "urn:serendip:problem:needs-approval"
 
 const instructions = `Serendip is a platform for applications, their components and secrets.
 You act as an AI agent: your calls are decided by the roles of the person you act for, with agent guardrails.
@@ -227,7 +227,7 @@ func result(r Response) *sdk.CallToolResult {
 	if json.Unmarshal(r.Body, &p) == nil && (p.Title != "" || p.Detail != "") {
 		text = fmt.Sprintf("HTTP %d %s: %s", r.Status, p.Title, p.Detail)
 	}
-	if p.Type == needsApproval {
+	if p.Type == NeedsApprovalProblem {
 		text += "\n\nThis needs a person's approval. File the request with approvals_request (kind, id, cascade if you asked for it, and a reason); a person decides it. Check it with approvals_get."
 	}
 	return failed(text)

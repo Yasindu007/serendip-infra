@@ -189,7 +189,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
 - **Verify**: every criterion has observed evidence. No secrets are
   printed.
 
-## T012 — Final reviews
+## T012 — Final reviews ✅ 2026-10-22
 
 - **Do**: run `contract-guardian`, `go-reviewer` and `/security-review` on
   the spec diff, and fix the findings. The security review should focus
@@ -198,7 +198,7 @@ T008) → T009 → T010 → T011 → T012 → T013.
 - **Files**: as the findings require.
 - **Verify**: all three pass, and `go test ./...` is green.
 
-## T013 [A] — Docs, ADR, close
+## T013 [A] — Docs, ADR, close ✅ 2026-10-22
 
 - **Do**:
   - Write the ADR for decisions 1 and 3 (the SDK's ADR is T003's).

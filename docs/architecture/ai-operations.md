@@ -44,7 +44,8 @@ AI → Serendip Action → Policy check → Provider → Execution → Verificat
 - **Policy check** — evaluates severity, resource sensitivity, and
   organizational policy before anything is allowed to proceed. Today it
   is the role check in `core/policy` (`authorization.md`). For an agent,
-  a delete returns `NeedsApproval`: the agent files `POST /v1/approvals`
+  or a person acting through an AI assistant, a delete returns
+  `NeedsApproval`: the AI files `POST /v1/approvals`
   with a reason, a person allowed to delete the target approves it, and
   the approval reconciler executes it and verifies the result. The same
   path records an Approval, decided by policy, for a person's delete
@@ -95,6 +96,72 @@ is no MCP-only capability and no AI-only control path — MCP is simply
 another way of expressing the same actions a human could take via the UI or
 API, subject to the exact same approval engine above. This is intentional:
 it avoids inventing a second, less-audited AI control interface.
+
+Built in spec 021 (ADR 0017, ADR 0018; commands, tools and client set-up in
+`docs/cli-and-mcp.md`). The CLI and MCP hold no authority of their own.
+
+### One catalogue
+
+`api/catalog` lists every `/v1` route with its CLI command, its MCP tool
+(name, description, schema, annotations) or a reason it's left off. Both
+clients are generated from it. A parity test fails when a route has
+neither, and another when `docs/cli-and-mcp.md` misses an operation.
+MCP covers applications, components, secrets, approvals, access reads,
+the graph and readiness; other kinds are read through `resources_list` and
+`resources_get`. Never exposed: access-management writes, directory reads
+and approving or rejecting (an AI never decides an approval).
+
+### Two ways in
+
+| Path | Who | Identity |
+|---|---|---|
+| `serendip mcp` (stdio, local) | A person's assistant on their machine | The person, through the `serendip-mcp` token exchange (`identity.md`). Audit actor `agent:serendip-mcp/<sub>`, the person as sponsor. |
+| `/mcp` in `serendipd` (streamable HTTP) | Hosted agents, and delegated assistant tokens | The caller's own token, validated as for `/v1`. |
+
+- **`serendip mcp`** is an HTTP client of the API. It exchanges the
+  person's CLI sign-in for a 5-minute token, in memory only, and refreshes
+  it before expiry. It refuses `SERENDIP_API_KEY` and `SERENDIP_TOKEN`, so
+  an AI never holds a full credential of its own. Stdout carries only the
+  protocol.
+- **`/mcp`** (`api/mcp_handler.go`) accepts only an agent token or a
+  delegated one: API keys and a person's own token get 403, no or an
+  invalid token 401 with an RFC 9728 `WWW-Authenticate` challenge, the
+  console cookie is never a credential. It is the same resource server as
+  the API, so there is no token passthrough. Each tool call is dispatched
+  in process to the same authorizing `/v1` mux with only the caller's
+  `Authorization`, under a 30 s deadline, as its own request with its own
+  ID. The token is verified at the gate and again by `/v1`, which stays
+  authoritative. Cross-origin browser requests are refused; clients with no
+  `Origin` (Claude Code) pass.
+- **Audit interface:** `/mcp` sets `mcp` itself, authoritatively. The CLI
+  and `serendip mcp` declare `cli` or `mcp` in `X-Serendip-Client`, shown
+  as `(declared)`: identity, not the label, is the boundary.
+
+### Guardrails
+
+A delegated assistant is decided as the person (their roles, never more),
+then meets the agent guardrails of spec 018 (`authorization.md`): never
+access management, and every delete is `NeedsApproval`. The assistant
+files `approvals_request` with a reason, and a person decides it in the
+console or the CLI (`approvals.md`); no MCP tool approves or rejects.
+Elicitation and a `confirm: true` step are deferred: the API's approvals are
+the safety boundary, not client confirmation (ADR 0017).
+
+### Secret values
+
+`secrets_read_value` and `secrets_write_value` are their own tools,
+flagged as sensitive and destructive, and need the secrets value data
+permission. `serendip mcp --no-secret-values` leaves them out of
+`tools/list`. Values are never logged.
+
+### Limits
+
+- A local assistant that can run commands as the person can also read
+  their CLI sign-in (RP-019). The guardrails cover its mistakes with
+  Serendip's tools, not hostile code running as the person.
+- After sign-out an assistant keeps access for up to 5 minutes (RP-021).
+- The protocol and its Go SDK change every month or two (RP-023; the SDK
+  is imported only by `mcp/`).
 
 ## Open questions
 

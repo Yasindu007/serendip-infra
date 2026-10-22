@@ -239,7 +239,7 @@ func browser(t *testing.T, listen, code string) func(string) error {
 func TestLoginCommandLogout(t *testing.T) {
 	w := newWorld(t)
 	listen := freePort(t)
-	r := w.cliWith(nil, strings.NewReader(""), loginOptions{listen: listen, openBrowser: browser(t, listen, "c1")}, "login")
+	r := w.cliWith(nil, strings.NewReader(""), loginOptions{listen: listen, openBrowser: browser(t, listen, "c1")}, "login", "--yes")
 	if r.code != exitOK {
 		t.Fatalf("login: %d %s %s", r.code, r.stdout, r.stderr)
 	}
@@ -319,7 +319,7 @@ func TestLoginPasteBack(t *testing.T) {
 			w := newWorld(t)
 			pr, pw := io.Pipe()
 			pb := &pasteBack{pr: pr, pw: pw, code: "c1", badState: bad}
-			r := w.cliWith(nil, pr, loginOptions{out: pb, in: bufio.NewReader(pr)}, "login", "--no-browser")
+			r := w.cliWith(nil, pr, loginOptions{out: pb, in: bufio.NewReader(pr)}, "login", "--no-browser", "--yes")
 			if bad {
 				if r.code == exitOK || !strings.Contains(r.stderr, "state mismatch") {
 					t.Errorf("forged state: %d %s", r.code, r.stderr)
@@ -571,8 +571,9 @@ func TestDiscoverRefusesEndpointsElsewhere(t *testing.T) {
 				json.NewEncoder(w).Encode(doc)
 			}))
 			defer idp.Close()
-			rs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				json.NewEncoder(w).Encode(map[string]any{"authorization_servers": []string{idp.URL}, "serendip_cli_client_id": "serendip"})
+			var rs *httptest.Server
+			rs = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"resource": rs.URL, "authorization_servers": []string{idp.URL}, "serendip_cli_client_id": "serendip"})
 			}))
 			defer rs.Close()
 			if _, _, err := discover(context.Background(), newHTTPClient(), rs.URL, false); err == nil {
@@ -692,7 +693,7 @@ func TestLoopbackIgnoresForgedAnswers(t *testing.T) {
 		}()
 		return nil
 	}
-	if r := w.cliWith(nil, strings.NewReader(""), loginOptions{listen: listen, openBrowser: forgeThenAnswer}, "login"); r.code != exitOK {
+	if r := w.cliWith(nil, strings.NewReader(""), loginOptions{listen: listen, openBrowser: forgeThenAnswer}, "login", "--yes"); r.code != exitOK {
 		t.Fatalf("login after forged answers: %d %s", r.code, r.stderr)
 	}
 	// The listener is gone afterwards.
@@ -751,5 +752,49 @@ func TestLockTakeoverAndUnlock(t *testing.T) {
 	defer cancel()
 	if _, err := lockCredentials(ctx, dir); err == nil {
 		t.Error("took a live lock")
+	}
+}
+
+// The first sign-in to a server confirms the identity provider it names:
+// a hostile server could name a real provider and receive a real sign-in.
+func TestLoginConfirmsTheIssuer(t *testing.T) {
+	w := newWorld(t)
+	tokens := func() int {
+		w.issuer.mu.Lock()
+		defer w.issuer.mu.Unlock()
+		return len(w.issuer.grants)
+	}
+	listen := freePort(t)
+	r := w.cliWith(nil, strings.NewReader("n\n"), loginOptions{listen: listen, openBrowser: browser(t, listen, "c1")}, "login")
+	if r.code == exitOK || !strings.Contains(r.stderr, "not confirmed") || !strings.Contains(r.stderr, "signs people in with the identity provider "+w.issuer.srv.URL) {
+		t.Errorf("declined: %d %s", r.code, r.stderr)
+	}
+	if r := w.cliWith(nil, strings.NewReader(""), loginOptions{listen: listen, openBrowser: browser(t, listen, "c1")}, "login"); r.code == exitOK {
+		t.Errorf("no answer (no terminal) signed in: %s", r.stderr)
+	}
+	if tokens() != 0 {
+		t.Fatal("a sign-in went ahead without confirmation")
+	}
+	if r := w.cliWith(nil, strings.NewReader("y\n"), loginOptions{listen: listen, openBrowser: browser(t, listen, "c1")}, "login"); r.code != exitOK {
+		t.Fatalf("confirmed: %d %s", r.code, r.stderr)
+	}
+	// Remembered: no question the second time.
+	if r := w.cliWith(nil, strings.NewReader(""), loginOptions{listen: listen, openBrowser: browser(t, listen, "c1")}, "login"); r.code != exitOK || strings.Contains(r.stderr, "[y/N]") {
+		t.Errorf("second sign-in: %d %s", r.code, r.stderr)
+	}
+	// A changed identity provider is asked about again.
+	os.WriteFile(trustedPath(w.dir), []byte(fmt.Sprintf(`{%q: "https://other-idp.example"}`, w.api.URL)), 0o600)
+	if r := w.cliWith(nil, strings.NewReader(""), loginOptions{listen: listen, openBrowser: browser(t, listen, "c1")}, "login"); r.code == exitOK {
+		t.Errorf("a changed provider signed in without asking: %s", r.stderr)
+	}
+}
+
+func TestDiscoverRefusesAnotherResource(t *testing.T) {
+	rs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"resource": "https://serendip.example", "authorization_servers": []string{"https://idp.example"}, "serendip_cli_client_id": "serendip"})
+	}))
+	defer rs.Close()
+	if _, _, err := discover(context.Background(), newHTTPClient(), rs.URL, false); err == nil || !strings.Contains(err.Error(), "describes itself") {
+		t.Errorf("discover = %v", err)
 	}
 }

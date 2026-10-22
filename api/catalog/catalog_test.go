@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"encoding/json"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -267,5 +268,19 @@ func TestReturnedCollectionsAreCopies(t *testing.T) {
 	s["properties"].(map[string]any)["phase"].(map[string]any)["enum"].([]string)[0] = "x"
 	if mustLookup(t, "approvals_list").Params[0].Enum[0] == "x" {
 		t.Error("changing a returned schema changed the catalogue")
+	}
+}
+
+// The CLI and MCP reference lists every operation (spec 021 T013).
+func TestReferenceListsEveryOperation(t *testing.T) {
+	b, err := os.ReadFile("../../docs/cli-and-mcp.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(b)
+	for _, op := range Operations() {
+		if !strings.Contains(doc, "`"+op.Method+" "+op.Path+"`") {
+			t.Errorf("docs/cli-and-mcp.md doesn't list %s (%s %s)", op.Name, op.Method, op.Path)
+		}
 	}
 }

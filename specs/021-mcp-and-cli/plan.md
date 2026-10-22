@@ -220,6 +220,14 @@ afterwards; claims read, tokens never printed.
        from `@file` or standard input.
      - **Exit codes:** 0 ok, 1 error, 2 usage, 3 denied, 4 needs approval,
        5 not found, 6 conflict, 7 server error, 8 not signed in.
+     - **First sign-in to a server is confirmed** (T012 security review):
+       the CLI shows the identity provider the server names and asks
+       before signing in. It remembers the answer per server
+       (`trusted-servers.json`), and asks again if the provider changes.
+       Without anyone to answer, it refuses unless `--yes` is given. The
+       RFC 9728 document's `resource` must be the server itself. Binding
+       tokens to the server's audience (RFC 8707) is the full fix
+       (RP-027).
      - **Hardened after review** (go-reviewer, T005):
        - **A stored sign-in goes only to the server it was made for.**
        - **Plain `http` is refused** except to this machine, unless
@@ -261,7 +269,8 @@ afterwards; claims read, tokens never printed.
      - Each tool call is dispatched **in process through the same
        authorizing API mux,** with the caller's identity. RBAC, approvals
        and audit are identical by construction.
-     - It publishes RFC 9728 metadata pointing at the agent issuers, and
+     - It publishes RFC 9728 metadata naming the human issuer and the CLI
+       and assistant clients (as built, T005), and
        checks `Origin`.
    - **As built (T007):** `api/mcp_handler.go`.
      - **Who may use it:** only an agent, or a person acting through an AI
@@ -361,7 +370,9 @@ afterwards; claims read, tokens never printed.
 - **cmd:**
   - `cmd/serendip/` (new): CLI commands from the catalogue, login, config,
     and the `mcp` subcommand.
-  - `cmd/serendipd`: wire `/mcp`, and the built-in `local` agent issuer.
+  - `cmd/serendipd`: wire `/mcp`, the resource metadata, and the
+    verifier's delegate client. (The built-in `local` agent issuer was the
+    fallback T001 made unnecessary; it wasn't built.)
 - **mcp (new top-level):** a thin adapter from the catalogue to the MCP Go
   SDK (stdio and streamable HTTP). It's the only importer of the SDK.
 - **api:**

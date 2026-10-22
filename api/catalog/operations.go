@@ -91,7 +91,7 @@ func crud(k kind) []Operation {
 			Summary: "Replace a " + what + "'s spec (send the version read, for a conflict check)", Method: "PUT", Path: "/v1/" + k.Path + "/{id}",
 			Params: []Param{id(what), resourceBody}, Hints: Hints{Idempotent: true}},
 		{Name: underscore(k.Path) + "_delete", CLI: []string{k.Path, "delete"}, MCP: k.AI,
-			Summary: "Delete a " + what + ". Recorded as an Approval; if it needs a person, file a request with approvals_request instead",
+			Summary: "Delete a " + what + ". Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request",
 			Method:  "DELETE", Path: "/v1/" + k.Path + "/{id}",
 			Params: []Param{id(what), cascadeParam}, Hints: Hints{Destructive: true, Idempotent: true}},
 	}

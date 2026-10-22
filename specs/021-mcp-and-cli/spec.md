@@ -1,6 +1,6 @@
 # Spec 021: Serendip's own MCP server and CLI
 
-Status: Approved 2026-10-20. Done **before** spec 020, by
+Status: Complete 2026-10-22 (approved 2026-10-20). Done **before** spec 020, by
 the user's order, so that 020's new actions land in the console, the CLI
 and MCP together.
 

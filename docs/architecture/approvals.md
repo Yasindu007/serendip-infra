@@ -9,7 +9,8 @@ direction: **roles decide; an approval is the exception.**
 - When the actor's roles Allow the delete, **policy approves it
   instantly**, and the caller sees an ordinary `DELETE`.
 - Only a `NeedsApproval` decision waits for a person. Today that is an
-  agent's delete (`authorization.md`, Agents).
+  agent's delete, or the delete of a person acting through an AI assistant
+  (`authorization.md`, Agents; spec 021).
 - A principal whose roles deny the action can't request it.
 
 The only verb is `delete`. The field is built to take scale-to-zero,
@@ -117,7 +118,7 @@ generic kinds, Secrets, role assignments and custom role definitions.
 - **Start-up** revokes assignments held by API keys no longer in
   configuration through the same store delete, with an intent decided by
   the server ("API key … removed from configuration").
-- **An agent's `DELETE`** is 403 `urn:serendip:problem:needs-approval`.
+- **An agent's or an assistant's `DELETE`** is 403 `urn:serendip:problem:needs-approval`.
   The detail says to `POST /v1/approvals` with
   `{"action": {"verb": "delete", "target": {"kind", "id"}, "cascade"}, "reason": "..."}`.
   Nothing is recorded but the audit row.
@@ -150,9 +151,15 @@ Requests an action explicitly, decided by the same checks as the
 
 **Who may decide:**
 - A person or an API key. Never an agent or a `system:` actor
-  (`policy.ErrApproverGuardrail`, 403 "approver guardrail").
+  (`policy.ErrApproverGuardrail`, 403 "approver guardrail"). Never a
+  person acting through an assistant (`Via` set): their own token can
+  decide, an assistant's can't, and no MCP tool approves or rejects.
 - Never the requester (`policy.ErrSelfApproval`, 403 "separation of
   duties"). An agent's sponsor may decide its agent's request (RP-007).
+  Likewise a person may decide what their own assistant requested: the
+  request records `requestedBy.principal.via`, and the check skips
+  self-approval when the requester has `Via` set. The assistant is the
+  AI, the person the accountable human.
 - Only someone whose roles **Allow the delete themselves**, at decision
   time: at the target, and with cascade at every descendant, by its own
   kind. The same applies to anything in the recorded blast radius that

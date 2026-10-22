@@ -11,6 +11,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/policy"
+	"github.com/serendip-infra/serendip-infra/mcp"
 )
 
 const mcpMeta = `"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"agent","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}`
@@ -192,5 +193,12 @@ func TestDeclaredInterface(t *testing.T) {
 		if got := create("org-"+strings.ReplaceAll(fmt.Sprintf("%q", client), `"`, ""), client); got != want {
 			t.Errorf("X-Serendip-Client %q: interface %q, want %q", client, got, want)
 		}
+	}
+}
+
+// mcp can't import api, so it keeps its own copy of the problem type.
+func TestNeedsApprovalProblemMatches(t *testing.T) {
+	if mcp.NeedsApprovalProblem != api.ProblemNeedsApproval {
+		t.Errorf("mcp.NeedsApprovalProblem = %q, api.ProblemNeedsApproval = %q", mcp.NeedsApprovalProblem, api.ProblemNeedsApproval)
 	}
 }

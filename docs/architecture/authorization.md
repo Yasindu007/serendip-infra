@@ -40,6 +40,12 @@ scope            = "/" or one resource; applies to everything that resource owns
 | `apiKey` | the key's actor name | `SERENDIP_API_KEYS` |
 | `agent` | `<issuer alias>/<sub>` | a token from a trusted agent issuer (spec 018, `identity.md`); must carry a person sponsor |
 
+A person acting through an AI assistant (spec 021) is not a fifth type: it
+is a `person` principal with `Via` set to the assistant's client
+(`serendip-mcp`). Their own assignments and groups apply, plus the agent
+guardrails below. A role assignment can never carry `Via` (400): roles are
+assigned to the person, never to their assistant.
+
 A person's groups come from **their current access token** at every
 request. A group change applies when their next token is issued (their
 next sign-in, or the console's session refresh), as in Azure.
@@ -140,6 +146,21 @@ Keeping it fast and current:
 Constitution 5 holds AI to more than roles do. For a principal of type
 `agent`, `core/policy` (`agents.go`) adds the following. People and API
 keys are unaffected.
+
+**Delegated principals (spec 021, ADR 0018).** The same guardrails apply to
+a person acting through an AI assistant (`Via` set). One predicate,
+`Principal.guarded()` in `engine.go`, is true for an agent or a `Via`
+person, and `Decide`, `EffectivePermissions`, `checkDelegated` and
+`GrantedAnywhere` all use it. The person's own roles decide first (so the
+assistant is capped at them), then:
+- access management is denied whatever their roles say, and the
+  permissions API doesn't claim it;
+- every delete their roles allow returns `NeedsApproval`;
+- the person's groups do apply, unlike an agent's. The sponsor and
+  group-assignment rules below concern agents only.
+
+The same person acting directly (no `Via`) is unaffected, so Owner keeps
+`DELETE` and access management in the console and the CLI.
 
 - **Never authority over access.**
   - **At evaluation:** `Decide` denies an agent `roleAssignments/write`

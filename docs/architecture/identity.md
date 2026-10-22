@@ -195,7 +195,7 @@ The install:
 
 The OIDC client is `serendip`: public, authorization code + PKCE. Its
 redirect URIs are the fixed loopback `http://127.0.0.1:8250/callback` (for
-a future CLI) and the web console's callback (below). ThunderID matches
+the CLI, spec 021) and the web console's callback (below). ThunderID matches
 redirect URIs exactly and imports its client definition on first install
 only.
 
@@ -468,9 +468,70 @@ ThunderID, run beside Serendip (`specs/018-agent-manager-poc/findings.md`).
 - **What a valid token grants: nothing.** Every agent in the issuer can
   get a token for Serendip's audience. Only role assignments give access,
   and agents have their own guardrails (`authorization.md`).
-- **Not done:** on-behalf-of delegation (an agent acting for a person),
-  managing agent issuers through the API, and creating agents from
-  Serendip.
+- **Not done:** managing agent issuers through the API, and creating
+  agents from Serendip. A person's own assistant is not an agent identity:
+  it acts for the person (next section).
+
+## The CLI and AI assistants (spec 021)
+
+ADR 0018, `docs/cli-and-mcp.md`, evidence in `specs/021-mcp-and-cli/`.
+
+### CLI sign-in
+
+- **Discovery:** the CLI needs only the server's address. It reads the
+  identity provider from `/.well-known/oauth-protected-resource`
+  (RFC 9728, `api/resource_metadata.go`, no credential needed), which
+  also names the CLI and assistant clients in two extension members.
+- **Flow:** authorization code with PKCE through the `serendip` client,
+  received on `127.0.0.1:8250/callback`. Without a browser, or with the port
+  taken, `login --no-browser` prints the link and takes the address pasted
+  back (`state` checked). ThunderID 1.0.1 has no device grant, hence the
+  paste-back.
+- **Credentials** are kept in `credentials.json` in the user's configuration
+  directory, the folder owner-only (an access list on Windows, 0700
+  elsewhere), refreshed under a lock file because rotated refresh tokens are
+  single-use. A sign-in goes only to the server it was made for, and plain
+  `http` only to this machine unless `--insecure`.
+- **`logout`** revokes the refresh token and deletes the file.
+- **Scripts** use `SERENDIP_API_KEY` or `SERENDIP_TOKEN` from the
+  environment, never a flag.
+
+### Delegated principals (`Via`)
+
+A person's AI assistant is **the person acting through an assistant**, not
+a separate identity with its own roles.
+
+- **The exchange:** `serendip mcp` exchanges the person's access token
+  (RFC 8693) through the public client **`serendip-mcp`**. ThunderID keeps
+  `sub`, `iss`, scope and groups, sets `client_id` and `aud` to the
+  exchanging client, and issues no refresh token. The lifetime is
+  `DelegatedTokenLifetime`, 5 minutes. No actor token is used, so there's
+  no secret on disk.
+- **The verifier** (`providers/identity/oidc`) takes `DelegateClients`,
+  here `serendip-mcp`. A token for a delegate client must carry
+  `grant_type` token-exchange, audience equal to the client, `iat`, and a
+  lifetime of at most 1 hour (`MaxDelegatedLifetime`) plus leeway. It then
+  yields the person with `Via` set to the client. A delegate client's
+  token that isn't an exchange is refused, and so is a token exchanged for
+  any other client. Serendip trusts the signed `client_id`, not `act`.
+- **The principal:** `identity.Principal.Via`, copied to
+  `policy.Principal.Via` and, in an Approval's `requestedBy`, to
+  `PrincipalRef.Via`. Roles are never assigned to a `Via` principal
+  (validation 400): they belong to the person.
+- **Audit:** actor `agent:serendip-mcp/<sub>`, subject the person's `sub`,
+  and the person as `actor_sponsor`, so the same audit row says who
+  asked and through what.
+- **Sign-out:** a revoked person session also stops new exchanges, so an
+  assistant loses access within about 5 minutes (RP-021).
+- **The client's declaration:** `serendip-mcp` is public and allows token
+  exchange plus `authorization_code` (ThunderID refuses a public client
+  with exchange alone, APP-1037). It is declared in a second bootstrap file,
+  `71-serendip-mcp-client.yaml`, on fresh installs, and created when missing
+  by the operator tool `cmd/serendip-identity-redirects` on existing ones.
+  `serendipd` writes nothing to the identity provider (ADR 0015 stays
+  read-only). Fresh-install bootstrap is not verified yet (RP-022).
+- **Not done:** which assistant it is (Claude Code, an IDE) is only a
+  declared label; an actor token (`act`) isn't required or relied on.
 
 ## Open questions
 

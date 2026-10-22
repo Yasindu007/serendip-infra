@@ -43,6 +43,11 @@ purpose), **Closed** (fixed).
 | RP-020 | The catalogue's parity test checks routes, not parameter names | Correctness (low) | Accepted | Spec 021 T002 |
 | RP-021 | An AI assistant keeps access up to 5 minutes after its person signs out | Security (low) | Accepted | Spec 021 T004 |
 | RP-022 | A fresh install's `serendip-mcp` bootstrap file isn't verified yet | Correctness | Open | Spec 021 T004 |
+| RP-023 | The MCP protocol and its Go SDK change every month or two | Maintenance | Accepted | Spec 021 (ADR 0017) |
+| RP-024 | Without a configured console origin, the resource metadata names the request's Host | Security (low) | Accepted | Spec 021 T005 review |
+| RP-025 | An exchanged assistant token can be exchanged again after its person signs out | Security (medium) | Open | Spec 021 T012 security review |
+| RP-026 | Tokens other ThunderID clients receive may be exchangeable into Serendip access | Security (low) | Open | Spec 021 T012 security review |
+| RP-027 | Tokens aren't bound to the Serendip server they were issued for | Security (medium) | Mitigated | Spec 021 T012 security review |
 
 ---
 
@@ -395,3 +400,108 @@ purpose), **Closed** (fixed).
   The operator tool `cmd/serendip-identity-redirects` creates it.
 - **Close:** on the next fresh identity install (a new kind cluster, or the
   real T470 run), check that ThunderID lists the client.
+
+## RP-023 — The MCP protocol and its Go SDK change often
+
+- **Kind:** maintenance. **Status:** Accepted, 2026-10-22. **Found:**
+  spec 021 (ADR 0017).
+- **What:** MCP's 2026-07-28 revision removed the handshake and sessions,
+  and clients still speak 2025 versions. The official Go SDK
+  (`modelcontextprotocol/go-sdk` v1.8.0) ships a minor version every one
+  to two months, and brings 9 modules.
+- **Why accepted:** the user chose less to maintain (2026-10-20). The SDK
+  tracks protocol revisions; a hand-written layer would make each one
+  ours.
+- **Mitigations:**
+  - **Contained:** the SDK is confined to `mcp/`, and
+    `check-imports.sh` enforces it.
+  - **Pinned:** recorded-exchange tests cover both protocol generations,
+    and Claude Code 2.1.304's actual requests.
+- **Revisit:** if an SDK upgrade breaks a client, the SDK stalls, or its
+  dependencies grow (ADR 0017's "Revisit").
+
+## RP-024 — Resource metadata can reflect the request's Host
+
+- **Kind:** security, low. **Status:** Accepted, 2026-10-22. **Found:**
+  spec 021 T005 review.
+- **What:** `/.well-known/oauth-protected-resource` names the resource,
+  and `/mcp`'s 401 names the document's URL. With a console origin
+  configured (the normal `serendipd` setup), both use it. Without one,
+  they're built from the request's `Host` header.
+- **Impact:** a client sending a forged `Host` gets its own forged value
+  back. The answer is `Cache-Control: no-store`, so a shared cache can't
+  serve it to anyone else. The issuer and client IDs never come from the
+  request.
+- **Revisit:** if `serendipd` runs behind a cache that ignores
+  `no-store`, or without a console origin in production.
+
+## RP-025 — An exchanged token can be exchanged again after sign-out
+
+- **Kind:** security, medium. **Status:** Open, 2026-10-22. **Found:**
+  spec 021 T012 security review; verified live on ThunderID 1.0.1.
+- **What:** after a person signs out (their refresh token is revoked),
+  ThunderID refuses to exchange their access token. But it still accepts
+  an **already-exchanged** `serendip-mcp` token as the subject of a new
+  exchange. Anyone holding a live delegated token can keep minting fresh
+  5-minute tokens after the sign-out, so RP-021's "within 5 minutes" holds
+  only for a holder who doesn't do that.
+- **Bounds:**
+  - **A live delegated token is needed:** one lives only in `serendip
+    mcp`'s memory and on its requests to `serendipd`. `serendip mcp`
+    never chains: it always exchanges the stored sign-in.
+  - **It must be renewed within 5 minutes,** every time, or it dies.
+  - **It's always the person, with agent guardrails:** no access
+    management, every delete through an approval.
+  - **Removing the person's role assignments** stops it immediately.
+- **Fix to pursue:** ThunderID's `oauth.token_exchange.token_family:
+  inherit` puts exchanged tokens in the subject token's family, so a
+  sign-out revokes them. The ThunderID 1.0.1 chart's `deployment.yaml`
+  template doesn't expose that setting. Getting it means an upstream chart
+  change, or overriding the whole configuration file, which is fragile.
+  Until then, Serendip can't tell a chained token from a first one.
+- **Revisit:** when the chart exposes the setting, or when Serendip gains
+  token introspection.
+
+## RP-026 — Other ThunderID clients' tokens may be exchangeable
+
+- **Kind:** security, low. **Status:** Open, 2026-10-22. **Found:**
+  spec 021 T012 security review.
+- **What:** `serendip-mcp` is a public client with the token-exchange
+  grant, and ThunderID decides whose tokens it accepts as subjects. A
+  token ThunderID's own Console received was refused (verified live: it
+  has a resource audience, and an exchange with that resource would carry
+  that audience, which `serendipd` refuses). A token another
+  relying-party app in the same ThunderID received for itself, carrying
+  its own client ID as audience, may be exchangeable. That app, or anyone
+  who compromises it, could then act in Serendip as that person, under
+  agent guardrails.
+- **Today:** Serendip's ThunderID has only the `serendip`, `serendip-mcp`
+  and Console clients. Its dynamic client registration is enabled in the
+  shipped configuration (`oauth.dcr.enabled: true, insecure: false`);
+  whether registering needs authentication is to be confirmed.
+- **Fix to pursue:** confirm the cross-client exchange with a second
+  test app. If it works, restrict which subject tokens `serendip-mcp`
+  accepts, if ThunderID allows it. Otherwise keep Serendip's identity
+  provider free of other relying parties, and confirm DCR requires
+  authentication.
+
+## RP-027 — Tokens aren't bound to the server they were issued for
+
+- **Kind:** security, medium. **Status:** Mitigated, 2026-10-22.
+  **Found:** spec 021 T012 security review.
+- **What:** the CLI learns which identity provider to sign in with from
+  the server it's pointed at. A hostile server could name a real
+  provider. The person signs in on the genuine page, and the CLI then
+  sends the real tokens to the hostile server, which could replay them to
+  the real `serendipd`: the audience is the shared client `serendip`, not
+  the server.
+- **Mitigation (spec 021 T012):**
+  - **The first sign-in to a server is confirmed:** it shows the
+    provider, asks, remembers the answer per server, and asks again if
+    the provider changes. Without anyone to answer, it refuses unless
+    `--yes` is given.
+  - **The server's RFC 9728 `resource` must be the server itself.**
+  - **A stored sign-in is only ever sent to the server it was made for.**
+- **Full fix:** bind tokens to the server with RFC 8707 (`resource=`).
+  ThunderID needs a registered resource server for that (spec 021 T001
+  finding 1); then `serendipd` checks the audience is its own.

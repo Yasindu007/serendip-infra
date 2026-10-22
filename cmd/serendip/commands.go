@@ -451,7 +451,9 @@ func usage(out io.Writer) {
 	fmt.Fprint(out, `Usage: serendip [flags] <command> [arguments] [--parameter value ...]
 
 Sign in:
-  login [--no-browser]    sign in through the identity provider
+  login [--no-browser] [--yes]
+                          sign in through the identity provider (the first time, confirm
+                          the provider the server names; --yes confirms without asking)
   logout                  sign out, revoking the session
   whoami                  who you are signed in as
 

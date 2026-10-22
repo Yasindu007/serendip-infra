@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ const loopbackAddr = "127.0.0.1:8250"
 
 // metadata is the part of Serendip's RFC 9728 document the CLI uses.
 type metadata struct {
+	Resource        string   `json:"resource"`
 	Issuers         []string `json:"authorization_servers"`
 	CLIClient       string   `json:"serendip_cli_client_id"`
 	AssistantClient string   `json:"serendip_assistant_client_id"`
@@ -74,6 +76,10 @@ func discover(ctx context.Context, hc *http.Client, server string, insecure bool
 	}
 	if len(m.Issuers) != 1 || m.CLIClient == "" {
 		return m, endpoints{}, fmt.Errorf("%s doesn't name one identity provider and CLI client", server)
+	}
+	// The document must describe the server it came from (RFC 9728 §3.3).
+	if !sameServer(m.Resource, server) {
+		return m, endpoints{}, fmt.Errorf("%s describes itself as %q, not as itself", server, m.Resource)
 	}
 	issuer := strings.TrimSuffix(m.Issuers[0], "/")
 	iu, err := checkURL(issuer, insecure)
@@ -126,9 +132,13 @@ type loginOptions struct {
 	openBrowser func(string) error
 	noBrowser   bool
 	insecure    bool
-	in          io.Reader
-	out         io.Writer
-	timeout     time.Duration
+	// yes trusts the server's identity provider without asking.
+	yes bool
+	// dir holds the record of trusted servers.
+	dir     string
+	in      io.Reader
+	out     io.Writer
+	timeout time.Duration
 }
 
 // login signs a person in with the authorization code flow and PKCE:
@@ -138,6 +148,14 @@ type loginOptions struct {
 func login(ctx context.Context, hc *http.Client, server string, o loginOptions) (*credentials, error) {
 	m, e, err := discover(ctx, hc, server, o.insecure)
 	if err != nil {
+		return nil, err
+	}
+	// One reader for every answer the person types, so none is lost to
+	// another's buffer.
+	in := bufio.NewReader(o.in)
+	o.in = in
+	issuer := strings.TrimSuffix(m.Issuers[0], "/")
+	if err := confirmIssuer(o, server, issuer); err != nil {
 		return nil, err
 	}
 	redirect := "http://" + loopbackAddr + "/callback"
@@ -173,7 +191,7 @@ func login(ctx context.Context, hc *http.Client, server string, o loginOptions) 
 		return nil, err
 	}
 	c := &credentials{
-		Server: server, Issuer: strings.TrimSuffix(m.Issuers[0], "/"), ClientID: m.CLIClient, AssistantID: m.AssistantClient,
+		Server: server, Issuer: issuer, ClientID: m.CLIClient, AssistantID: m.AssistantClient,
 		TokenURL: e.Token, RevocationURL: e.Revocation,
 	}
 	tok.apply(c)
@@ -240,7 +258,7 @@ func loopbackCode(ctx context.Context, ln net.Listener, state, authURL string, o
 func pastedCode(state, authURL string, o loginOptions) (string, error) {
 	fmt.Fprintf(o.out, "Open this link in a browser, on any device, and sign in:\n\n  %s\n\n", authURL)
 	fmt.Fprintf(o.out, "The browser then goes to an address starting with http://%s/callback that won't load.\nPaste that whole address here: ", loopbackAddr)
-	line, err := bufio.NewReader(o.in).ReadString('\n')
+	line, err := readLine(o.in)
 	if err != nil && strings.TrimSpace(line) == "" {
 		return "", errors.New("no address pasted")
 	}
@@ -249,6 +267,57 @@ func pastedCode(state, authURL string, o loginOptions) (string, error) {
 		return "", errors.New("that isn't an address")
 	}
 	return codeFrom(u.Query(), state)
+}
+
+// readLine reads one line from r, through the bufio.Reader login made.
+func readLine(r io.Reader) (string, error) {
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReader(r)
+	}
+	return br.ReadString('\n')
+}
+
+// trustedPath records, for each server, the identity provider the person
+// agreed to sign in to it with.
+func trustedPath(dir string) string { return filepath.Join(dir, "trusted-servers.json") }
+
+// confirmIssuer asks the person, the first time they sign in to a server
+// (or when the server names a different identity provider than before),
+// whether to sign in to it with their account at that provider. Tokens are
+// sent to the server, so a hostile server naming a real provider would
+// otherwise receive a real sign-in (spec 021 T012 security review).
+// Without anyone to answer, it refuses unless --yes was given.
+func confirmIssuer(o loginOptions, server, issuer string) error {
+	trusted := map[string]string{}
+	if b, err := os.ReadFile(trustedPath(o.dir)); err == nil {
+		json.Unmarshal(b, &trusted)
+	}
+	for s, i := range trusted {
+		if sameServer(s, server) && i == issuer {
+			return nil
+		}
+	}
+	if !o.yes {
+		fmt.Fprintf(o.out, "%s signs people in with the identity provider %s.\n"+
+			"Signing in sends your sign-in for that account to %s. Continue only if you expect that. [y/N]: ", server, issuer, server)
+		line, _ := readLine(o.in)
+		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+			return fmt.Errorf("not confirmed: %s with identity provider %s (add --yes to confirm without asking)", server, issuer)
+		}
+	}
+	trusted[server] = issuer
+	b, err := json.MarshalIndent(trusted, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(o.dir, 0o700); err != nil {
+		return err
+	}
+	if err := makePrivate(o.dir); err != nil {
+		return err
+	}
+	return os.WriteFile(trustedPath(o.dir), b, 0o600)
 }
 
 // codeFrom reads the authorization code from a redirect's query. The state
