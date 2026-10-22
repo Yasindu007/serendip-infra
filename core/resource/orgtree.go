@@ -30,9 +30,13 @@ type TeamStatus struct {
 
 type Team = Resource[TeamSpec, TeamStatus]
 
-// ProjectSpec has no fields yet -- Project groups related Applications;
-// that grouping is expressed via OwnerRefs, not fields here.
-type ProjectSpec struct{}
+// ProjectSpec: a Project groups related Applications and Environments,
+// through OwnerRefs (resource-model.md; an Azure subscription, plan 020
+// decision 2). Pipeline is the order releases move through its
+// Environments; empty means a single stage.
+type ProjectSpec struct {
+	Pipeline Pipeline `json:"pipeline,omitzero"`
+}
 
 type ProjectStatus struct {
 	Status

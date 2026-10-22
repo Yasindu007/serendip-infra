@@ -376,3 +376,28 @@ func TestOwnersAndDescendants(t *testing.T) {
 		t.Errorf("Descendants(web) = %v, %v; want none", leaf, err)
 	}
 }
+
+// A Deployment (spec 020) is owned by its Environment and depends on its
+// Component, through the envelope's generic edges: it's among the
+// Component's dependents and blast radius, and among the Environment's
+// children (which a cascade delete covers).
+func TestDeploymentEdges(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	env := ref(resource.KindEnvironment, "staging")
+	comp := ref(resource.KindComponent, "web")
+	dep := ref(resource.KindDeployment, "d1")
+	if err := graph.SyncEdges(ctx, db, dep, []resource.OwnerRef{{Kind: env.Kind, ID: env.ID}},
+		resource.DeploymentRelationships(resource.DeploymentSpec{Component: comp.ID})); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := graph.Dependents(ctx, db, comp); len(got) != 1 || got[0] != dep {
+		t.Errorf("Dependents(component) = %v", got)
+	}
+	if got, _ := graph.Children(ctx, db, env); len(got) != 1 || got[0] != dep {
+		t.Errorf("Children(environment) = %v", got)
+	}
+	if got, _ := graph.BlastRadius(ctx, db, comp); !slices.Contains(got, dep) {
+		t.Errorf("BlastRadius(component) = %v, want the Deployment in it", got)
+	}
+}

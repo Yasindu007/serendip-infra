@@ -43,7 +43,7 @@ Dependency sketch:
 - **Verify:** each item has observed evidence, and the scratch objects
   are gone.
 
-## T002 — The capability interfaces and the Deployment kind
+## T002 — The capability interfaces and the Deployment kind ✅ 2026-10-22
 
 - **Do:**
   - **`core/resource`:**

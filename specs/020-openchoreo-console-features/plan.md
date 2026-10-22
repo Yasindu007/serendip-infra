@@ -286,8 +286,25 @@ Components were restored exactly.
      (`providers/application/openchoreo`). `core/` sees only
      capability-shaped interfaces (decision 4).
 
-4. **Capability interfaces in `core/`** (constitution 1). Their shape is
-   settled in T002:
+4. **Capability interfaces in `core/`** (constitution 1). **As settled
+   in T002** (`core/reconcile/platform.go`), they're separate small
+   interfaces, not growth of `ApplicationPlatformProvider`, so existing
+   providers and fakes are untouched, and a provider offers what it can:
+   - `DeploymentProvider`: `EnsureEnvironment`/`DeleteEnvironment`,
+     `EnsurePipeline`, `Releases`, `CreateRelease`, `Deploy`, `Undeploy`;
+   - `RuntimeProvider`: `RuntimeObjects`, `Events`, and `Logs`, which
+     returns a `LogStream` of lines;
+   - `ConfigSchemaProvider`: `ConfigSchemas`, for the environment
+     configuration and each trait;
+   - `PlatformViewProvider`: `Platform`.
+   - **Topology needs no provider:** dependencies are Serendip's own
+     `depends-on` relationships in the graph.
+   - **The model:** `KindDeployment` (`core/resource/deployment.go`) is
+     owned by its Environment, with a derived `depends-on` edge to its
+     Component. A Project's spec gains a `Pipeline` of promotion paths,
+     validated as one start, acyclic.
+
+   The first sketch, kept for the record:
    - **`ApplicationPlatformProvider` grows:**
      - `Releases(component)`;
      - `Deploy(component, environment, release)`, the same call for
