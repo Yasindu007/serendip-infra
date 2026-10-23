@@ -17,8 +17,8 @@ Last updated: 2026-10-23
 ## Current phase
 
 **Spec 020 (OpenChoreo's portal features in Serendip's console): IN
-PROGRESS.** The plan was approved 2026-10-22. T001–T010 are done and
-committed, one commit each (`fd01e8c` … `adef733`, not pushed). Every
+PROGRESS.** The plan was approved 2026-10-22. T001–T011 are done and
+committed, one commit each (`fd01e8c` … `f81d33f`, not pushed). Every
 task's "Done as" note in `specs/020-openchoreo-console-features/tasks.md`
 records what was built and decided.
 
@@ -44,12 +44,12 @@ records what was built and decided.
   through an Approval. Readiness is per optional capability, and
   `GET /v1/packages` lists them. The `build` and `observability`
   catalogue entries have no installer until 022 and 023.
+- **The CLI:** `serendip deployments logs <id> --follow` streams, with
+  workload text escaped. `catalog.Param.CLIOnly` keeps `follow` off MCP.
 - **Records:** RP-028 to RP-033 were added. `docs/cli-and-mcp.md` is
   regenerated.
 
 **Next:**
-- **T011:** CLI `--follow` for logs, MCP wording, and the catalogue
-  check.
 - **T012:** the console (screens for all of the above).
 - **T013:** acceptance tests.
 - **T014:** footprint.
