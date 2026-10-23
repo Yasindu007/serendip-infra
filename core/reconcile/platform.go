@@ -46,6 +46,8 @@ type DeploymentProvider interface {
 	// EnsurePipeline makes project's promotion order exist on the platform
 	// (the platform doesn't enforce it; Serendip does).
 	EnsurePipeline(ctx context.Context, project resource.Project) error
+	// DeletePipeline removes a deleted Project's promotion order.
+	DeletePipeline(ctx context.Context, projectID string) error
 	// Releases lists comp's releases, newest first.
 	Releases(ctx context.Context, comp resource.Component) ([]Release, error)
 	// CreateRelease snapshots comp's current workload as a release.
@@ -55,8 +57,8 @@ type DeploymentProvider interface {
 	// rollback.
 	Deploy(ctx context.Context, app resource.Application, comp resource.Component, env resource.Environment, d resource.Deployment) (DeploymentObservation, error)
 	// Undeploy stops d running. Only its ID and spec are needed, since the
-	// Serendip record may already be gone.
-	Undeploy(ctx context.Context, d resource.Deployment, env resource.Environment) error
+	// Serendip record, and its Environment's, may already be gone.
+	Undeploy(ctx context.Context, d resource.Deployment) error
 }
 
 // RuntimeObject is one object a Deployment runs as on the platform.

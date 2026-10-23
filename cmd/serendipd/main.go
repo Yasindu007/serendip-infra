@@ -118,7 +118,11 @@ func run() error {
 		secretReconciler = kube.secretReconciler
 		authn = kube.authn
 	}
-	registerApprovals(db, bus, engine, secretReconciler)
+	var platformCleaners map[resource.Kind]reconcile.CleanupFunc
+	if kube != nil {
+		platformCleaners = kube.cleaners
+	}
+	registerApprovals(db, bus, engine, secretReconciler, platformCleaners)
 	if len(agentIssuers) > 0 {
 		agents, err := agentVerifiers(ctx, agentIssuers)
 		if err != nil {

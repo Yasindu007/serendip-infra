@@ -3,6 +3,7 @@ package resource_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -135,5 +136,63 @@ func TestDeploymentRelationships(t *testing.T) {
 	want := []resource.Relationship{{Type: resource.EdgeDependsOn, TargetKind: resource.KindComponent, TargetID: "c1"}}
 	if !slices.Equal(rels, want) {
 		t.Errorf("relationships = %+v", rels)
+	}
+}
+
+func TestAdmitRelease(t *testing.T) {
+	p := resource.Pipeline{Paths: []resource.PromotionPath{{From: "dev", To: []string{"staging"}}, {From: "staging", To: []string{"prod"}}}}
+	running := map[string]string{"dev": "r2", "staging": "r1"}
+	tests := []struct {
+		name, env, release string
+		history            []string
+		pipeline           resource.Pipeline
+		ok                 bool
+		err                string
+	}{
+		{name: "no pipeline: anything", env: "x", release: "", pipeline: resource.Pipeline{}, ok: true},
+		{name: "latest enters at the start", env: "dev", release: "", pipeline: p, ok: true},
+		{name: "any release at the start", env: "dev", release: "r0", pipeline: p, ok: true},
+		{name: "latest further along", env: "staging", release: "", pipeline: p, err: "first Environment"},
+		{name: "promoted from the predecessor", env: "staging", release: "r2", pipeline: p, ok: true},
+		{name: "skipping a stage", env: "prod", release: "r2", pipeline: p, err: "promotes here"},
+		{name: "promoted along the next step", env: "prod", release: "r1", pipeline: p, ok: true},
+		{name: "rollback to what ran before", env: "prod", release: "r0", history: []string{"r0"}, pipeline: p, ok: true},
+		{name: "a release nobody ran", env: "prod", release: "r9", pipeline: p, err: "promotes here"},
+		{name: "outside the pipeline", env: "qa", release: "r2", pipeline: p, err: "isn't in the Project's pipeline"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := resource.AdmitRelease(tt.pipeline, tt.env, tt.release, running, tt.history)
+			if tt.ok {
+				if err != nil {
+					t.Fatalf("err = %v", err)
+				}
+				return
+			}
+			if err == nil || !errors.Is(err, resource.ErrPipeline) || !errors.Is(err, resource.ErrValidation) || !strings.Contains(err.Error(), tt.err) {
+				t.Fatalf("err = %v, want a pipeline refusal containing %q", err, tt.err)
+			}
+		})
+	}
+}
+
+func TestRecordRelease(t *testing.T) {
+	h := resource.RecordRelease(nil, "", "r1")
+	if len(h) != 0 {
+		t.Errorf("first release recorded history %v", h)
+	}
+	h = resource.RecordRelease(h, "r1", "r2")
+	h = resource.RecordRelease(h, "r2", "r1") // rollback: r1 leaves history, r2 enters
+	if !slices.Equal(h, []string{"r2"}) {
+		t.Errorf("history = %v, want [r2]", h)
+	}
+	if got := resource.RecordRelease(h, "r1", "r1"); !slices.Equal(got, h) {
+		t.Error("no change changed history")
+	}
+	for i := range 20 {
+		h = resource.RecordRelease(h, fmt.Sprintf("r%d", i+10), fmt.Sprintf("r%d", i+11))
+	}
+	if len(h) != resource.MaxDeploymentHistory {
+		t.Errorf("history grew to %d", len(h))
 	}
 }

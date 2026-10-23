@@ -203,6 +203,12 @@ tools.
 | `serendip components get <id>` | `components_get` | `GET /v1/components/{id}` | Get one Component |
 | `serendip components list` | `components_list` | `GET /v1/components` | List components the caller may read |
 | `serendip components update <id>` | `components_update` | `PUT /v1/components/{id}` | Replace a Component's spec (send the version read, for a conflict check) |
+| `serendip deployments create` | `deployments_create` | `POST /v1/deployments` | Create a Deployment |
+| `serendip deployments delete <id>` | `deployments_delete` | `DELETE /v1/deployments/{id}` | Delete a Deployment. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
+| `serendip deployments get <id>` | `deployments_get` | `GET /v1/deployments/{id}` | Get one Deployment |
+| `serendip deployments list` | `deployments_list` | `GET /v1/deployments` | List deployments the caller may read |
+| `serendip deployments promote <id>` | `deployments_promote` | `POST /v1/deployments/{id}/promote` | Run the release a Deployment runs now in the next Environment of the Project's pipeline. The target keeps its own overrides |
+| `serendip deployments update <id>` | `deployments_update` | `PUT /v1/deployments/{id}` | Replace a Deployment's spec (send the version read, for a conflict check) |
 | `serendip environments create` | — | `POST /v1/environments` | Create a Environment |
 | `serendip environments delete <id>` | — | `DELETE /v1/environments/{id}` | Delete a Environment. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
 | `serendip environments get <id>` | — | `GET /v1/environments/{id}` | Get one Environment |

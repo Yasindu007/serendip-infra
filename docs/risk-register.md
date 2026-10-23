@@ -558,3 +558,32 @@ purpose), **Closed** (fixed).
 - **Revisit:** when a list costs measurable time on the T470, or
   releases exceed a few hundred. Options are labelling legacy releases
   once, pruning old releases, or a release index.
+
+## RP-030 — Deployment writes scan every Deployment; platform failures wait for a resync
+
+- **Kind:** performance and resilience. **Status:** Accepted, 2026-10-23.
+  **Found:** spec 020 T006 review.
+- **What:**
+  - **Each Deployment create, update or promote lists every Deployment.**
+    The pipeline rule needs the release this Component runs in every
+    other Environment. Writes are serialised by one mutex in the
+    handler, which also makes "one Deployment per Component per
+    Environment" hold under concurrent requests on one control plane.
+  - **A failed `Deploy` that isn't "provider not ready"** becomes an
+    `EnsureFailed` condition and waits for the next resync instead of
+    backing off. This matches the Application and Component reconcilers.
+  - **A pipeline naming a since-deleted Environment** keeps failing in
+    the Project reconciler until someone edits it. The API checks the
+    pipeline only when it's written.
+- **Why accepted:** edge-1 has tens of Deployments, so the list is small
+  and the mutex is never contended in practice. Consistent failure
+  handling across the platform reconcilers is worth more than one being
+  different.
+- **Revisit:**
+  - **Scan and mutex:** when Deployments reach the hundreds, or when
+    more than one `serendipd` writes. Options are an index by Component,
+    or a unique constraint in the store.
+  - **Failures:** together with the other platform reconcilers, if
+    resync latency turns out to hurt.
+  - **Deleted Environments:** remove them from pipelines when they are
+    deleted.

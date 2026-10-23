@@ -27,6 +27,7 @@ var kinds = []kind{
 	{"Alert", "alerts", false},
 	{"Volume", "volumes", false},
 	{"Secret", "secrets", true},
+	{"Deployment", "deployments", true},
 }
 
 // KindPaths maps each kind's name to its collection path, for the parity
@@ -219,6 +220,12 @@ var operations = func() []Operation {
 		Operation{Name: "approvals_reject", CLI: []string{"approvals", "reject"},
 			Summary: "Reject a request", Method: "POST", Path: "/v1/approvals/{id}/reject",
 			Params: []Param{approvalID, comment}},
+
+		Operation{Name: "deployments_promote", CLI: []string{"deployments", "promote"}, MCP: true,
+			Summary: "Run the release a Deployment runs now in the next Environment of the Project's pipeline. The target keeps its own overrides",
+			Method:  "POST", Path: "/v1/deployments/{id}/promote",
+			Params: []Param{id("Deployment"), {Name: "to", In: InField, Required: true, Description: "ID of the Environment to promote to"}},
+			Hints:  Hints{Destructive: true, Idempotent: true}},
 
 		Operation{Name: "secrets_read_value", CLI: []string{"secrets", "value", "get"}, MCP: true, SecretValue: true,
 			Summary: "Read a Secret's value. Needs the secrets value data permission", Method: "GET", Path: "/v1/secrets/{id}/value",

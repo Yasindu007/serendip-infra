@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 )
 
 // KindDeployment is one Component, running in one Environment
@@ -47,6 +48,68 @@ type DeploymentStatus struct {
 	// Release is the release actually running.
 	Release   string                    `json:"release,omitempty"`
 	Endpoints []ComponentEndpointStatus `json:"endpoints,omitempty"`
+	// History is the releases this Deployment ran before, newest first, at
+	// most MaxDeploymentHistory: what it may roll back to.
+	History []string `json:"history,omitempty"`
+}
+
+// MaxDeploymentHistory bounds DeploymentStatus.History.
+const MaxDeploymentHistory = 10
+
+// RecordRelease returns history with previous added in front (when it's a
+// real change), deduplicated and bounded.
+func RecordRelease(history []string, previous, current string) []string {
+	if previous == "" || previous == current {
+		return history
+	}
+	out := []string{previous}
+	for _, r := range history {
+		if r != previous && r != current && len(out) < MaxDeploymentHistory {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// ErrPipeline is a release that may not run in an Environment: it hasn't
+// come along the Project's pipeline.
+var ErrPipeline = fmt.Errorf("%w: pipeline", ErrValidation)
+
+// AdmitRelease decides whether release may run in env, for one Component,
+// under the Project's pipeline (plan 020 decision 2; the platform doesn't
+// enforce it). running is the release each Environment runs now (by
+// Environment ID); history is what env itself ran before.
+//   - Without a pipeline, anything goes.
+//   - In the first Environment, anything goes: releases enter there.
+//   - Elsewhere, "latest" (an empty release) is refused, and a release must
+//     run now in an Environment that promotes to env, or be one env ran
+//     before (a rollback).
+func AdmitRelease(p Pipeline, env, release string, running map[string]string, history []string) error {
+	if len(p.Paths) == 0 {
+		return nil
+	}
+	if !slices.Contains(p.Environments(), env) {
+		return fmt.Errorf("%w: this Environment isn't in the Project's pipeline", ErrPipeline)
+	}
+	if env == p.First() {
+		return nil
+	}
+	if release == "" {
+		return fmt.Errorf("%w: a new release enters at the pipeline's first Environment (%s); name the release to promote", ErrPipeline, p.First())
+	}
+	if slices.Contains(history, release) {
+		return nil
+	}
+	var from []string
+	for _, path := range p.Paths {
+		if slices.Contains(path.To, env) {
+			from = append(from, path.From)
+			if running[path.From] == release {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%w: release %s isn't running in an Environment that promotes here (%s), and this Environment hasn't run it before", ErrPipeline, release, strings.Join(from, ", "))
 }
 
 type Deployment = Resource[DeploymentSpec, DeploymentStatus]

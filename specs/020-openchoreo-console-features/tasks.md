@@ -119,7 +119,7 @@ T006's route rule.
   server, including names within limits and idempotent re-apply.
 - **Then:** `contract-guardian`.
 
-## T006 — The Deployment reconciler and API
+## T006 — The Deployment reconciler and API ✅ 2026-10-23
 
 - **Do:**
   - **The reconciler:** drives `Deploy`/`Undeploy` and writes conditions.
@@ -135,6 +135,20 @@ T006's route rule.
 - **Verify:** `go test ./...`. Table tests for promotion paths (allowed
   and skipped), rollback, overrides not carried over, an agent's
   undeploy waiting for a person, and audit rows.
+- **Done as:**
+  - `/v1/deployments` (an Environment owns each Deployment) plus
+    `POST /v1/deployments/{id}/promote {to}`. Rollback is a `PUT` naming a
+    release from `status.history` (the last 10 releases).
+  - The pipeline lives on the Project (`PUT /v1/projects/{id}`), checked
+    to name only its own Environments.
+  - Deploying also needs reading the Component. Promoting needs writing
+    at the target Environment.
+  - The handler's extra checks join the audit row's policy evidence.
+  - `allowedAt` now fails closed with no decider; the authorizer attaches
+    one on every route.
+  - **Restart is deferred:** it needs a provider call (a rollout restart
+    on the data plane), and no acceptance criterion depends on it. It
+    lands with T007's runtime work or later.
 
 ## T007 [P] — The runtime view: tree, events, pod logs
 

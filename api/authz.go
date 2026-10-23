@@ -102,6 +102,7 @@ var resourcePaths = map[resource.Kind]string{
 	resource.KindAlert:            "alerts",
 	resource.KindVolume:           "volumes",
 	resource.KindSecret:           "secrets",
+	resource.KindDeployment:       "deployments",
 }
 
 func authzAction(what, verb string) policy.Action {
@@ -166,6 +167,10 @@ func routeTable() map[string]rule {
 		"GET /v1/approvals/{id}":          {action: approvalsAction("read"), target: targetApprovalRead, kind: resource.KindApproval},
 		"POST /v1/approvals/{id}/approve": {action: approvalsAction("write"), target: targetApprovalDecide, kind: resource.KindApproval},
 		"POST /v1/approvals/{id}/reject":  {action: approvalsAction("write"), target: targetApprovalDecide, kind: resource.KindApproval},
+
+		// Promote reads the source Deployment; the handler checks writing
+		// deployments at the target Environment (spec 020).
+		"POST /v1/deployments/{id}/promote": {action: action(resource.KindDeployment, "read"), target: targetResource, kind: resource.KindDeployment},
 
 		"POST /v1/secrets/{id}/value": {action: policy.Action{Name: "serendip/secrets/value/write", Data: true}, target: targetResource, kind: resource.KindSecret},
 		"GET /v1/secrets/{id}/value":  {action: policy.Action{Name: "serendip/secrets/value/read", Data: true}, target: targetResource, kind: resource.KindSecret},
@@ -252,14 +257,25 @@ type deciderKey struct{}
 
 type decider func(ctx context.Context, act policy.Action, at resource.Scope) (bool, error)
 
-// allowedAt answers through the request's decider. Without one (a handler
-// on a plain mux, in unit tests) everything is allowed, as for lists.
+// allowedAt answers through the request's decider, which the authorizer
+// attaches to every route it lets through. Without one it refuses: a
+// permission check never fails open (spec 020 T006 found a handler's extra
+// check silently passing on a route that had none).
 func allowedAt(ctx context.Context, act policy.Action, at resource.Scope) (bool, error) {
 	d, ok := ctx.Value(deciderKey{}).(decider)
 	if !ok {
-		return true, nil
+		return false, nil
 	}
 	return d(ctx, act, at)
+}
+
+// withDecider lets a handler ask further "may the caller do this there?"
+// questions of the policy engine (allowedAt).
+func (a *authorizer) withDecider(ctx context.Context, caller policy.Principal) context.Context {
+	return context.WithValue(ctx, deciderKey{}, decider(func(ctx context.Context, act policy.Action, at resource.Scope) (bool, error) {
+		d, err := a.engine.Decide(ctx, caller, act, at)
+		return d.Effect == policy.Allow, err
+	}))
 }
 
 func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
@@ -272,7 +288,7 @@ func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 			WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", reqID)
 			return
 		}
-		ctx := r.Context()
+		ctx := a.withDecider(r.Context(), caller)
 		switch {
 		case ru.authOnly:
 			h(w, r.WithContext(ctx))
@@ -309,10 +325,6 @@ func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 				}
 				decided[key] = d.Effect == policy.Allow
 				return decided[key], nil
-			}))
-			ctx = context.WithValue(ctx, deciderKey{}, decider(func(ctx context.Context, act policy.Action, at resource.Scope) (bool, error) {
-				d, err := a.engine.Decide(ctx, caller, act, at)
-				return d.Effect == policy.Allow, err
 			}))
 			h(w, r.WithContext(ctx))
 			return

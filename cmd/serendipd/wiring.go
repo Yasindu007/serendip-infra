@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"strconv"
 	"sync/atomic"
@@ -37,9 +38,12 @@ const defaultReensureInterval = 5 * time.Minute
 // providers up.
 type kubeWiring struct {
 	secretReconciler *reconcile.SecretReconciler
-	authn            *lazyAuthenticator
-	login            *lazyLogin
-	directory        *lazyDirectory
+	// cleaners are the platform's clean-ups for removed Deployments,
+	// Environments and Projects (spec 020), run by the approval reconciler.
+	cleaners  map[resource.Kind]reconcile.CleanupFunc
+	authn     *lazyAuthenticator
+	login     *lazyLogin
+	directory *lazyDirectory
 	// issuer is the human issuer once identity is set up, or "".
 	issuer func() string
 	plan   setupPlan
@@ -119,6 +123,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 	credentialsPath := envOr("SERENDIP_OPENBAO_CREDENTIALS_PATH", defaultOpenBaoCredentialsPath)
 
 	storage, secrets, platform, authn := &lazyStorage{}, &lazySecrets{}, &lazyPlatform{}, &lazyAuthenticator{}
+	deployments := &lazyDeployments{}
 	directory := &lazyDirectory{}
 	login := &lazyLogin{}
 	// verifier is the identity setup's token verifier, shared with the
@@ -151,7 +156,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		login.set(rp)
 		log.Printf("serendipd: console login enabled (callback %s)", console.callback)
 	}
-	secretReconciler := registerKubernetesReconcilers(db, bus, engine, storage, secrets, platform)
+	secretReconciler := registerKubernetesReconcilers(db, bus, engine, storage, secrets, platform, deployments)
 
 	plan := setupPlan{
 		storage: func(ctx context.Context) error {
@@ -203,6 +208,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 			p := openchoreo.NewProvider(client, ep)
 			registry.Register(capAppPlatform, p)
 			platform.set(p)
+			deployments.set(p)
 			log.Print("serendipd: kubernetes: application platform provider (openchoreo) active")
 			return nil
 		},
@@ -295,7 +301,12 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		}
 		return ""
 	}
-	return &kubeWiring{secretReconciler: secretReconciler, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject, issuer: issuer}, nil
+	cleaners := map[resource.Kind]reconcile.CleanupFunc{
+		resource.KindDeployment:  reconcile.UndeployCleanup(deployments),
+		resource.KindEnvironment: reconcile.EnvironmentCleanup(deployments),
+		resource.KindProject:     reconcile.PipelineCleanup(deployments),
+	}
+	return &kubeWiring{secretReconciler: secretReconciler, cleaners: cleaners, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject, issuer: issuer}, nil
 }
 
 // ensureGatewayReady ensures the shared gateway and treats "not programmed
@@ -331,7 +342,7 @@ func ensurePlatformFoundations(ctx context.Context, client *kubernetes.Client, e
 // engine against the given (lazy) providers, and returns the
 // SecretReconciler api.SecretHandler needs. Must run before engine.Run.
 func registerKubernetesReconcilers(db *sql.DB, bus event.Bus, engine *reconcile.Engine,
-	storage reconcile.StorageProvider, secrets reconcile.SecretsProvider, platform reconcile.ApplicationPlatformProvider,
+	storage reconcile.StorageProvider, secrets reconcile.SecretsProvider, platform reconcile.ApplicationPlatformProvider, deployments reconcile.DeploymentProvider,
 ) *reconcile.SecretReconciler {
 	volumes := sqlite.NewStore[resource.VolumeSpec, resource.VolumeStatus](db, resource.KindVolume).SetBus(bus)
 	engine.Register(resource.KindVolume, reconcile.NewVolumeReconciler(volumes, storage), lister(volumes, resource.KindVolume))
@@ -344,6 +355,13 @@ func registerKubernetesReconcilers(db *sql.DB, bus event.Bus, engine *reconcile.
 	components := sqlite.NewStore[resource.ComponentSpec, resource.ComponentStatus](db, resource.KindComponent).SetBus(bus)
 	engine.Register(resource.KindApplication, reconcile.NewApplicationReconciler(apps, platform), lister(apps, resource.KindApplication))
 	engine.Register(resource.KindComponent, reconcile.NewComponentReconciler(components, apps, platform), lister(components, resource.KindComponent))
+	// Spec 020: Deployments run Components in Environments, and Projects
+	// carry their promotion pipelines.
+	deploymentStore := sqlite.NewStore[resource.DeploymentSpec, resource.DeploymentStatus](db, resource.KindDeployment).SetBus(bus)
+	envs := sqlite.NewStore[resource.EnvironmentSpec, resource.EnvironmentStatus](db, resource.KindEnvironment).SetBus(bus)
+	projects := sqlite.NewStore[resource.ProjectSpec, resource.ProjectStatus](db, resource.KindProject).SetBus(bus)
+	engine.Register(resource.KindDeployment, reconcile.NewDeploymentReconciler(deploymentStore, envs, components, apps, deployments), lister(deploymentStore, resource.KindDeployment))
+	engine.Register(resource.KindProject, reconcile.NewProjectReconciler(projects, deployments), lister(projects, resource.KindProject))
 
 	return secretReconciler
 }
@@ -353,7 +371,7 @@ func registerKubernetesReconcilers(db *sql.DB, bus event.Bus, engine *reconcile.
 // value from the approval's record, and verifies. secrets is nil without a
 // cluster; a Secret's clean-up then waits, honestly not ready, until one is
 // configured. Must run before engine.Run.
-func registerApprovals(db *sql.DB, bus event.Bus, engine *reconcile.Engine, secrets *reconcile.SecretReconciler) {
+func registerApprovals(db *sql.DB, bus event.Bus, engine *reconcile.Engine, secrets *reconcile.SecretReconciler, platformCleaners map[resource.Kind]reconcile.CleanupFunc) {
 	approvals := sqlite.NewStore[resource.ApprovalSpec, resource.ApprovalStatus](db, resource.KindApproval).SetBus(bus)
 	// The store's delete is kind-agnostic below its type parameters, so one
 	// raw store per call serves every kind.
@@ -369,7 +387,9 @@ func registerApprovals(db *sql.DB, bus event.Bus, engine *reconcile.Engine, secr
 	exists := func(ctx context.Context, kind resource.Kind, id string) (bool, error) {
 		return sqlite.ResourceExists(ctx, db, kind, id)
 	}
-	r := reconcile.NewApprovalReconciler(approvals, del, map[resource.Kind]reconcile.CleanupFunc{resource.KindSecret: eraseSecret}, exists, time.Now)
+	cleaners := map[resource.Kind]reconcile.CleanupFunc{resource.KindSecret: eraseSecret}
+	maps.Copy(cleaners, platformCleaners)
+	r := reconcile.NewApprovalReconciler(approvals, del, cleaners, exists, time.Now)
 	// Resync revisits only unsettled approvals, by their index: approvals
 	// only grow, so listing them all every resync would too.
 	engine.Register(resource.KindApproval, r, func(ctx context.Context) ([]graph.ResourceRef, error) {

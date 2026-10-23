@@ -195,3 +195,75 @@ func (l *lazyLogin) client() identity.LoginClient {
 	}
 	return lc
 }
+
+// lazyDeployments is the platform's DeploymentProvider (spec 020), set
+// with lazyPlatform when the platform is ready.
+type lazyDeployments struct {
+	lazy[reconcile.DeploymentProvider]
+}
+
+var _ reconcile.DeploymentProvider = (*lazyDeployments)(nil)
+
+func (l *lazyDeployments) EnsureEnvironment(ctx context.Context, env resource.Environment) error {
+	p, err := l.get()
+	if err != nil {
+		return err
+	}
+	return p.EnsureEnvironment(ctx, env)
+}
+
+func (l *lazyDeployments) DeleteEnvironment(ctx context.Context, env resource.Environment) error {
+	p, err := l.get()
+	if err != nil {
+		return err
+	}
+	return p.DeleteEnvironment(ctx, env)
+}
+
+func (l *lazyDeployments) EnsurePipeline(ctx context.Context, project resource.Project) error {
+	p, err := l.get()
+	if err != nil {
+		return err
+	}
+	return p.EnsurePipeline(ctx, project)
+}
+
+func (l *lazyDeployments) DeletePipeline(ctx context.Context, projectID string) error {
+	p, err := l.get()
+	if err != nil {
+		return err
+	}
+	return p.DeletePipeline(ctx, projectID)
+}
+
+func (l *lazyDeployments) Releases(ctx context.Context, comp resource.Component) ([]reconcile.Release, error) {
+	p, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return p.Releases(ctx, comp)
+}
+
+func (l *lazyDeployments) CreateRelease(ctx context.Context, comp resource.Component) (reconcile.Release, error) {
+	p, err := l.get()
+	if err != nil {
+		return reconcile.Release{}, err
+	}
+	return p.CreateRelease(ctx, comp)
+}
+
+func (l *lazyDeployments) Deploy(ctx context.Context, app resource.Application, comp resource.Component, env resource.Environment, d resource.Deployment) (reconcile.DeploymentObservation, error) {
+	p, err := l.get()
+	if err != nil {
+		return reconcile.DeploymentObservation{}, err
+	}
+	return p.Deploy(ctx, app, comp, env, d)
+}
+
+func (l *lazyDeployments) Undeploy(ctx context.Context, d resource.Deployment) error {
+	p, err := l.get()
+	if err != nil {
+		return err
+	}
+	return p.Undeploy(ctx, d)
+}

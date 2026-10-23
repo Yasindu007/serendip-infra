@@ -417,7 +417,7 @@ func TestUndeploy(t *testing.T) {
 		Spec: mustJSON(bindingSpec{Environment: environmentObjectName(testEnvID), Owner: ownerRef{ProjectName: projectName(testAppID), ComponentName: "cmp-2"}})})
 
 	d := testDeployment(resource.DeploymentSpec{})
-	if err := p.Undeploy(context.Background(), d, testEnv()); err != nil {
+	if err := p.Undeploy(context.Background(), d); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := api.objects[bindingPath()]; ok {
@@ -434,13 +434,13 @@ func TestUndeploy(t *testing.T) {
 	// Undeploying what's already gone is fine, and the project binding goes
 	// with the last binding.
 	deploy(t, p, testDeployment(resource.DeploymentSpec{}))
-	if err := p.Undeploy(context.Background(), d, testEnv()); err != nil {
+	if err := p.Undeploy(context.Background(), d); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := api.objects[prbPath()]; ok {
 		t.Error("the project binding stayed after the last Deployment there")
 	}
-	if err := p.Undeploy(context.Background(), d, testEnv()); err != nil {
+	if err := p.Undeploy(context.Background(), d); err != nil {
 		t.Errorf("undeploying again = %v", err)
 	}
 }
@@ -452,14 +452,14 @@ func TestUndeploy_RetryAfterAFailureStillCleansUp(t *testing.T) {
 	p := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway)
 	deploy(t, p, testDeployment(resource.DeploymentSpec{}))
 	api.failPath = namespacedPath("projectreleasebindings")
-	if err := p.Undeploy(context.Background(), testDeployment(resource.DeploymentSpec{}), testEnv()); err == nil {
+	if err := p.Undeploy(context.Background(), testDeployment(resource.DeploymentSpec{})); err == nil {
 		t.Fatal("Undeploy succeeded with the project binding undeletable")
 	}
 	if _, ok := api.objects[bindingPath()]; !ok {
 		t.Fatal("the Deployment's binding went before the project binding")
 	}
 	api.failPath = ""
-	if err := p.Undeploy(context.Background(), testDeployment(resource.DeploymentSpec{}), testEnv()); err != nil {
+	if err := p.Undeploy(context.Background(), testDeployment(resource.DeploymentSpec{})); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := api.objects[prbPath()]; ok {

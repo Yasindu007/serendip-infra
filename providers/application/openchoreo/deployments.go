@@ -309,29 +309,39 @@ func (p *Provider) Deploy(ctx context.Context, app resource.Application, comp re
 	return obs, nil
 }
 
-// Undeploy stops d running in env. When it was the last of its
-// Application's deployments there, the Application's binding to the
+// DeletePipeline removes a deleted Project's pipeline.
+func (p *Provider) DeletePipeline(ctx context.Context, projectID string) error {
+	return p.deleteIgnoringNotFound(ctx, namespacedPath("deploymentpipelines")+"/"+pipelineName(projectID))
+}
+
+// Undeploy stops d running. Its binding is found by the Deployment's ID
+// label (Deploy sets it), so neither the Serendip record nor its
+// Environment's is needed. When it was the last of its Application's
+// deployments in that Environment, the Application's binding to the
 // Environment goes too, removing the data-plane namespace. That's decided,
 // and done, before the Deployment's own binding is deleted, so a retry
-// after a failure still finds the binding it needs to know the project.
-// Reconciles run one at a time (core/reconcile's engine), so a Deploy into
+// after a failure still finds the binding it needs. Reconciles and
+// clean-ups run one at a time (core/reconcile's engine), so a Deploy into
 // the same Environment can't interleave.
-func (p *Provider) Undeploy(ctx context.Context, d resource.Deployment, env resource.Environment) error {
-	path := namespacedPath("releasebindings") + "/" + deploymentBindingName(d.Spec.Component, env.Metadata.ID)
-	binding, err := p.client.Get(ctx, path)
-	if errors.Is(err, kubernetes.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("get the binding of Deployment %s: %w", d.Metadata.ID, err)
-	}
-	var spec bindingSpec
-	if err := json.Unmarshal(binding.Spec, &spec); err != nil {
-		return fmt.Errorf("decode the binding of Deployment %s: %w", d.Metadata.ID, err)
-	}
+func (p *Provider) Undeploy(ctx context.Context, d resource.Deployment) error {
 	all, err := p.client.List(ctx, namespacedPath("releasebindings"))
 	if err != nil {
 		return fmt.Errorf("list bindings: %w", err)
+	}
+	var binding kubernetes.Object
+	var spec bindingSpec
+	found := false
+	for _, b := range all {
+		if b.Metadata.Labels[labelSerendipID] == d.Metadata.ID {
+			if err := json.Unmarshal(b.Spec, &spec); err != nil {
+				return fmt.Errorf("decode the binding of Deployment %s: %w", d.Metadata.ID, err)
+			}
+			binding, found = b, true
+			break
+		}
+	}
+	if !found {
+		return nil // never deployed, or already undeployed
 	}
 	last := true
 	for _, b := range all {
@@ -345,11 +355,11 @@ func (p *Provider) Undeploy(ctx context.Context, d resource.Deployment, env reso
 		}
 	}
 	if last {
-		if err := p.deleteIgnoringNotFound(ctx, namespacedPath("projectreleasebindings")+"/"+projectEnvBindingName(spec.Owner.ProjectName, env.Metadata.ID)); err != nil {
+		if err := p.deleteIgnoringNotFound(ctx, namespacedPath("projectreleasebindings")+"/"+spec.Owner.ProjectName+"-"+spec.Environment); err != nil {
 			return err
 		}
 	}
-	return p.deleteIgnoringNotFound(ctx, path)
+	return p.deleteIgnoringNotFound(ctx, namespacedPath("releasebindings")+"/"+binding.Metadata.Name)
 }
 
 func sortedKeys(m map[string]string) []string {

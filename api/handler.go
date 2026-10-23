@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -28,6 +29,15 @@ import (
 type ResourceHandler[S, St any] struct {
 	store store.Store[S, St]
 	path  string
+	// validate, when set, checks a spec on create and update; id is ""
+	// on create. Its error answers 400 (wrap resource.ErrValidation).
+	validate func(ctx context.Context, id string, spec S) error
+}
+
+// WithValidate makes the handler check specs with v before storing them.
+func (h *ResourceHandler[S, St]) WithValidate(v func(ctx context.Context, id string, spec S) error) *ResourceHandler[S, St] {
+	h.validate = v
+	return h
 }
 
 // NewResourceHandler returns a handler for one resource kind. path is the
@@ -50,6 +60,12 @@ func (h *ResourceHandler[S, St]) Create(w http.ResponseWriter, r *http.Request) 
 	var res resource.Resource[S, St]
 	if !decodeBody(w, r, &res) {
 		return
+	}
+	if h.validate != nil {
+		if err := h.validate(r.Context(), "", res.Spec); err != nil {
+			h.writeStoreError(w, r, err)
+			return
+		}
 	}
 	created, err := h.store.Create(r.Context(), res)
 	if err != nil {
@@ -106,6 +122,12 @@ func (h *ResourceHandler[S, St]) Update(w http.ResponseWriter, r *http.Request) 
 	// The path's {id} is authoritative over whatever the body claims --
 	// standard REST semantics for PUT /resource/{id}.
 	res.Metadata.ID = r.PathValue("id")
+	if h.validate != nil {
+		if err := h.validate(r.Context(), res.Metadata.ID, res.Spec); err != nil {
+			h.writeStoreError(w, r, err)
+			return
+		}
+	}
 
 	updated, err := h.store.Update(r.Context(), res)
 	if err != nil {
