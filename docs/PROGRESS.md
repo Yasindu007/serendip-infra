@@ -80,7 +80,7 @@ records what was built and decided.
 - **`serendipd`** (spec 020) runs on `:8088` against `serendip-t018`.
   - **Its scratch:** the T015 store copy, the run script, the CLI
     config, the console driver and the screenshots are in
-    `%TEMP%\claude\D--serendip-infrac3ed502-…\scratchpad	015\`.
+    `%TEMP%/claude/D--serendip-infra/5c3ed502-4ff6-4bd9-94ad-ac55cfc89763/scratchpad/t015/`.
   - **Restart it** with that folder's `run.ps1`. The API keys are
     `verifier` (Owner) and `t015-reader` (Reader at `t019-agents`).
 - **On the cluster:** `t020-staging`, `t020-production`, `t020-web` and
