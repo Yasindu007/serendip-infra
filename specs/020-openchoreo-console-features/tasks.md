@@ -444,11 +444,51 @@ Spec 020 authorises the UI work.
     through the API and CLI). It isn't in T012's list.
   - **Seen live in T015,** with a browser against `serendip-t018`.
 
-## T013 [A] — Acceptance tests
+## T013 [A] — Acceptance tests ✅ 2026-10-23
 
 - **Do:** in-process tests for spec acceptance criteria 1–7, 10 and 11,
   against a fake platform provider.
 - **Verify:** `go test -race ./...` is green.
+- **Done as:** `api/spec020_acceptance_test.go`, one
+  `TestSpec020Criterion<N>_…` per criterion. It runs the whole API stack
+  and the real Deployment and ProviderInstance reconcilers, called as the
+  engine would. `fakePlatform020` stands in for OpenChoreo: it remembers
+  the release and overrides it runs in each Environment, and reports them
+  back on the runtime view.
+  - **1:** the runtime tree, events and recent logs. Following runs over a
+    real connection (`httptest.NewServer`): lines arrive as they're
+    written, then `{"end":"ended"}`.
+  - **2:** deploy to development, then promote to staging and production.
+    - Production has its own replicas and variable; development doesn't.
+    - A new release moves along, and each Environment keeps its own
+      overrides.
+    - Skipping staging is refused.
+    - Each Environment shows its release and Ready.
+    - Rollback restores the earlier release and keeps production's
+      overrides.
+    - All 7 changes are audited as the person. A route's decision names
+      the role and scope; each promotion also names its write check at
+      the target.
+  - **3:** a Reader and a Reader agent are refused (403 naming the
+    action). A Contributor agent promotes at once. The audit row names
+    the agent, its sponsor and the decision.
+  - **4:** the trait's schema from `GET …/schemas`. 9 is refused with
+    "must be at most 5", and 4 reaches the running workload.
+  - **5:** topology and both sides of `…/dependencies`, from a dependency
+    declared through the API.
+  - **6:** the platform, environments and pipeline. `/v1/platform` takes
+    no writes.
+  - **7:** readiness reports `NotInstalled` for build and `Unavailable`
+    for observability. Deploying and the runtime view still work. An
+    install reads `Installing`, then Ready. The greyed-out sections are
+    the console's tests (T012).
+  - **10:** logs need `serendip/components/logs/read`. Package install
+    and removal are decided at `/`, and removal records an Approval.
+    That every route has a rule stays `TestEveryRouteHasARule`.
+  - **11:** every spec 020 route is a CLI command, and an MCP tool or
+    excluded with a reason. `follow` is CLI-only.
+  - **Test support:** `authzWorld` gained an optional `registry`, and
+    `newDeployWorldWith` sets it.
 
 ## T014 — Footprint
 

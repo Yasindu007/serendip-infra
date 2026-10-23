@@ -16,6 +16,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/policy"
+	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
@@ -32,6 +33,8 @@ type authzWorld struct {
 	db *sql.DB
 	h  http.Handler
 	id map[string]string // name -> resource ID
+	// registry, when grants sets it, serves GET /v1/readiness.
+	registry *provider.Registry
 }
 
 // people maps each test token to its person.
@@ -97,7 +100,7 @@ func newAuthzWorld(t *testing.T, grants func(w *authzWorld), opts ...api.ServerO
 	bus := event.NewInProcessBus()
 	secrets := sqlite.NewStore[resource.SecretSpec, resource.SecretStatus](w.db, resource.KindSecret).SetBus(bus)
 	rec := reconcile.NewSecretReconciler(secrets, newFakeSecretsProvider())
-	w.h = api.NewServer(w.db, bus, map[string]string{"key-ci": "ci"}, authn, rec, nil, nil, opts...).Handler
+	w.h = api.NewServer(w.db, bus, map[string]string{"key-ci": "ci"}, authn, rec, w.registry, nil, opts...).Handler
 	return w
 }
 

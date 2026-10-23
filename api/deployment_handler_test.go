@@ -11,6 +11,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/policy"
+	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
@@ -25,6 +26,12 @@ type deployWorld struct {
 
 func newDeployWorld(t *testing.T, opts ...api.ServerOption) *deployWorld {
 	t.Helper()
+	return newDeployWorldWith(t, nil, opts...)
+}
+
+// newDeployWorldWith is newDeployWorld with registry serving readiness.
+func newDeployWorldWith(t *testing.T, registry *provider.Registry, opts ...api.ServerOption) *deployWorld {
+	t.Helper()
 	people["tok-devops"] = identity.Principal{Subject: "sub-devops", Name: "devops"}
 	people["tok-envonly"] = identity.Principal{Subject: "sub-envonly", Name: "envonly"}
 	people["tok-owner-ai"] = identity.Principal{Subject: "sub-owner", Name: "owner", Via: "serendip-mcp"}
@@ -37,6 +44,7 @@ func newDeployWorld(t *testing.T, opts ...api.ServerOption) *deployWorld {
 	})
 	d := &deployWorld{}
 	d.authzWorld = newAuthzWorld(t, func(w *authzWorld) {
+		w.registry = registry
 		ctx := context.Background()
 		projects := sqlite.NewStore[resource.ProjectSpec, resource.ProjectStatus](w.db, resource.KindProject)
 		envs := sqlite.NewStore[resource.EnvironmentSpec, resource.EnvironmentStatus](w.db, resource.KindEnvironment)
