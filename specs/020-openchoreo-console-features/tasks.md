@@ -524,7 +524,7 @@ Spec 020 authorises the UI work.
     gap didn't occur.
 
 
-## T015 — Real cluster run
+## T015 — Real cluster run ✅ 2026-10-23
 
 - **Do**, on `serendip-t018`, with the migration run on a copy of the
   spec 019/021 store:
@@ -542,12 +542,33 @@ Spec 020 authorises the UI work.
     for a person.
 - **Files:** `specs/020-openchoreo-console-features/verification.md`.
 - **Verify:** every acceptance criterion has observed evidence.
+- **Done as:** `verification.md` has the evidence for each criterion,
+  on a copy of spec 021's store migrated to schema 8.
+  - **Shown working:** the pipeline; promotion with production's own
+    variable and replicas (checked inside the containers); a new release
+    carried through; rollback; live log following in the console; the
+    schema form setting staging to 3 replicas.
+  - **Also:** topology, the platform view, greyed-out Builds and
+    Observability, and a Reader's refused promotion.
+  - **The AI:** Claude Code promoted at once, and its undeploy waited
+    for the person, who rejected it.
+  - **Findings, carried into T016:**
+    - **F1:** a Component deployed before the one it calls sits in
+      Progressing with no reason.
+    - **F2:** Deployments read not-ready for a moment after a restart.
+    - **F3:** the handlers' own 403s aren't audited.
+    - **U1–U5:** console design issues.
 
 ## T016 — Final reviews
 
 - **Do:** run `contract-guardian`, `go-reviewer`, a security review scoped
   to the spec diff, and a UI review against the design rules. Fix the
   findings.
+  Also fix T015's findings (`verification.md`):
+  - **F1:** show why a Deployment waits for a Component it calls.
+  - **F3:** audit the handlers' own refusals.
+  - **F2:** look at it, and fix it or record it.
+  - **U1–U5:** in the UI review.
 - **Verify:** all pass, and the gates are green.
 
 ## T017 [A] — Docs, ADR, close

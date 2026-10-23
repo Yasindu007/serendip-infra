@@ -17,7 +17,7 @@ Last updated: 2026-10-23
 ## Current phase
 
 **Spec 020 (OpenChoreo's portal features in Serendip's console): IN
-PROGRESS.** The plan was approved 2026-10-22. T001–T014 are done and
+PROGRESS.** The plan was approved 2026-10-22. T001–T015 are done and
 committed, one commit each (`fd01e8c` … `97599d8`, not pushed). Every
 task's "Done as" note in `specs/020-openchoreo-console-features/tasks.md`
 records what was built and decided.
@@ -65,15 +65,26 @@ records what was built and decided.
   Kubernetes system because of the host, not the code. The first deploy
   into a new Environment serves in 70 s (RP-035). The harness now
   deploys through Deployments.
+- **Real cluster (T015):** `verification.md`. Every criterion that can
+  be shown without packages was shown on `serendip-t018`, including
+  Claude Code promoting through `serendip mcp` and its undeploy waiting
+  for a person. Findings F1–F3 and U1–U5 go to T016.
 - **Records:** RP-028 to RP-035 were added (RP-034: the console can't
   state a package's measured cost until the catalogue carries it). `docs/cli-and-mcp.md` is
   regenerated.
 
 **Next:**
-- **T015:** the real cluster run on `serendip-t018`, which still has the
-  legacy binding names (`cmp-x-development`) until the new serendipd
-  runs.
-- **T016:** the reviews.
+- **T016:** the reviews, plus T015's findings (F1 dependency wait reason, F3 audit of handler refusals, F2, UI U1–U5).
+
+**Leftovers (spec 020):**
+- **`serendipd`** (spec 020) runs on `:8088` against `serendip-t018`.
+  - **Its scratch:** the T015 store copy, the run script, the CLI
+    config, the console driver and the screenshots are in
+    `%TEMP%\claude\D--serendip-infrac3ed502-…\scratchpad	015\`.
+  - **Restart it** with that folder's `run.ps1`. The API keys are
+    `verifier` (Owner) and `t015-reader` (Reader at `t019-agents`).
+- **On the cluster:** `t020-staging`, `t020-production`, `t020-web` and
+  `t020-api` are left from T015.
 - **T017:** the docs, ADR 0019 and PROGRESS.
 - **Restart** (a rollout restart) was deferred in T006.
 
