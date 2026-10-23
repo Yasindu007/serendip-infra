@@ -143,13 +143,13 @@ func run(args []string) error {
 	// From here on, whatever was measured is written even if a later phase
 	// fails, and the light workload is always removed so the next run on
 	// this cluster isn't skewed by leftovers.
-	var appID string
-	measureErr := measure(ctx, o, cl, node.Name, d, a, &res, &appID)
+	var w workload
+	measureErr := measure(ctx, o, cl, node.Name, d, a, &res, &w)
 	if measureErr != nil {
 		res.Findings = append(res.Findings, "run aborted: "+measureErr.Error())
 	}
-	if appID != "" {
-		if err := a.deleteApplication(context.Background(), appID); err != nil {
+	if w.project != "" {
+		if err := a.deleteWorkload(context.Background(), w); err != nil {
 			res.Findings = append(res.Findings, "deleting the light workload failed: "+err.Error())
 		}
 	}
@@ -191,7 +191,7 @@ func run(args []string) error {
 
 // measure runs the platform-idle and light-workload phases, filling res as
 // it goes so a failure part-way leaves everything measured so far.
-func measure(ctx context.Context, o options, cl *cluster, nodeName string, d *daemon, a api, res *Result, appID *string) error {
+func measure(ctx context.Context, o options, cl *cluster, nodeName string, d *daemon, a api, res *Result, created *workload) error {
 	if err := cl.waitAllPodsReady(ctx, 15*time.Minute); err != nil {
 		return err
 	}
@@ -208,8 +208,8 @@ func measure(ctx context.Context, o options, cl *cluster, nodeName string, d *da
 	}
 
 	log.Printf("workload: deploying %d exposed Components", o.components)
-	id, serving, err := a.deployWorkload(ctx, o.components, o.image)
-	*appID = id
+	w, serving, err := a.deployWorkload(ctx, o.components, o.image)
+	*created = w
 	res.Timings.TimeToServing = serving
 	if err != nil {
 		res.Findings = append(res.Findings, "light workload did not reach Serving: "+err.Error())
@@ -233,7 +233,7 @@ func measure(ctx context.Context, o options, cl *cluster, nodeName string, d *da
 	if o.pollClients <= 0 {
 		return nil
 	}
-	comps, err := a.componentIDs(ctx, id)
+	comps, err := a.componentIDs(ctx, w.app)
 	if err != nil {
 		res.Findings = append(res.Findings, "console polling phase skipped: "+err.Error())
 		return nil
@@ -243,7 +243,7 @@ func measure(ctx context.Context, o options, cl *cluster, nodeName string, d *da
 		return nil
 	}
 	log.Printf("polling: %d console tabs on a Component page", o.pollClients)
-	st, stop := a.startConsoleTabs(ctx, id, comps, o.pollClients)
+	st, stop := a.startConsoleTabs(ctx, w.app, comps, o.pollClients)
 	start := time.Now()
 	_, pollProcs, err := samplePhase(ctx, cl, nodeName, d, o.samples, o.interval)
 	stop()

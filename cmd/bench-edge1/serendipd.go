@@ -188,74 +188,124 @@ func (a api) waitReason(ctx context.Context, path, typ, reason string, timeout t
 	}
 }
 
-// deployWorkload creates one Application and n exposed Components and
-// returns the Application's ID and each Component's create→Serving time.
-func (a api) deployWorkload(ctx context.Context, n int, image string) (string, []Duration, error) {
-	app, err := a.do(ctx, http.MethodPost, "/v1/applications", map[string]any{"metadata": map[string]any{"name": "bench"}})
-	if err != nil {
-		return "", nil, err
+// workload is what deployWorkload created, for the polling phase and the
+// clean-up.
+type workload struct {
+	project, env, app string
+	deployments       []string
+}
+
+// deployWorkload deploys n exposed Components the way spec 020 does: a
+// Project with one Environment, an Application in the Project, its
+// Components, and a Deployment of each into the Environment. It returns
+// what it created and each Component's create→Serving time, Serving
+// being its Deployment's first published endpoint.
+func (a api) deployWorkload(ctx context.Context, n int, image string) (workload, []Duration, error) {
+	var w workload
+	create := func(path string, body map[string]any) (string, error) {
+		obj, err := a.do(ctx, http.MethodPost, path, body)
+		if err != nil {
+			return "", err
+		}
+		id := idOf(obj)
+		if id == "" {
+			return "", fmt.Errorf("POST %s: response carried no metadata.id", path)
+		}
+		return id, nil
 	}
-	appID := idOf(app)
-	if appID == "" {
-		return "", nil, fmt.Errorf("create application: response carried no metadata.id")
+	owned := func(name, kind, id string) map[string]any {
+		return map[string]any{"name": name, "ownerRefs": []any{map[string]any{"kind": kind, "id": id}}}
 	}
-	if err := a.waitReason(ctx, "/v1/applications/"+appID, "Ready", "Deployed", 5*time.Minute); err != nil {
-		return appID, nil, err
+	var err error
+	if w.project, err = create("/v1/projects", map[string]any{"metadata": map[string]any{"name": "bench"}}); err != nil {
+		return w, nil, err
+	}
+	if w.env, err = create("/v1/environments", map[string]any{"metadata": owned("bench", "Project", w.project)}); err != nil {
+		return w, nil, err
+	}
+	if w.app, err = create("/v1/applications", map[string]any{"metadata": owned("bench", "Project", w.project)}); err != nil {
+		return w, nil, err
+	}
+	if err := a.waitReason(ctx, "/v1/applications/"+w.app, "Ready", "Deployed", 5*time.Minute); err != nil {
+		return w, nil, err
 	}
 	type pending struct {
-		id      string
-		created time.Time
+		comp, dep string
+		created   time.Time
 	}
 	var comps []pending
 	for i := 0; i < n; i++ {
-		comp, err := a.do(ctx, http.MethodPost, "/v1/components", map[string]any{
-			"metadata": map[string]any{
-				"name":      fmt.Sprintf("bench-%d", i+1),
-				"ownerRefs": []any{map[string]any{"kind": "Application", "id": appID}},
-			},
-			"spec": map[string]any{"image": image, "ports": []any{map[string]any{"name": "http", "port": 80, "expose": true}}},
+		id, err := create("/v1/components", map[string]any{
+			"metadata": owned(fmt.Sprintf("bench-%d", i+1), "Application", w.app),
+			"spec":     map[string]any{"image": image, "ports": []any{map[string]any{"name": "http", "port": 80, "expose": true}}},
 		})
 		if err != nil {
-			return appID, nil, err
+			return w, nil, err
 		}
-		id := idOf(comp)
-		if id == "" {
-			return appID, nil, fmt.Errorf("create component: response carried no metadata.id")
-		}
-		comps = append(comps, pending{id: id, created: time.Now()})
+		comps = append(comps, pending{comp: id, created: time.Now()})
 	}
 
-	// Poll every Component in one loop and record when each was first seen
-	// Serving, so one slow Component doesn't inflate the others' times.
+	// Poll every Component in one loop: deploy each once it's released,
+	// and record when its Deployment first publishes an endpoint, so one
+	// slow Component doesn't inflate the others' times.
 	serving := make([]Duration, len(comps))
-	done := make([]bool, len(comps))
 	remaining := len(comps)
 	deadline := time.Now().Add(10 * time.Minute)
 	for remaining > 0 {
-		for i, c := range comps {
-			if done[i] {
-				continue
-			}
-			obj, err := a.do(ctx, http.MethodGet, "/v1/components/"+c.id, nil)
-			if err == nil && conditionReason(obj, "Reachable") == "Serving" {
-				serving[i] = Duration(time.Since(c.created))
-				done[i] = true
-				remaining--
+		for i := range comps {
+			c := &comps[i]
+			switch {
+			case serving[i] > 0:
+			case c.dep == "":
+				obj, err := a.do(ctx, http.MethodGet, "/v1/components/"+c.comp, nil)
+				if err != nil || !conditionTrue(obj, "Ready") {
+					continue
+				}
+				if c.dep, err = create("/v1/deployments", map[string]any{
+					"metadata": owned(fmt.Sprintf("bench-%d", i+1), "Environment", w.env),
+					"spec":     map[string]any{"component": c.comp},
+				}); err != nil {
+					return w, nil, err
+				}
+				w.deployments = append(w.deployments, c.dep)
+			default:
+				obj, err := a.do(ctx, http.MethodGet, "/v1/deployments/"+c.dep, nil)
+				if err == nil && hasEndpoint(obj) {
+					serving[i] = Duration(time.Since(c.created))
+					remaining--
+				}
 			}
 		}
 		if remaining == 0 {
 			break
 		}
 		if time.Now().After(deadline) {
-			return appID, nil, fmt.Errorf("%d of %d components not Serving after 10m", remaining, len(comps))
+			return w, nil, fmt.Errorf("%d of %d components not Serving after 10m", remaining, len(comps))
 		}
 		select {
 		case <-ctx.Done():
-			return appID, nil, ctx.Err()
+			return w, nil, ctx.Err()
 		case <-time.After(2 * time.Second):
 		}
 	}
-	return appID, serving, nil
+	return w, serving, nil
+}
+
+func conditionTrue(obj map[string]any, typ string) bool {
+	st, _ := obj["status"].(map[string]any)
+	conds, _ := st["conditions"].([]any)
+	for _, c := range conds {
+		if m, _ := c.(map[string]any); m["type"] == typ {
+			return m["status"] == "True"
+		}
+	}
+	return false
+}
+
+func hasEndpoint(obj map[string]any) bool {
+	st, _ := obj["status"].(map[string]any)
+	eps, _ := st["endpoints"].([]any)
+	return len(eps) > 0
 }
 
 // componentIDs lists the Components owned by appID. List endpoints answer
@@ -287,10 +337,23 @@ func (a api) componentIDs(ctx context.Context, appID string) ([]string, error) {
 	return ids, nil
 }
 
-func (a api) deleteApplication(ctx context.Context, appID string) error {
-	_, err := a.do(ctx, http.MethodDelete, "/v1/applications/"+appID+"?cascade=true", nil)
-	if err != nil && strings.Contains(err.Error(), " 404 ") {
-		return nil
+// deleteWorkload removes what deployWorkload created, Deployments first
+// (they depend on the Components), then the Application with its
+// Components, the Environment and the Project. A 404 is already gone.
+func (a api) deleteWorkload(ctx context.Context, w workload) error {
+	paths := []string{}
+	for _, d := range w.deployments {
+		paths = append(paths, "/v1/deployments/"+d)
 	}
-	return err
+	for _, p := range []struct{ path, id string }{{"/v1/applications/", w.app}, {"/v1/environments/", w.env}, {"/v1/projects/", w.project}} {
+		if p.id != "" {
+			paths = append(paths, p.path+p.id+"?cascade=true")
+		}
+	}
+	for _, p := range paths {
+		if _, err := a.do(ctx, http.MethodDelete, p, nil); err != nil && !strings.Contains(err.Error(), " 404 ") {
+			return err
+		}
+	}
+	return nil
 }

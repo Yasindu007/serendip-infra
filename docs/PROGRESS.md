@@ -17,7 +17,7 @@ Last updated: 2026-10-23
 ## Current phase
 
 **Spec 020 (OpenChoreo's portal features in Serendip's console): IN
-PROGRESS.** The plan was approved 2026-10-22. T001–T013 are done and
+PROGRESS.** The plan was approved 2026-10-22. T001–T014 are done and
 committed, one commit each (`fd01e8c` … `1d5efbf`, not pushed). Every
 task's "Done as" note in `specs/020-openchoreo-console-features/tasks.md`
 records what was built and decided.
@@ -59,12 +59,17 @@ records what was built and decided.
 - **Acceptance (T013):** `api/spec020_acceptance_test.go` proves
   criteria 1–7, 10 and 11 in process, on a fake platform with the real
   reconcilers.
-- **Records:** RP-028 to RP-034 were added (RP-034: the console can't
+- **Footprint (T014):** no regression against a same-day baseline of
+  `cecc037` on the simulated T470. `serendipd` idles at 35.6 MiB, and
+  rule 4 passes. The cross-day comparison with spec 019 fails on
+  Kubernetes system because of the host, not the code. The first deploy
+  into a new Environment serves in 70 s (RP-035). The harness now
+  deploys through Deployments.
+- **Records:** RP-028 to RP-035 were added (RP-034: the console can't
   state a package's measured cost until the catalogue carries it). `docs/cli-and-mcp.md` is
   regenerated.
 
 **Next:**
-- **T014:** footprint.
 - **T015:** the real cluster run on `serendip-t018`, which still has the
   legacy binding names (`cmp-x-development`) until the new serendipd
   runs.

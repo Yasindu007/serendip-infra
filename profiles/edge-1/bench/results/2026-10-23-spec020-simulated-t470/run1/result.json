@@ -1,0 +1,4804 @@
+{
+  "startedAt": "2026-10-23T18:42:07.3288086+05:30",
+  "machine": {
+    "hostOS": "windows/amd64",
+    "hostCPU": "AMD Ryzen 7 7840HS with Radeon 780M Graphics",
+    "nodeName": "bench-t470-control-plane",
+    "nodeKernel": "6.6.87.2-microsoft-standard-WSL2",
+    "nodeOSImage": "Debian GNU/Linux 12 (bookworm)",
+    "containerRuntime": "containerd://2.1.3",
+    "kubeletVersion": "v1.34.0",
+    "nodeCPUCapacity": "4",
+    "nodeMemoryCapacity": "8133876Ki"
+  },
+  "simulation": {
+    "cpus": 2,
+    "cpuset": "0-3",
+    "note": "kind node limited to 4 threads and 2.0 CPUs of quota to approximate an i5-6300U (2c/4t)",
+    "notSimulated": [
+      "16-32 GB RAM (only measured, not limited)",
+      "SATA/NVMe disk speed"
+    ]
+  },
+  "settleSeconds": 180,
+  "sampleIntervalSeconds": 10,
+  "workloadComponents": 3,
+  "platform": {
+    "groups": {
+      "Application platform: control plane": {
+        "cpuMillicores": {
+          "mean": 7.845120416666667,
+          "max": 8.858027
+        },
+        "memoryMiB": {
+          "mean": 54.858072916666664,
+          "max": 55.1171875
+        }
+      },
+      "Application platform: data plane": {
+        "cpuMillicores": {
+          "mean": 0.03414908333333333,
+          "max": 0.154832
+        },
+        "memoryMiB": {
+          "mean": 6.513346354166667,
+          "max": 6.58203125
+        }
+      },
+      "Certificates (cert-manager)": {
+        "cpuMillicores": {
+          "mean": 2.998962,
+          "max": 4.396855
+        },
+        "memoryMiB": {
+          "mean": 62.5556640625,
+          "max": 62.58984375
+        }
+      },
+      "Gateway (kgateway)": {
+        "cpuMillicores": {
+          "mean": 7.547505916666666,
+          "max": 9.908621
+        },
+        "memoryMiB": {
+          "mean": 52.464518229166664,
+          "max": 52.46875
+        }
+      },
+      "Identity (ThunderID)": {
+        "cpuMillicores": {
+          "mean": 0.2650295833333333,
+          "max": 0.576837
+        },
+        "memoryMiB": {
+          "mean": 12.09765625,
+          "max": 12.10546875
+        }
+      },
+      "Kubernetes system": {
+        "cpuMillicores": {
+          "mean": 150.97819933333332,
+          "max": 181.634724
+        },
+        "memoryMiB": {
+          "mean": 859.11328125,
+          "max": 869.80859375
+        }
+      },
+      "Secrets (OpenBao)": {
+        "cpuMillicores": {
+          "mean": 9.071678416666666,
+          "max": 11.263984
+        },
+        "memoryMiB": {
+          "mean": 18.622395833333332,
+          "max": 18.6953125
+        }
+      }
+    },
+    "pods": [
+      {
+        "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 586.7766927083334,
+          "max": 594.69921875
+        },
+        "cpuMillicores": {
+          "mean": 74.77798958333334,
+          "max": 100.419724
+        }
+      },
+      {
+        "name": "kube-system/etcd-bench-t470-control-plane",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 107.55305989583333,
+          "max": 107.8984375
+        },
+        "cpuMillicores": {
+          "mean": 41.4401465,
+          "max": 44.008235
+        }
+      },
+      {
+        "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 73.404296875,
+          "max": 76.890625
+        },
+        "cpuMillicores": {
+          "mean": 19.440525916666665,
+          "max": 20.52949
+        }
+      },
+      {
+        "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+        "group": "Gateway (kgateway)",
+        "memoryMiB": {
+          "mean": 34.562174479166664,
+          "max": 34.56640625
+        },
+        "cpuMillicores": {
+          "mean": 1.8992058333333335,
+          "max": 3.717369
+        }
+      },
+      {
+        "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 29.0078125,
+          "max": 29.06640625
+        },
+        "cpuMillicores": {
+          "mean": 8.599832166666666,
+          "max": 9.221743
+        }
+      },
+      {
+        "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+        "group": "Certificates (cert-manager)",
+        "memoryMiB": {
+          "mean": 26.23046875,
+          "max": 26.23828125
+        },
+        "cpuMillicores": {
+          "mean": 1.1281185,
+          "max": 2.009472
+        }
+      },
+      {
+        "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+        "group": "Certificates (cert-manager)",
+        "memoryMiB": {
+          "mean": 24.003255208333332,
+          "max": 24.00390625
+        },
+        "cpuMillicores": {
+          "mean": 1.410157833333333,
+          "max": 2.053252
+        }
+      },
+      {
+        "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+        "group": "Application platform: control plane",
+        "memoryMiB": {
+          "mean": 22.255533854166668,
+          "max": 22.390625
+        },
+        "cpuMillicores": {
+          "mean": 7.009108083333334,
+          "max": 8.068516
+        }
+      },
+      {
+        "name": "serendip-system/openbao-0",
+        "group": "Secrets (OpenBao)",
+        "memoryMiB": {
+          "mean": 18.622395833333332,
+          "max": 18.6953125
+        },
+        "cpuMillicores": {
+          "mean": 9.071678416666666,
+          "max": 11.263984
+        }
+      },
+      {
+        "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+        "group": "Gateway (kgateway)",
+        "memoryMiB": {
+          "mean": 17.90234375,
+          "max": 17.90234375
+        },
+        "cpuMillicores": {
+          "mean": 5.648300083333333,
+          "max": 6.726062
+        }
+      },
+      {
+        "name": "kube-system/coredns-66bc5c9577-jcgpm",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 15.055338541666666,
+          "max": 15.25390625
+        },
+        "cpuMillicores": {
+          "mean": 2.6393120833333334,
+          "max": 2.878401
+        }
+      },
+      {
+        "name": "kube-system/coredns-66bc5c9577-m8qz4",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 14.831380208333334,
+          "max": 14.8828125
+        },
+        "cpuMillicores": {
+          "mean": 2.5292937500000003,
+          "max": 2.893951
+        }
+      },
+      {
+        "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+        "group": "Application platform: control plane",
+        "memoryMiB": {
+          "mean": 14.388346354166666,
+          "max": 14.4296875
+        },
+        "cpuMillicores": {
+          "mean": 0.1518316666666667,
+          "max": 0.476274
+        }
+      },
+      {
+        "name": "kube-system/kube-proxy-t4dpf",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 13.220377604166666,
+          "max": 13.22265625
+        },
+        "cpuMillicores": {
+          "mean": 0.44827125000000007,
+          "max": 0.755602
+        }
+      },
+      {
+        "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+        "group": "Certificates (cert-manager)",
+        "memoryMiB": {
+          "mean": 12.321940104166666,
+          "max": 12.34765625
+        },
+        "cpuMillicores": {
+          "mean": 0.4606856666666667,
+          "max": 0.681206
+        }
+      },
+      {
+        "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+        "group": "Identity (ThunderID)",
+        "memoryMiB": {
+          "mean": 12.09765625,
+          "max": 12.10546875
+        },
+        "cpuMillicores": {
+          "mean": 0.2650295833333333,
+          "max": 0.576837
+        }
+      },
+      {
+        "name": "kube-system/kindnet-b994j",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 10.384765625,
+          "max": 10.62890625
+        },
+        "cpuMillicores": {
+          "mean": 0.9533005000000001,
+          "max": 2.531237
+        }
+      },
+      {
+        "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+        "group": "Application platform: control plane",
+        "memoryMiB": {
+          "mean": 9.7763671875,
+          "max": 9.796875
+        },
+        "cpuMillicores": {
+          "mean": 0.4162275833333334,
+          "max": 0.549717
+        }
+      },
+      {
+        "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 8.879557291666666,
+          "max": 8.90234375
+        },
+        "cpuMillicores": {
+          "mean": 0.14952758333333335,
+          "max": 0.364393
+        }
+      },
+      {
+        "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+        "group": "Application platform: control plane",
+        "memoryMiB": {
+          "mean": 8.437825520833334,
+          "max": 8.546875
+        },
+        "cpuMillicores": {
+          "mean": 0.2679530833333334,
+          "max": 0.560394
+        }
+      },
+      {
+        "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+        "group": "Application platform: data plane",
+        "memoryMiB": {
+          "mean": 6.513346354166667,
+          "max": 6.58203125
+        },
+        "cpuMillicores": {
+          "mean": 0.03414908333333333,
+          "max": 0.154832
+        }
+      }
+    ],
+    "nodeCpuMillicores": {
+      "mean": 247.67945425000002,
+      "max": 293.455042
+    },
+    "nodeMemoryMiB": {
+      "mean": 1702.9934895833333,
+      "max": 1721.54296875
+    },
+    "nodeOverheadMiB": {
+      "mean": 636.7685546875,
+      "max": 647.140625
+    },
+    "nodeOverheadMillicores": {
+      "mean": 68.9388095,
+      "max": 110.68636699999999
+    },
+    "nodeFsUsedMiB": 77533.84375,
+    "imageFsUsedMiB": 2199.33984375
+  },
+  "workload": {
+    "groups": {
+      "Application platform: control plane": {
+        "cpuMillicores": {
+          "mean": 9.404282083333333,
+          "max": 11.427087
+        },
+        "memoryMiB": {
+          "mean": 65.93033854166667,
+          "max": 66.546875
+        }
+      },
+      "Application platform: data plane": {
+        "cpuMillicores": {
+          "mean": 0.0444715,
+          "max": 0.315451
+        },
+        "memoryMiB": {
+          "mean": 7.365885416666667,
+          "max": 7.56640625
+        }
+      },
+      "Certificates (cert-manager)": {
+        "cpuMillicores": {
+          "mean": 3.156322,
+          "max": 4.374598
+        },
+        "memoryMiB": {
+          "mean": 62.215169270833336,
+          "max": 62.23046875
+        }
+      },
+      "Gateway (kgateway)": {
+        "cpuMillicores": {
+          "mean": 8.315036916666667,
+          "max": 9.943701
+        },
+        "memoryMiB": {
+          "mean": 53.922200520833336,
+          "max": 53.953125
+        }
+      },
+      "Identity (ThunderID)": {
+        "cpuMillicores": {
+          "mean": 0.2598481666666666,
+          "max": 0.658989
+        },
+        "memoryMiB": {
+          "mean": 12.0400390625,
+          "max": 12.04296875
+        }
+      },
+      "Kubernetes system": {
+        "cpuMillicores": {
+          "mean": 164.4760658333333,
+          "max": 189.959654
+        },
+        "memoryMiB": {
+          "mean": 857.71875,
+          "max": 858.08203125
+        }
+      },
+      "Secrets (OpenBao)": {
+        "cpuMillicores": {
+          "mean": 10.740706166666667,
+          "max": 12.103056
+        },
+        "memoryMiB": {
+          "mean": 18.854817708333332,
+          "max": 18.875
+        }
+      },
+      "Workloads": {
+        "cpuMillicores": {
+          "mean": 0,
+          "max": 0
+        },
+        "memoryMiB": {
+          "mean": 13.64453125,
+          "max": 13.64453125
+        }
+      }
+    },
+    "pods": [
+      {
+        "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 583.3414713541666,
+          "max": 583.6328125
+        },
+        "cpuMillicores": {
+          "mean": 86.96229858333332,
+          "max": 109.753529
+        }
+      },
+      {
+        "name": "kube-system/etcd-bench-t470-control-plane",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 109.09114583333333,
+          "max": 109.28515625
+        },
+        "cpuMillicores": {
+          "mean": 43.26777291666667,
+          "max": 50.164829
+        }
+      },
+      {
+        "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 72.86751302083333,
+          "max": 73.27734375
+        },
+        "cpuMillicores": {
+          "mean": 19.424038583333335,
+          "max": 20.61723
+        }
+      },
+      {
+        "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+        "group": "Gateway (kgateway)",
+        "memoryMiB": {
+          "mean": 35.769856770833336,
+          "max": 35.80078125
+        },
+        "cpuMillicores": {
+          "mean": 2.175228,
+          "max": 3.405774
+        }
+      },
+      {
+        "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+        "group": "Application platform: control plane",
+        "memoryMiB": {
+          "mean": 31.718424479166668,
+          "max": 31.78125
+        },
+        "cpuMillicores": {
+          "mean": 8.461911833333334,
+          "max": 10.159611
+        }
+      },
+      {
+        "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 29.642903645833332,
+          "max": 29.6953125
+        },
+        "cpuMillicores": {
+          "mean": 8.540354083333332,
+          "max": 9.298633
+        }
+      },
+      {
+        "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+        "group": "Certificates (cert-manager)",
+        "memoryMiB": {
+          "mean": 25.998372395833332,
+          "max": 26.0078125
+        },
+        "cpuMillicores": {
+          "mean": 1.0963399166666665,
+          "max": 1.904514
+        }
+      },
+      {
+        "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+        "group": "Certificates (cert-manager)",
+        "memoryMiB": {
+          "mean": 24.008463541666668,
+          "max": 24.01171875
+        },
+        "cpuMillicores": {
+          "mean": 1.5724084166666668,
+          "max": 1.94993
+        }
+      },
+      {
+        "name": "serendip-system/openbao-0",
+        "group": "Secrets (OpenBao)",
+        "memoryMiB": {
+          "mean": 18.854817708333332,
+          "max": 18.875
+        },
+        "cpuMillicores": {
+          "mean": 10.740706166666667,
+          "max": 12.103056
+        }
+      },
+      {
+        "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+        "group": "Gateway (kgateway)",
+        "memoryMiB": {
+          "mean": 18.15234375,
+          "max": 18.15234375
+        },
+        "cpuMillicores": {
+          "mean": 6.1398089166666665,
+          "max": 6.537927
+        }
+      },
+      {
+        "name": "kube-system/coredns-66bc5c9577-jcgpm",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 15.212890625,
+          "max": 15.359375
+        },
+        "cpuMillicores": {
+          "mean": 2.6635861666666667,
+          "max": 2.947907
+        }
+      },
+      {
+        "name": "kube-system/coredns-66bc5c9577-m8qz4",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 14.91015625,
+          "max": 14.91796875
+        },
+        "cpuMillicores": {
+          "mean": 2.5572320833333335,
+          "max": 2.952786
+        }
+      },
+      {
+        "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+        "group": "Application platform: control plane",
+        "memoryMiB": {
+          "mean": 14.259114583333334,
+          "max": 14.26171875
+        },
+        "cpuMillicores": {
+          "mean": 0.15930208333333332,
+          "max": 0.528375
+        }
+      },
+      {
+        "name": "kube-system/kube-proxy-t4dpf",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 13.320638020833334,
+          "max": 13.32421875
+        },
+        "cpuMillicores": {
+          "mean": 0.43675933333333333,
+          "max": 0.731781
+        }
+      },
+      {
+        "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+        "group": "Certificates (cert-manager)",
+        "memoryMiB": {
+          "mean": 12.208333333333334,
+          "max": 12.2109375
+        },
+        "cpuMillicores": {
+          "mean": 0.48757366666666674,
+          "max": 0.760571
+        }
+      },
+      {
+        "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+        "group": "Identity (ThunderID)",
+        "memoryMiB": {
+          "mean": 12.0400390625,
+          "max": 12.04296875
+        },
+        "cpuMillicores": {
+          "mean": 0.2598481666666666,
+          "max": 0.658989
+        }
+      },
+      {
+        "name": "kube-system/kindnet-b994j",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 10.417317708333334,
+          "max": 10.4296875
+        },
+        "cpuMillicores": {
+          "mean": 0.46028841666666676,
+          "max": 1.741338
+        }
+      },
+      {
+        "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+        "group": "Application platform: control plane",
+        "memoryMiB": {
+          "mean": 9.989583333333334,
+          "max": 10.5
+        },
+        "cpuMillicores": {
+          "mean": 0.2346633333333333,
+          "max": 0.369198
+        }
+      },
+      {
+        "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+        "group": "Application platform: control plane",
+        "memoryMiB": {
+          "mean": 9.963216145833334,
+          "max": 10.09375
+        },
+        "cpuMillicores": {
+          "mean": 0.5484048333333332,
+          "max": 0.852839
+        }
+      },
+      {
+        "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+        "group": "Kubernetes system",
+        "memoryMiB": {
+          "mean": 8.914713541666666,
+          "max": 8.91796875
+        },
+        "cpuMillicores": {
+          "mean": 0.16373566666666667,
+          "max": 0.296403
+        }
+      },
+      {
+        "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+        "group": "Application platform: data plane",
+        "memoryMiB": {
+          "mean": 7.365885416666667,
+          "max": 7.56640625
+        },
+        "cpuMillicores": {
+          "mean": 0.0444715,
+          "max": 0.315451
+        }
+      },
+      {
+        "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+        "group": "Workloads",
+        "memoryMiB": {
+          "mean": 4.578125,
+          "max": 4.578125
+        },
+        "cpuMillicores": {
+          "mean": 0,
+          "max": 0
+        }
+      },
+      {
+        "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+        "group": "Workloads",
+        "memoryMiB": {
+          "mean": 4.53515625,
+          "max": 4.53515625
+        },
+        "cpuMillicores": {
+          "mean": 0,
+          "max": 0
+        }
+      },
+      {
+        "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+        "group": "Workloads",
+        "memoryMiB": {
+          "mean": 4.53125,
+          "max": 4.53125
+        },
+        "cpuMillicores": {
+          "mean": 0,
+          "max": 0
+        }
+      }
+    ],
+    "nodeCpuMillicores": {
+      "mean": 263.92559866666664,
+      "max": 299.498493
+    },
+    "nodeMemoryMiB": {
+      "mean": 1743.27734375,
+      "max": 1744.92578125
+    },
+    "nodeOverheadMiB": {
+      "mean": 651.5856119791666,
+      "max": 652.765625
+    },
+    "nodeOverheadMillicores": {
+      "mean": 67.52886600000001,
+      "max": 100.97055
+    },
+    "nodeFsUsedMiB": 77585.3125,
+    "imageFsUsedMiB": 2249.84375
+  },
+  "platformSamples": [
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 7483292,
+          "workingSetBytes": 57655296,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 233616,
+              "workingSetBytes": 8962048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 6793146,
+              "workingSetBytes": 23408640
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 320691,
+              "workingSetBytes": 10244096
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 135839,
+              "workingSetBytes": 15040512
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 38331,
+          "workingSetBytes": 6819840,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 38331,
+              "workingSetBytes": 6819840
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2627678,
+          "workingSetBytes": 65605632,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 909269,
+              "workingSetBytes": 27508736
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1329510,
+              "workingSetBytes": 25165824
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 388899,
+              "workingSetBytes": 12931072
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 5110817,
+          "workingSetBytes": 55009280,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1791009,
+              "workingSetBytes": 36237312
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 3319808,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 170888,
+          "workingSetBytes": 12689408,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 170888,
+              "workingSetBytes": 12689408
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 147188089,
+          "workingSetBytes": 912060416,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2739074,
+              "workingSetBytes": 15773696
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2498734,
+              "workingSetBytes": 15536128
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 40130573,
+              "workingSetBytes": 112791552
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 1770397,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 71335642,
+              "workingSetBytes": 623050752
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 19877838,
+              "workingSetBytes": 80625664
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 755602,
+              "workingSetBytes": 13860864
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 7715836,
+              "workingSetBytes": 30392320
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 364393,
+              "workingSetBytes": 9191424
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 8630675,
+          "workingSetBytes": 19509248,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 8630675,
+              "workingSetBytes": 19509248
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 228920886,
+      "nodeWorkingSetBytes": 1805168640,
+      "nodeFsUsedBytes": 81300013056,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 7831370,
+          "workingSetBytes": 57692160,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 233616,
+              "workingSetBytes": 8962048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7114559,
+              "workingSetBytes": 23412736
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 320691,
+              "workingSetBytes": 10244096
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 162504,
+              "workingSetBytes": 15073280
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 6819840,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 6819840
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2891990,
+          "workingSetBytes": 65605632,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 909269,
+              "workingSetBytes": 27508736
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1329510,
+              "workingSetBytes": 25165824
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 653211,
+              "workingSetBytes": 12931072
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 5859009,
+          "workingSetBytes": 55009280,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1482522,
+              "workingSetBytes": 36237312
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 4376487,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 378572,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 378572,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 148854403,
+          "workingSetBytes": 908218368,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2830705,
+              "workingSetBytes": 15847424
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2509036,
+              "workingSetBytes": 15540224
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 40130573,
+              "workingSetBytes": 112791552
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 1770397,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 71335642,
+              "workingSetBytes": 623050752
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 20510050,
+              "workingSetBytes": 76693504
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 181864,
+              "workingSetBytes": 13860864
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9221743,
+              "workingSetBytes": 30404608
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 364393,
+              "workingSetBytes": 9191424
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 9228395,
+          "workingSetBytes": 19509248,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 9228395,
+              "workingSetBytes": 19509248
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 254344844,
+      "nodeWorkingSetBytes": 1803153408,
+      "nodeFsUsedBytes": 81300021248,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 7024113,
+          "workingSetBytes": 57692160,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 203823,
+              "workingSetBytes": 8962048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 6412004,
+              "workingSetBytes": 23412736
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 326364,
+              "workingSetBytes": 10244096
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 81922,
+              "workingSetBytes": 15073280
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 48468,
+          "workingSetBytes": 6823936,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 48468,
+              "workingSetBytes": 6823936
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 3173499,
+          "workingSetBytes": 65613824,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1145550,
+              "workingSetBytes": 27512832
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1654856,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 373093,
+              "workingSetBytes": 12931072
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 6109064,
+          "workingSetBytes": 55009280,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1732577,
+              "workingSetBytes": 36237312
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 4376487,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 378572,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 378572,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 151325879,
+          "workingSetBytes": 908267520,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2444146,
+              "workingSetBytes": 15904768
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2509036,
+              "workingSetBytes": 15540224
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 42821407,
+              "workingSetBytes": 112803840
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 144007,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 75512995,
+              "workingSetBytes": 622886912
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 17776677,
+              "workingSetBytes": 76693504
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 730878,
+              "workingSetBytes": 13860864
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9221743,
+              "workingSetBytes": 30404608
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 164990,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 8172870,
+          "workingSetBytes": 19509248,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 8172870,
+              "workingSetBytes": 19509248
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 230857561,
+      "nodeWorkingSetBytes": 1803808768,
+      "nodeFsUsedBytes": 81300021248,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 7035681,
+          "workingSetBytes": 57692160,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 203823,
+              "workingSetBytes": 8962048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 6412004,
+              "workingSetBytes": 23412736
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 337932,
+              "workingSetBytes": 10244096
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 81922,
+              "workingSetBytes": 15073280
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 48468,
+          "workingSetBytes": 6823936,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 48468,
+              "workingSetBytes": 6823936
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 3112906,
+          "workingSetBytes": 65613824,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1145550,
+              "workingSetBytes": 27512832
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1594263,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 373093,
+              "workingSetBytes": 12931072
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7768340,
+          "workingSetBytes": 55013376,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1820724,
+              "workingSetBytes": 36241408
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 5947616,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 203030,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 203030,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 141899698,
+          "workingSetBytes": 908529664,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2444146,
+              "workingSetBytes": 15904768
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2265756,
+              "workingSetBytes": 15544320
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 39962285,
+              "workingSetBytes": 112869376
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 144007,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 70406517,
+              "workingSetBytes": 623075328
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 17776677,
+              "workingSetBytes": 76693504
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 730878,
+              "workingSetBytes": 13860864
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8106269,
+              "workingSetBytes": 30408704
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 63163,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 8172870,
+          "workingSetBytes": 19509248,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 8172870,
+              "workingSetBytes": 19509248
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 236989884,
+      "nodeWorkingSetBytes": 1804451840,
+      "nodeFsUsedBytes": 81300025344,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 6994922,
+          "workingSetBytes": 57692160,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 133463,
+              "workingSetBytes": 8962048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 6422808,
+              "workingSetBytes": 23412736
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 337932,
+              "workingSetBytes": 10244096
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 100719,
+              "workingSetBytes": 15073280
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 6823936,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 6823936
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2369104,
+          "workingSetBytes": 65613824,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 822383,
+              "workingSetBytes": 27512832
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1210607,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 336114,
+              "workingSetBytes": 12931072
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7532037,
+          "workingSetBytes": 55013376,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1689269,
+              "workingSetBytes": 36241408
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 5842768,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 224286,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 224286,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 142934602,
+          "workingSetBytes": 908857344,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2463018,
+              "workingSetBytes": 15962112
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2265756,
+              "workingSetBytes": 15544320
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 40628680,
+              "workingSetBytes": 113139712
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 146304,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 70406517,
+              "workingSetBytes": 623075328
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 18758108,
+              "workingSetBytes": 76693504
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 96787,
+              "workingSetBytes": 13860864
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8106269,
+              "workingSetBytes": 30408704
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 63163,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 10318332,
+          "workingSetBytes": 19513344,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 10318332,
+              "workingSetBytes": 19513344
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 234722251,
+      "nodeWorkingSetBytes": 1804234752,
+      "nodeFsUsedBytes": 81300029440,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 7847899,
+          "workingSetBytes": 57769984,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 133463,
+              "workingSetBytes": 8962048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7011053,
+              "workingSetBytes": 23461888
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 549717,
+              "workingSetBytes": 10252288
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 153666,
+              "workingSetBytes": 15093760
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 59845,
+          "workingSetBytes": 6823936,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 59845,
+              "workingSetBytes": 6823936
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2754588,
+          "workingSetBytes": 65622016,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1042280,
+              "workingSetBytes": 27512832
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1210607,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 501701,
+              "workingSetBytes": 12939264
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7724120,
+          "workingSetBytes": 55013376,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1689269,
+              "workingSetBytes": 36241408
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6034851,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 224286,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 224286,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 146803039,
+          "workingSetBytes": 908988416,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2740428,
+              "workingSetBytes": 15994880
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2631127,
+              "workingSetBytes": 15544320
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 39628314,
+              "workingSetBytes": 112926720
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 1780378,
+              "workingSetBytes": 11145216
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 71830612,
+              "workingSetBytes": 623079424
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 18758108,
+              "workingSetBytes": 76693504
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 653747,
+              "workingSetBytes": 13860864
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8604466,
+              "workingSetBytes": 30408704
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 175859,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 9525824,
+          "workingSetBytes": 19513344,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 9525824,
+              "workingSetBytes": 19513344
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 235763974,
+      "nodeWorkingSetBytes": 1804980224,
+      "nodeFsUsedBytes": 81300066304,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 7970968,
+          "workingSetBytes": 57774080,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 272418,
+              "workingSetBytes": 8962048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7011053,
+              "workingSetBytes": 23461888
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 549717,
+              "workingSetBytes": 10252288
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 137780,
+              "workingSetBytes": 15097856
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 59845,
+          "workingSetBytes": 6823936,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 59845,
+              "workingSetBytes": 6823936
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2771913,
+          "workingSetBytes": 65622016,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1042280,
+              "workingSetBytes": 27512832
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1227932,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 501701,
+              "workingSetBytes": 12939264
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7726571,
+          "workingSetBytes": 55013376,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1691720,
+              "workingSetBytes": 36241408
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6034851,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 219513,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 219513,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 147764608,
+          "workingSetBytes": 908992512,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2740428,
+              "workingSetBytes": 15994880
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2893951,
+              "workingSetBytes": 15540224
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 39628314,
+              "workingSetBytes": 112926720
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 1780378,
+              "workingSetBytes": 11145216
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 71830612,
+              "workingSetBytes": 623079424
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 18888793,
+              "workingSetBytes": 76693504
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 653747,
+              "workingSetBytes": 13860864
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9172526,
+              "workingSetBytes": 30416896
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 175859,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 9525824,
+          "workingSetBytes": 19513344,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 9525824,
+              "workingSetBytes": 19513344
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 245326322,
+      "nodeWorkingSetBytes": 1804931072,
+      "nodeFsUsedBytes": 81300070400,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 8858027,
+          "workingSetBytes": 57794560,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 272418,
+              "workingSetBytes": 8962048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 8068516,
+              "workingSetBytes": 23478272
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 379313,
+              "workingSetBytes": 10256384
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 137780,
+              "workingSetBytes": 15097856
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 6823936,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 6823936
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2545829,
+          "workingSetBytes": 65630208,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 792423,
+              "workingSetBytes": 27512832
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1227932,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 525474,
+              "workingSetBytes": 12947456
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7853784,
+          "workingSetBytes": 55013376,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1691720,
+              "workingSetBytes": 36241408
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6162064,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 219513,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 219513,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 151197984,
+          "workingSetBytes": 908681216,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2878401,
+              "workingSetBytes": 15609856
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2893951,
+              "workingSetBytes": 15540224
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 42627552,
+              "workingSetBytes": 112828416
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 500093,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 72779088,
+              "workingSetBytes": 623587328
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 19812673,
+              "workingSetBytes": 76660736
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 453322,
+              "workingSetBytes": 13864960
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9172526,
+              "workingSetBytes": 30416896
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 80378,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 9574936,
+          "workingSetBytes": 19513344,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 9574936,
+              "workingSetBytes": 19513344
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 243656906,
+      "nodeWorkingSetBytes": 1803255808,
+      "nodeFsUsedBytes": 81300078592,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 7917999,
+          "workingSetBytes": 57454592,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 160152,
+              "workingSetBytes": 8962048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7332108,
+              "workingSetBytes": 23138304
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 320921,
+              "workingSetBytes": 10256384
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 104818,
+              "workingSetBytes": 15097856
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 6823936,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 6823936
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2880079,
+          "workingSetBytes": 65630208,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 854737,
+              "workingSetBytes": 27512832
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1499868,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 525474,
+              "workingSetBytes": 12947456
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 8015081,
+          "workingSetBytes": 55013376,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1823829,
+              "workingSetBytes": 36241408
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6191252,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 178006,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 178006,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 149402194,
+          "workingSetBytes": 908685312,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2551966,
+              "workingSetBytes": 15609856
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2377306,
+              "workingSetBytes": 15540224
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 42627552,
+              "workingSetBytes": 112828416
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 500093,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 72779088,
+              "workingSetBytes": 623587328
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 19812673,
+              "workingSetBytes": 76660736
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 453322,
+              "workingSetBytes": 13864960
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8219816,
+              "workingSetBytes": 30420992
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 80378,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 7921093,
+          "workingSetBytes": 19513344,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 7921093,
+              "workingSetBytes": 19513344
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 234664208,
+      "nodeWorkingSetBytes": 1796841472,
+      "nodeFsUsedBytes": 81300090880,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 8520642,
+          "workingSetBytes": 56991744,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 560394,
+              "workingSetBytes": 8503296
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7332108,
+              "workingSetBytes": 23138304
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 503762,
+              "workingSetBytes": 10252288
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 124378,
+              "workingSetBytes": 15097856
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 6823936,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 6823936
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2688736,
+          "workingSetBytes": 65630208,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 854737,
+              "workingSetBytes": 27512832
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1499868,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 334131,
+              "workingSetBytes": 12947456
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 9908621,
+          "workingSetBytes": 55013376,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 3717369,
+              "workingSetBytes": 36241408
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6191252,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 203426,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 203426,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 150013819,
+          "workingSetBytes": 907862016,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2551966,
+              "workingSetBytes": 15609856
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2468566,
+              "workingSetBytes": 15540224
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 41080038,
+              "workingSetBytes": 112291840
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 221538,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 74349719,
+              "workingSetBytes": 623472640
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 20529490,
+              "workingSetBytes": 76488704
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 557930,
+              "workingSetBytes": 13864960
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8219816,
+              "workingSetBytes": 30420992
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 34756,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 7921093,
+          "workingSetBytes": 19513344,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 7921093,
+              "workingSetBytes": 19513344
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 254020574,
+      "nodeWorkingSetBytes": 1795985408,
+      "nodeFsUsedBytes": 81300127744,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 8288503,
+          "workingSetBytes": 57004032,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 560394,
+              "workingSetBytes": 8503296
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7099969,
+              "workingSetBytes": 23150592
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 503762,
+              "workingSetBytes": 10252288
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 124378,
+              "workingSetBytes": 15097856
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 6823936,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 6823936
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 4396855,
+          "workingSetBytes": 65585152,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 2009472,
+              "workingSetBytes": 27467776
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 2053252,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 334131,
+              "workingSetBytes": 12947456
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 8556293,
+          "workingSetBytes": 55017472,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1830231,
+              "workingSetBytes": 36245504
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6726062,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 203426,
+          "workingSetBytes": 12693504,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 203426,
+              "workingSetBytes": 12693504
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 152719353,
+          "workingSetBytes": 908206080,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2609528,
+              "workingSetBytes": 15613952
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2519153,
+              "workingSetBytes": 15605760
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 44008235,
+              "workingSetBytes": 112566272
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 150777,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 74349719,
+              "workingSetBytes": 623472640
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 20529490,
+              "workingSetBytes": 76488704
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 55589,
+              "workingSetBytes": 13864960
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8392927,
+              "workingSetBytes": 30420992
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 103935,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 8604245,
+          "workingSetBytes": 19603456,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 8604245,
+              "workingSetBytes": 19603456
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 293455042,
+      "nodeWorkingSetBytes": 1700761600,
+      "nodeFsUsedBytes": 81300123648,
+      "imageFsUsedBytes": 2306174976
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 8368029,
+          "workingSetBytes": 57061376,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 247857,
+              "workingSetBytes": 8507392
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7099969,
+              "workingSetBytes": 23150592
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 543929,
+              "workingSetBytes": 10272768
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 476274,
+              "workingSetBytes": 15130624
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 154832,
+          "workingSetBytes": 6901760,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 154832,
+              "workingSetBytes": 6901760
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 3774367,
+          "workingSetBytes": 65359872,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 2009472,
+              "workingSetBytes": 27467776
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1083689,
+              "workingSetBytes": 25169920
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 681206,
+              "workingSetBytes": 12722176
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 8406334,
+          "workingSetBytes": 55017472,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1830231,
+              "workingSetBytes": 36245504
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6576103,
+              "workingSetBytes": 18771968
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 576837,
+          "workingSetBytes": 12599296,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 576837,
+              "workingSetBytes": 12599296
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 181634724,
+          "workingSetBytes": 812797952,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2677939,
+              "workingSetBytes": 15613952
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2519153,
+              "workingSetBytes": 15605760
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 44008235,
+              "workingSetBytes": 112566272
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 2531237,
+              "workingSetBytes": 10838016
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 100419724,
+              "workingSetBytes": 527941632
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 20255734,
+              "workingSetBytes": 76554240
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 55589,
+              "workingSetBytes": 13864960
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9044049,
+              "workingSetBytes": 30478336
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 123064,
+              "workingSetBytes": 9334784
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 11263984,
+          "workingSetBytes": 19603456,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 11263984,
+              "workingSetBytes": 19603456
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 279430999,
+      "nodeWorkingSetBytes": 1701044224,
+      "nodeFsUsedBytes": 81300127744,
+      "imageFsUsedBytes": 2306174976
+    }
+  ],
+  "workloadSamples": [
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 8100106,
+          "workingSetBytes": 69750784,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 203427,
+              "workingSetBytes": 11005952
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7300802,
+              "workingSetBytes": 33210368
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 469087,
+              "workingSetBytes": 10584064
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 126790,
+              "workingSetBytes": 14950400
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 7933952,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 7933952
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 4374598,
+          "workingSetBytes": 65220608,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1904514,
+              "workingSetBytes": 27250688
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1949930,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 520154,
+              "workingSetBytes": 12795904
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 9943701,
+          "workingSetBytes": 56426496,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 3405774,
+              "workingSetBytes": 37392384
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6537927,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 216727,
+          "workingSetBytes": 12627968,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 216727,
+              "workingSetBytes": 12627968
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 161835070,
+          "workingSetBytes": 899694592,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2618420,
+              "workingSetBytes": 15831040
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2535536,
+              "workingSetBytes": 15634432
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 50164829,
+              "workingSetBytes": 114577408
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 469323,
+              "workingSetBytes": 10899456
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 77785557,
+              "workingSetBytes": 611545088
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 18859790,
+              "workingSetBytes": 76832768
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 161606,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9084279,
+              "workingSetBytes": 31059968
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 155730,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 9036382,
+          "workingSetBytes": 19750912,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 9036382,
+              "workingSetBytes": 19750912
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 246295048,
+      "nodeWorkingSetBytes": 1828114432,
+      "nodeFsUsedBytes": 81353908224,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 10796071,
+          "workingSetBytes": 69779456,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 150072,
+              "workingSetBytes": 11005952
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 10050122,
+              "workingSetBytes": 33239040
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 469087,
+              "workingSetBytes": 10584064
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 126790,
+              "workingSetBytes": 14950400
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 7933952,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 7933952
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 3212623,
+          "workingSetBytes": 65220608,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1045696,
+              "workingSetBytes": 27250688
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1481384,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 685543,
+              "workingSetBytes": 12795904
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 9943701,
+          "workingSetBytes": 56426496,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 3405774,
+              "workingSetBytes": 37392384
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6537927,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 658989,
+          "workingSetBytes": 12623872,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 658989,
+              "workingSetBytes": 12623872
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 155683685,
+          "workingSetBytes": 899428352,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2618420,
+              "workingSetBytes": 15831040
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2535536,
+              "workingSetBytes": 15634432
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 44072412,
+              "workingSetBytes": 114311168
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 469323,
+              "workingSetBytes": 10899456
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 77785557,
+              "workingSetBytes": 611545088
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 18859790,
+              "workingSetBytes": 76832768
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 161606,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9084279,
+              "workingSetBytes": 31059968
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 96762,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 10302161,
+          "workingSetBytes": 19750912,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 10302161,
+              "workingSetBytes": 19750912
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 282168627,
+      "nodeWorkingSetBytes": 1829687296,
+      "nodeFsUsedBytes": 81353908224,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 9107444,
+          "workingSetBytes": 69611520,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 150072,
+              "workingSetBytes": 11005952
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7576158,
+              "workingSetBytes": 33239040
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 852839,
+              "workingSetBytes": 10416128
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 528375,
+              "workingSetBytes": 14950400
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 43951,
+          "workingSetBytes": 7933952,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 43951,
+              "workingSetBytes": 7933952
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 3371579,
+          "workingSetBytes": 65220608,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1045696,
+              "workingSetBytes": 27250688
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1640340,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 685543,
+              "workingSetBytes": 12795904
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7893053,
+          "workingSetBytes": 56561664,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1776490,
+              "workingSetBytes": 37527552
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6116563,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 262174,
+          "workingSetBytes": 12623872,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 262174,
+              "workingSetBytes": 12623872
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 166087943,
+          "workingSetBytes": 899510272,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2649851,
+              "workingSetBytes": 15900672
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2677750,
+              "workingSetBytes": 15630336
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 41090363,
+              "workingSetBytes": 114319360
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 1716293,
+              "workingSetBytes": 10903552
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 89308742,
+              "workingSetBytes": 611545088
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 20198809,
+              "workingSetBytes": 76836864
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 587589,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 7761784,
+              "workingSetBytes": 31059968
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 96762,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 10486643,
+          "workingSetBytes": 19750912,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 10486643,
+              "workingSetBytes": 19750912
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 250954500,
+      "nodeWorkingSetBytes": 1828712448,
+      "nodeFsUsedBytes": 81353916416,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 8917438,
+          "workingSetBytes": 69611520,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 350043,
+              "workingSetBytes": 11005952
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7576158,
+              "workingSetBytes": 33239040
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 852839,
+              "workingSetBytes": 10416128
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 138398,
+              "workingSetBytes": 14950400
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 43951,
+          "workingSetBytes": 7933952,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 43951,
+              "workingSetBytes": 7933952
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 3092604,
+          "workingSetBytes": 65232896,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1044779,
+              "workingSetBytes": 27262976
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1640340,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 407485,
+              "workingSetBytes": 12795904
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7861945,
+          "workingSetBytes": 56565760,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1745382,
+              "workingSetBytes": 37531648
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6116563,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 262174,
+          "workingSetBytes": 12623872,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 262174,
+              "workingSetBytes": 12623872
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 145457473,
+          "workingSetBytes": 899616768,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2581461,
+              "workingSetBytes": 15990784
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2677750,
+              "workingSetBytes": 15630336
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 39646045,
+              "workingSetBytes": 114319360
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 174694,
+              "workingSetBytes": 10911744
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 71780827,
+              "workingSetBytes": 611553280
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 20198809,
+              "workingSetBytes": 76836864
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 587589,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 7761784,
+              "workingSetBytes": 31059968
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 48514,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 10486643,
+          "workingSetBytes": 19750912,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 10486643,
+              "workingSetBytes": 19750912
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 277092778,
+      "nodeWorkingSetBytes": 1828802560,
+      "nodeFsUsedBytes": 81353957376,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 9794282,
+          "workingSetBytes": 69619712,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 142887,
+              "workingSetBytes": 11010048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 9229743,
+              "workingSetBytes": 33239040
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 283254,
+              "workingSetBytes": 10420224
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 138398,
+              "workingSetBytes": 14950400
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 7933952,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 7933952
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 3567744,
+          "workingSetBytes": 65241088,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1004000,
+              "workingSetBytes": 27262976
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1803173,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 760571,
+              "workingSetBytes": 12804096
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7963319,
+          "workingSetBytes": 56565760,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1745382,
+              "workingSetBytes": 37531648
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6217937,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 225543,
+          "workingSetBytes": 12623872,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 225543,
+              "workingSetBytes": 12623872
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 168989756,
+          "workingSetBytes": 899010560,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2548991,
+              "workingSetBytes": 16007168
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2352564,
+              "workingSetBytes": 15630336
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 39646045,
+              "workingSetBytes": 114319360
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 174694,
+              "workingSetBytes": 10911744
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 93914650,
+              "workingSetBytes": 611577856
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 20617230,
+              "workingSetBytes": 76181504
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 140546,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9298633,
+              "workingSetBytes": 31064064
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 296403,
+              "workingSetBytes": 9351168
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 10191675,
+          "workingSetBytes": 19750912,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 10191675,
+              "workingSetBytes": 19750912
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 295798534,
+      "nodeWorkingSetBytes": 1828646912,
+      "nodeFsUsedBytes": 81353969664,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 9745094,
+          "workingSetBytes": 69619712,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 142887,
+              "workingSetBytes": 11010048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 9229743,
+              "workingSetBytes": 33239040
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 283254,
+              "workingSetBytes": 10420224
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 89210,
+              "workingSetBytes": 14950400
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 44361,
+          "workingSetBytes": 7933952,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 44361,
+              "workingSetBytes": 7933952
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2711932,
+          "workingSetBytes": 65241088,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1004000,
+              "workingSetBytes": 27262976
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1432918,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 275014,
+              "workingSetBytes": 12804096
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7987577,
+          "workingSetBytes": 56561664,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1927393,
+              "workingSetBytes": 37527552
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6060184,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 225543,
+          "workingSetBytes": 12623872,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 225543,
+              "workingSetBytes": 12623872
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 189959654,
+          "workingSetBytes": 899182592,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2548991,
+              "workingSetBytes": 16007168
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2388111,
+              "workingSetBytes": 15630336
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 45324940,
+              "workingSetBytes": 114339840
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 235105,
+              "workingSetBytes": 10936320
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 109753529,
+              "workingSetBytes": 611696640
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 19973396,
+              "workingSetBytes": 76189696
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 140546,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9298633,
+              "workingSetBytes": 31064064
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 296403,
+              "workingSetBytes": 9351168
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 10191675,
+          "workingSetBytes": 19750912,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 10191675,
+              "workingSetBytes": 19750912
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 245072594,
+      "nodeWorkingSetBytes": 1826824192,
+      "nodeFsUsedBytes": 81354055680,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 7915241,
+          "workingSetBytes": 69619712,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 259104,
+              "workingSetBytes": 11010048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 6994511,
+              "workingSetBytes": 33239040
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 572416,
+              "workingSetBytes": 10420224
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 89210,
+              "workingSetBytes": 14950400
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 44361,
+          "workingSetBytes": 7933952,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 44361,
+              "workingSetBytes": 7933952
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2802998,
+          "workingSetBytes": 65241088,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1078552,
+              "workingSetBytes": 27262976
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1449432,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 275014,
+              "workingSetBytes": 12804096
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7987577,
+          "workingSetBytes": 56561664,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1927393,
+              "workingSetBytes": 37527552
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6060184,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 226109,
+          "workingSetBytes": 12627968,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 226109,
+              "workingSetBytes": 12627968
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 189250783,
+          "workingSetBytes": 899219456,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2502696,
+              "workingSetBytes": 16039936
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2388111,
+              "workingSetBytes": 15630336
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 45324940,
+              "workingSetBytes": 114339840
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 235105,
+              "workingSetBytes": 10936320
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 109753529,
+              "workingSetBytes": 611696640
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 19728792,
+              "workingSetBytes": 76189696
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 625147,
+              "workingSetBytes": 13971456
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8508930,
+              "workingSetBytes": 31068160
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 183533,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 9174504,
+          "workingSetBytes": 19787776,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 9174504,
+              "workingSetBytes": 19787776
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 245072594,
+      "nodeWorkingSetBytes": 1826824192,
+      "nodeFsUsedBytes": 81354055680,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 9680913,
+          "workingSetBytes": 69652480,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 259104,
+              "workingSetBytes": 11010048
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 8734033,
+              "workingSetBytes": 33271808
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 572416,
+              "workingSetBytes": 10420224
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 115360,
+              "workingSetBytes": 14950400
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 7933952,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 7933952
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2948443,
+          "workingSetBytes": 65241088,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1078552,
+              "workingSetBytes": 27262976
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1449432,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 420459,
+              "workingSetBytes": 12804096
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7635222,
+          "workingSetBytes": 56561664,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1721858,
+              "workingSetBytes": 37527552
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 5913364,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 181707,
+          "workingSetBytes": 12623872,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 181707,
+              "workingSetBytes": 12623872
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 168334863,
+          "workingSetBytes": 899764224,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2502696,
+              "workingSetBytes": 16039936
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2521134,
+              "workingSetBytes": 15634432
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 44555672,
+              "workingSetBytes": 114593792
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 106953,
+              "workingSetBytes": 10936320
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 89699086,
+              "workingSetBytes": 611983360
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 19728792,
+              "workingSetBytes": 76189696
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 731781,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8305216,
+              "workingSetBytes": 31072256
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 183533,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 11547161,
+          "workingSetBytes": 19787776,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 11547161,
+              "workingSetBytes": 19787776
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 299498493,
+      "nodeWorkingSetBytes": 1829441536,
+      "nodeFsUsedBytes": 81354055680,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 8044270,
+          "workingSetBytes": 68059136,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 369198,
+              "workingSetBytes": 9408512
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7266225,
+              "workingSetBytes": 33271808
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 298517,
+              "workingSetBytes": 10424320
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 110330,
+              "workingSetBytes": 14954496
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 315451,
+          "workingSetBytes": 7303168,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 315451,
+              "workingSetBytes": 7303168
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 3046041,
+          "workingSetBytes": 65241088,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 961320,
+              "workingSetBytes": 27262976
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1634752,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 449969,
+              "workingSetBytes": 12804096
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7855363,
+          "workingSetBytes": 56561664,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1721858,
+              "workingSetBytes": 37527552
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6133505,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 181707,
+          "workingSetBytes": 12623872,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 181707,
+              "workingSetBytes": 12623872
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 147554575,
+          "workingSetBytes": 899309568,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2638885,
+              "workingSetBytes": 16080896
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2521134,
+              "workingSetBytes": 15634432
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 39597332,
+              "workingSetBytes": 114343936
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 106953,
+              "workingSetBytes": 10936320
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 73793541,
+              "workingSetBytes": 611729408
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 20005139,
+              "workingSetBytes": 76197888
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 731781,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8059705,
+              "workingSetBytes": 31072256
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 100105,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 12103056,
+          "workingSetBytes": 19791872,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 12103056,
+              "workingSetBytes": 19791872
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 249010666,
+      "nodeWorkingSetBytes": 1827610624,
+      "nodeFsUsedBytes": 81354055680,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 8474814,
+          "workingSetBytes": 68055040,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 325735,
+              "workingSetBytes": 9408512
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 7266225,
+              "workingSetBytes": 33271808
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 772524,
+              "workingSetBytes": 10420224
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 110330,
+              "workingSetBytes": 14954496
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 7303168,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 7303168
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2948585,
+          "workingSetBytes": 65245184,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 863864,
+              "workingSetBytes": 27267072
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1634752,
+              "workingSetBytes": 25174016
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 449969,
+              "workingSetBytes": 12804096
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7957922,
+          "workingSetBytes": 56565760,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1824417,
+              "workingSetBytes": 37531648
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 6133505,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 294208,
+          "workingSetBytes": 12623872,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 294208,
+              "workingSetBytes": 12623872
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 152076466,
+          "workingSetBytes": 899399680,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2947907,
+              "workingSetBytes": 16105472
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2952786,
+              "workingSetBytes": 15638528
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 44172708,
+              "workingSetBytes": 114339840
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 1741338,
+              "workingSetBytes": 10936320
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 73793541,
+              "workingSetBytes": 611729408
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 17809628,
+              "workingSetBytes": 76197888
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 424360,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8033351,
+              "workingSetBytes": 31137792
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 200847,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 12103056,
+          "workingSetBytes": 19791872,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 12103056,
+              "workingSetBytes": 19791872
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 248306034,
+      "nodeWorkingSetBytes": 1825648640,
+      "nodeFsUsedBytes": 81354059776,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 11427087,
+          "workingSetBytes": 68108288,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 325735,
+              "workingSetBytes": 9408512
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 10159611,
+              "workingSetBytes": 33325056
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 772524,
+              "workingSetBytes": 10420224
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 169217,
+              "workingSetBytes": 14954496
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 0,
+          "workingSetBytes": 7303168,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 0,
+              "workingSetBytes": 7303168
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 2725847,
+          "workingSetBytes": 65249280,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 863864,
+              "workingSetBytes": 27267072
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1376224,
+              "workingSetBytes": 25178112
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 485759,
+              "workingSetBytes": 12804096
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 7832548,
+          "workingSetBytes": 56565760,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 1879394,
+              "workingSetBytes": 37531648
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 5953154,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 193457,
+          "workingSetBytes": 12627968,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 193457,
+              "workingSetBytes": 12627968
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 164326535,
+          "workingSetBytes": 899129344,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2902358,
+              "workingSetBytes": 15794176
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2646931,
+              "workingSetBytes": 15642624
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 44172708,
+              "workingSetBytes": 114339840
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 46840,
+              "workingSetBytes": 10936320
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 88089512,
+              "workingSetBytes": 611766272
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 17809628,
+              "workingSetBytes": 76197888
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 424360,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 8033351,
+              "workingSetBytes": 31137792
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 200847,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 11632759,
+          "workingSetBytes": 19791872,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 11632759,
+              "workingSetBytes": 19791872
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 278415354,
+      "nodeWorkingSetBytes": 1827422208,
+      "nodeFsUsedBytes": 81354096640,
+      "imageFsUsedBytes": 2359132160
+    },
+    {
+      "groups": {
+        "Application platform: control plane": {
+          "nanoCores": 10848625,
+          "workingSetBytes": 68108288,
+          "pods": [
+            {
+              "name": "openchoreo-control-plane/cluster-gateway-8547556648-74r6x",
+              "nanoCores": 137696,
+              "workingSetBytes": 9408512
+            },
+            {
+              "name": "openchoreo-control-plane/controller-manager-6b99ffdcd-g2c62",
+              "nanoCores": 10159611,
+              "workingSetBytes": 33325056
+            },
+            {
+              "name": "openchoreo-control-plane/event-forwarder-54fbb669c9-fldnc",
+              "nanoCores": 382101,
+              "workingSetBytes": 10420224
+            },
+            {
+              "name": "openchoreo-control-plane/openchoreo-api-75494997df-rwcsd",
+              "nanoCores": 169217,
+              "workingSetBytes": 14954496
+            }
+          ]
+        },
+        "Application platform: data plane": {
+          "nanoCores": 41583,
+          "workingSetBytes": 7303168,
+          "pods": [
+            {
+              "name": "openchoreo-data-plane/cluster-agent-dataplane-5f4cbcf4cf-zhvbz",
+              "nanoCores": 41583,
+              "workingSetBytes": 7303168
+            }
+          ]
+        },
+        "Certificates (cert-manager)": {
+          "nanoCores": 3072870,
+          "workingSetBytes": 65253376,
+          "pods": [
+            {
+              "name": "cert-manager/cert-manager-bc44b5799-c56fz",
+              "nanoCores": 1261242,
+              "workingSetBytes": 27271168
+            },
+            {
+              "name": "cert-manager/cert-manager-cainjector-784846b495-v7cp9",
+              "nanoCores": 1376224,
+              "workingSetBytes": 25178112
+            },
+            {
+              "name": "cert-manager/cert-manager-webhook-6c6d98f866-kkqzp",
+              "nanoCores": 435404,
+              "workingSetBytes": 12804096
+            }
+          ]
+        },
+        "Gateway (kgateway)": {
+          "nanoCores": 8918515,
+          "workingSetBytes": 56573952,
+          "pods": [
+            {
+              "name": "kgateway-system/kgateway-7b8984bc55-wvh8m",
+              "nanoCores": 3021621,
+              "workingSetBytes": 37539840
+            },
+            {
+              "name": "kgateway-system/serendip-external-657d66d6c7-7phxw",
+              "nanoCores": 5896894,
+              "workingSetBytes": 19034112
+            }
+          ]
+        },
+        "Identity (ThunderID)": {
+          "nanoCores": 189840,
+          "workingSetBytes": 12623872,
+          "pods": [
+            {
+              "name": "serendip-identity/thunderid-deployment-7fdd45668-d8xpr",
+              "nanoCores": 189840,
+              "workingSetBytes": 12623872
+            }
+          ]
+        },
+        "Kubernetes system": {
+          "nanoCores": 164155987,
+          "workingSetBytes": 899334144,
+          "pods": [
+            {
+              "name": "kube-system/coredns-66bc5c9577-jcgpm",
+              "nanoCores": 2902358,
+              "workingSetBytes": 15794176
+            },
+            {
+              "name": "kube-system/coredns-66bc5c9577-m8qz4",
+              "nanoCores": 2489442,
+              "workingSetBytes": 15642624
+            },
+            {
+              "name": "kube-system/etcd-bench-t470-control-plane",
+              "nanoCores": 41445281,
+              "workingSetBytes": 114540544
+            },
+            {
+              "name": "kube-system/kindnet-b994j",
+              "nanoCores": 46840,
+              "workingSetBytes": 10936320
+            },
+            {
+              "name": "kube-system/kube-apiserver-bench-t470-control-plane",
+              "nanoCores": 88089512,
+              "workingSetBytes": 611766272
+            },
+            {
+              "name": "kube-system/kube-controller-manager-bench-t470-control-plane",
+              "nanoCores": 19298660,
+              "workingSetBytes": 76201984
+            },
+            {
+              "name": "kube-system/kube-proxy-t4dpf",
+              "nanoCores": 524201,
+              "workingSetBytes": 13967360
+            },
+            {
+              "name": "kube-system/kube-scheduler-bench-t470-control-plane",
+              "nanoCores": 9254304,
+              "workingSetBytes": 31137792
+            },
+            {
+              "name": "local-path-storage/local-path-provisioner-7b8c8ddbd6-5gspf",
+              "nanoCores": 105389,
+              "workingSetBytes": 9347072
+            }
+          ]
+        },
+        "Secrets (OpenBao)": {
+          "nanoCores": 11632759,
+          "workingSetBytes": 19791872,
+          "pods": [
+            {
+              "name": "serendip-system/openbao-0",
+              "nanoCores": 11632759,
+              "workingSetBytes": 19791872
+            }
+          ]
+        },
+        "Workloads": {
+          "nanoCores": 0,
+          "workingSetBytes": 14307328,
+          "pods": [
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-00e8e5c893-env-0dc8d58921-7a7071ed-744fddcdd6-zz4g2",
+              "nanoCores": 0,
+              "workingSetBytes": 4755456
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-066f355945-env-0dc8d58921-fc9d8a29-5f4cdbdb6-7gcjg",
+              "nanoCores": 0,
+              "workingSetBytes": 4800512
+            },
+            {
+              "name": "dp-openchoreo-co-app-9fe8bcc36-env-0dc8d589-779e2557/cmp-a48b069290-env-0dc8d58921-3fd7f9ed-786b48885c-85npr",
+              "nanoCores": 0,
+              "workingSetBytes": 4751360
+            }
+          ]
+        }
+      },
+      "nodeNanoCores": 249421962,
+      "nodeWorkingSetBytes": 1827770368,
+      "nodeFsUsedBytes": 81354096640,
+      "imageFsUsedBytes": 2359132160
+    }
+  ],
+  "serendipd": {
+    "rssMiB": {
+      "mean": 35.5595703125,
+      "max": 36.36328125
+    },
+    "cpuMillicores": {
+      "mean": 0,
+      "max": 0
+    }
+  },
+  "serendipdWorkload": {
+    "rssMiB": {
+      "mean": 37.4873046875,
+      "max": 37.875
+    },
+    "cpuMillicores": {
+      "mean": 1.0933293751588307,
+      "max": 7.553549719457817
+    }
+  },
+  "polling": {
+    "clients": 3,
+    "requests": 150,
+    "errors": 0,
+    "requestsPerSecond": 1.2963703417693038,
+    "serendipd": {
+      "rssMiB": {
+        "mean": 37.233723958333336,
+        "max": 37.9765625
+      },
+      "cpuMillicores": {
+        "mean": 2.3036039528176886,
+        "max": 7.441718819520143
+      }
+    },
+    "cpuPercent": 0.11518019764088443,
+    "cpuPass": true,
+    "rssPass": true
+  },
+  "rule4": {
+    "rssMiB": 35.5595703125,
+    "cpuPercent": 0,
+    "rssPass": true,
+    "cpuPass": true,
+    "capacityCores": 2,
+    "note": "covers serendipd only: serendip-agent is not a long-running daemon yet and is not measured"
+  },
+  "headroom": {
+    "platformMiB": 1738.5530598958333,
+    "perComponentMiB": 9.086480034722227,
+    "projectedMiB": 1829.4178602430554,
+    "budgetMiB": 14336,
+    "fraction": 0.12761006279597206,
+    "verdict": "fits 16 GB comfortably"
+  },
+  "timings": {
+    "coldStart": 774.4,
+    "warmRestart": 46.6,
+    "timeToServing": [
+      70.2,
+      70.2,
+      70.2
+    ]
+  }
+}

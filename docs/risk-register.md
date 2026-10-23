@@ -694,3 +694,27 @@ purpose), **Closed** (fixed).
     out to be held open for hours.
   - **Listing:** add a `component` filter to `GET /v1/deployments` if
     the list grows large.
+
+## RP-035 — The first deploy into a new Environment takes about 70 s to serve
+
+- **Kind:** performance. **Status:** Accepted, 2026-10-23. **Found:**
+  spec 020 T014 (`profiles/edge-1/bench/results/2026-10-23-spec020-simulated-t470/`).
+- **What:** on the simulated T470, a Component created and deployed into
+  a new Environment served after 70 s. Before spec 020, an auto-deployed
+  Component served after 16 to 24 s on the same host.
+  - The Component is released in under a second. Its Deployment then
+    reads Progressing for about 67 s.
+  - The platform does more on a first deploy into an Environment: it
+    makes the Environment's data-plane namespace and the Application's
+    binding to it.
+  - The engine re-checks a converging Deployment fast for one resync
+    interval (30 s), then only on the 30 s resync. Up to about 30 s of
+    the 70 can be that wait.
+- **Why accepted:** memory and CPU don't regress. A first deploy into a
+  new Environment is rare. Later deploys and promotions into an existing
+  Environment weren't measured, and don't create a namespace.
+- **Revisit:**
+  - **Measure** a second Deployment into the same Environment, and a
+    promotion, to split the platform's time from the engine's wait.
+  - **If the wait dominates,** let a converging Deployment keep its fast
+    re-checks longer (a `core/reconcile` change, so a reviewed one).

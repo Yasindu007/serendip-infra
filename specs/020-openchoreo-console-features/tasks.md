@@ -490,12 +490,39 @@ Spec 020 authorises the UI work.
   - **Test support:** `authzWorld` gained an optional `registry`, and
     `newDeployWorldWith` sets it.
 
-## T014 — Footprint
+## T014 — Footprint ✅ 2026-10-23
 
 - **Do:** the edge-1 harness on the simulated T470, compared with spec
   019's run.
 - **Files:** `profiles/edge-1/bench/results/2026-10-xx-spec020-*/`.
 - **Verify:** no regression beyond tolerance, and rule 4 passes.
+- **Done as:** `profiles/edge-1/bench/results/2026-10-23-spec020-simulated-t470/`
+  (its README has the full reading).
+  - **The harness deploys the spec 020 way now** (`cmd/bench-edge1`).
+    Since T005 a Component only becomes Released, so the old workload
+    would never serve. It creates a Project, an Environment, an
+    Application in the Project, the Components and a Deployment of each.
+    "Serving" is the Deployment's first endpoint. Clean-up goes
+    Deployments first, then the Application, the Environment and the
+    Project.
+  - **`kind-t470-setup.sh` takes `KIND_CONFIG`,** because
+    `serendip-t018` holds host port 30080. The harness never uses the
+    host port.
+  - **Against spec 019's run, Kubernetes system fails** (742 → 859 MiB).
+    That's the host: a baseline of spec 021's final code (`cecc037`),
+    run the same day on the same host, measures 813 MiB. Every
+    control-plane pod grew alike with unchanged CPU, and cold starts
+    were slower all day.
+  - **Against that same-day baseline, every group passes.**
+    - `serendipd` idles at 35.6 MiB (the baseline is 34.4). Rule 4
+      passes: 0.12% CPU with three console tabs.
+    - The 16 GB headroom is 13%.
+  - **Create → Serving rose from 16–24 s to 70 s** for the first deploy
+    into a new Environment (RP-035). The Deployment reads Progressing
+    for about 67 s. Up to 30 s of that may be the engine's resync wait
+    after its fast re-checks end. The suspected Ready-before-reachable
+    gap didn't occur.
+
 
 ## T015 — Real cluster run
 

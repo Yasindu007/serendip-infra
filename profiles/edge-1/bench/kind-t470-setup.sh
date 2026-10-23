@@ -14,12 +14,16 @@ SIM_CPUS="${SIM_CPUS:-2}"
 SIM_CPUSET="${SIM_CPUSET:-0-3}"
 NODE_IMAGE="${NODE_IMAGE:-kindest/node:v1.34.0}"
 here="$(cd "$(dirname "$0")" && pwd)"
+# KIND_CONFIG replaces kind-t470.yaml, for example to map the gateway to
+# another host port when another cluster already holds 30080. The harness
+# never uses the host port, so results are unaffected.
+KIND_CONFIG="${KIND_CONFIG:-$here/kind-t470.yaml}"
 
 case "${1:-}" in
 up)
   name="${2:?cluster name required}"
   out="${3:?kubeconfig output path required}"
-  kind create cluster --name "$name" --image "$NODE_IMAGE" --config "$here/kind-t470.yaml" --wait 120s
+  kind create cluster --name "$name" --image "$NODE_IMAGE" --config "$KIND_CONFIG" --wait 120s
   node="$name-control-plane"
   docker update --cpus "$SIM_CPUS" --cpuset-cpus "$SIM_CPUSET" "$node" > /dev/null
   kind get kubeconfig --name "$name" > "$out"
