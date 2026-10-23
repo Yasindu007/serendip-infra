@@ -12,9 +12,55 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-10-22
+Last updated: 2026-10-23
 
 ## Current phase
+
+**Spec 020 (OpenChoreo's portal features in Serendip's console): IN
+PROGRESS.** The plan was approved 2026-10-22. T001–T010 are done and
+committed, one commit each (`fd01e8c` … `adef733`, not pushed). Every
+task's "Done as" note in `specs/020-openchoreo-console-features/tasks.md`
+records what was built and decided.
+
+**What exists now (server side, complete):**
+- **Environments, Azure-style:** a Project is the subscription and an
+  Environment the resource group. Migration 0008 moved Applications up to
+  their Project.
+- **Deployments:** `/v1/deployments` plus `POST .../promote`.
+  - Serendip enforces the Project's pipeline.
+  - Rollback is a `PUT` to a release from `status.history`.
+  - Serendip writes the releases itself (`autoDeploy: false`).
+- **Runtime:** `GET .../runtime`, `/events` and `/logs` (with
+  `follow=true` as NDJSON). Streams are capped, and logs need their own
+  permission (the Log Reader role).
+- **Configuration:** `core/jsonschema` checks overrides against the
+  platform's schemas (fail closed), and `GET /v1/components/{id}/schemas`
+  serves them.
+- **Topology:** `ComponentSpec.dependencies` (within one Application),
+  `GET /v1/components/{id}/dependencies`, and
+  `GET /v1/applications/{id}/topology`.
+- **The platform view:** `GET /v1/platform`.
+- **Packages:** a `ProviderInstance` installs a package. Its removal goes
+  through an Approval. Readiness is per optional capability, and
+  `GET /v1/packages` lists them. The `build` and `observability`
+  catalogue entries have no installer until 022 and 023.
+- **Records:** RP-028 to RP-033 were added. `docs/cli-and-mcp.md` is
+  regenerated.
+
+**Next:**
+- **T011:** CLI `--follow` for logs, MCP wording, and the catalogue
+  check.
+- **T012:** the console (screens for all of the above).
+- **T013:** acceptance tests.
+- **T014:** footprint.
+- **T015:** the real cluster run on `serendip-t018`, which still has the
+  legacy binding names (`cmp-x-development`) until the new serendipd
+  runs.
+- **T016:** the reviews.
+- **T017:** the docs, ADR 0019 and PROGRESS.
+- **Restart** (a rollout restart) was deferred in T006.
+
+Previous phase:
 
 **Spec 021 (Serendip's MCP server and CLI): COMPLETE** (T001–T013,
 2026-10-22).
@@ -77,10 +123,8 @@ Last updated: 2026-10-22
   stand-in) is still to be shown. The user can run `serendip login`
   themselves.
 
-**Next:**
-- **Spec 020** (OpenChoreo console features), whose plan is awaiting
-  approval. Its new actions land in the console, CLI and MCP together
-  through `api/catalog`.
+**Next (as of 021):**
+- **Spec 020** (now in progress, above).
 - **Then** 022 (builds) and 023 (observability).
 - **Also queued:** the self-service autonomous agents spec, and the `occ`
   admin escape hatch.
