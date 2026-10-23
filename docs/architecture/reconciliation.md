@@ -80,13 +80,15 @@ provider-neutral reasons):
 
 | Kind | Converging |
 |---|---|
-| Component | `Ready` = `Progressing`, `WaitingForApplication` or `ProviderNotReady`; or `Ready` true with `Reachable=Pending` |
+| Component | `Ready` = `Progressing`, `WaitingForApplication` or `ProviderNotReady`; or `Ready` true with `Reachable=Pending` (a provider that reports reachability on Components; OpenChoreo's doesn't since spec 020) |
 | Application | `Ready` = `Progressing` or `ProviderNotReady` |
+| Deployment (spec 020) | `Ready` = `Progressing`, `ProviderNotReady` or `WaitingForComponent` |
+| ProviderInstance (spec 020) | installing, or the platform not ready yet (`RequeueAfter` 15 s) |
 | Volume | `Bound` false with reason `Pending`, or `ProviderNotReady` |
 | Secret | `ProviderNotReady` (otherwise nothing to converge) |
 
-Settled (`Deployed`, `Serving`, `Bound`) and terminal (`DeployFailed`,
-`InvalidSpec`, `Unsupported`, `RouteRejected`) outcomes do
+Settled (`Deployed`, `Released`, `Serving`, `Bound`) and terminal
+(`DeployFailed`, `InvalidSpec`, `Unsupported`, `RouteRejected`) outcomes do
 not requeue, so the idle footprint is unchanged.
 
 **Idempotency is unchanged.** `RequeueAfter` is returned after `setState`,
@@ -182,6 +184,8 @@ which is exactly what readiness is). Capabilities today: `storage`,
 unauthenticated process liveness for supervisors.
 
 ## Real-cluster verification (spec 014, kind v1.34.0, unthrottled 4-CPU Docker VM)
+
+Before spec 020: Components deployed themselves then. Since spec 020 a Component is `Released` and its Deployments serve (`application-platform.md`).
 
 - **Time-to-Serving.** Component create to `Deployed`/`Serving` with a cached
   image: 14.2s in 4 of 4 runs. OpenChoreo's own ReleaseBinding `Ready` came

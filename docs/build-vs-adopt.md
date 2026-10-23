@@ -32,6 +32,9 @@ Last updated: 2026-10-21.
 | CLI | `cmd/serendip`, a client of the API | Spec 021 |
 | Operation catalogue | `api/catalog`: one list of actions the CLI and MCP both build from, with a route parity test | Spec 021 |
 | Benchmark harness | `cmd/bench-edge1` | Spec 013 |
+| Pipeline enforcement | The platform doesn't check promotion order, so Serendip does (`resource.AdmitRelease`) on every deploy and promotion | Spec 020, ADR 0019 |
+| Releases and bindings | Serendip writes every release and binding with the platform's auto-deploy off: one writer per binding, and Serendip's overrides never compete with it | Spec 020, ADR 0019 |
+| Log following | NDJSON over `fetch`, with caps, idle and maximum timers; the console reconnects | Spec 020 plan decision 8 |
 | JSON Schema validation | `core/jsonschema`: the platform's schemas use 7 keywords. It's about 300 lines of stdlib, fails closed on anything else, and refuses unknown settings the platform would silently drop | Spec 020 T008 |
 
 ## Adopted (other projects, integrated)
@@ -57,7 +60,7 @@ Last updated: 2026-10-21.
 | What | Instead | Why | Where |
 |---|---|---|---|
 | Backstage (OpenChoreo's portal) | Our own console | Up to 2 GiB and hundreds of Node packages, and it would call OpenChoreo's API directly, bypassing Serendip's RBAC, approvals and audit | Spec 020 |
-| OpenChoreo's API (`openchoreo-api`) as Serendip's path | The Kubernetes API, directly | A new admin credential, a second authorization layer, and extra hops; it's closed to all pods (RP-018) | Spec 020 plan decision 3 |
+| OpenChoreo's API (`openchoreo-api`) as Serendip's path | The Kubernetes API, directly | A new admin credential, a second authorization layer, and extra hops; it's closed to all pods (RP-018) | Spec 020 plan decision 3, ADR 0019 |
 | OpenChoreo's `occ` CLI and MCP | Serendip's CLI and MCP | They bypass Serendip's RBAC, approvals and audit; an admin-only escape hatch is deferred | Spec 021 |
 | `client-go` | Our small REST client | Weight (constitution 4) | Spec 006 |
 | Service proxy, or an in-cluster helper, for the identity provider's management API | In-process port-forward | The proxy strips `Authorization`; a helper is another image to maintain | ADR 0015 |
@@ -65,7 +68,9 @@ Last updated: 2026-10-21.
 | A 428 "approval required" on every DELETE | Policy-approved Approvals | An approval for everything is a hassle; roles decide | Spec 019 |
 | An Approval record written after the delete | In the same transaction | Not atomic | Spec 019, ADR 0016 |
 | SQLite `synchronous = NORMAL` | `FULL` | Power loss could resurrect deletes and revoked access | RP-001 |
-| One Application per Environment | Deployments into environments (Azure-style) | Fights OpenChoreo's model; duplicates configuration | Spec 020 plan decision 2 |
+| One Application per Environment | Deployments into environments (Azure-style) | Fights OpenChoreo's model; duplicates configuration | Spec 020 plan decision 2, ADR 0019 |
+| OpenChoreo's auto-deploy | Serendip creating releases and bindings | Two writers on one binding, and an ambiguous first environment | Spec 020, ADR 0019 |
+| `EventSource` (server-sent events) for log following | `fetch` with a `ReadableStream` | It can't send the CSRF header cookie requests need (ADR 0013) | Spec 020 plan decision 8 |
 | A hand-written MCP protocol layer | The MCP Go SDK | Two-plus protocol generations to track ourselves | Spec 021 (reversed 2026-10-20) |
 | Serendip issuing its own tokens | ThunderID | Building an identity provider | Spec 021 plan decision 1 |
 | `mark3labs/mcp-go` | The official MCP Go SDK | Community-maintained, no 2026-07-28 support when checked | ADR 0017 |

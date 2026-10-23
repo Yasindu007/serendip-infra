@@ -660,7 +660,7 @@ Spec 020 authorises the UI work.
       both themes.
 
 
-## T017 [A] — Docs, ADR, close
+## T017 [A] — Docs, ADR, close ✅ 2026-10-23
 
 - **Do:**
   - Write ADR 0019 (the environment model; direct Kubernetes access).
@@ -669,3 +669,46 @@ Spec 020 authorises the UI work.
   - Update the risk register, `docs/build-vs-adopt.md` and
     `docs/PROGRESS.md` (next: 022).
 - **Verify:** `docs-keeper` reports the docs in sync.
+- **Done as:**
+  - **ADR 0019:** Azure-style environments, Serendip writing every
+    release and binding (auto-deploy off), and direct Kubernetes access
+    instead of `openchoreo-api`, with the consequences and the
+    alternatives turned down.
+  - **`application-platform.md`:** a new "Environments and Deployments
+    (spec 020)" section, plus the object mapping, conditions, message
+    writes, exposure, rollout and the deferred list brought up to date.
+  - **The other architecture docs:**
+    - `resource-model.md`: the hierarchy, Deployment, ProviderInstance
+      and the edges;
+    - `authorization.md`: inheritance, packages at `/`, read the source
+      and write the target, the handlers' audited refusals;
+    - `ai-operations.md`: spec 020's MCP tools;
+    - `gateway.md`: reachability per Deployment;
+    - `reconciliation.md`: converging and settled reasons for
+      Deployments and packages;
+    - the architecture index, which gains its missing
+      `application-platform.md` row.
+  - **Records:**
+    - `build-vs-adopt.md`: pipeline enforcement, releases and bindings,
+      and log following built; auto-deploy and `EventSource` rejected.
+    - The risk register: RP-035 gains the real-cluster timings, and
+      RP-037 records that no provider declares its RAM and CPU in code.
+    - PROGRESS: spec 020 complete, next 022.
+  - **`docs-keeper`:** in sync after two passes. The first found the new sections accurate,
+    every limit, route, action and reason matching the code, and
+    `cli-and-mcp.md` complete. It flagged older passages spec 020 had
+    made stale (Components deploying themselves, auto-deploy, one cell
+    namespace per Application, the pipeline rules' edge cases); all are
+    fixed. The second pass confirmed seven, and its
+    one catch (an Application reads its OpenChoreo Project's readiness,
+    not a binding's) is fixed.
+  - **Found by that check, fixed in the console:** a Component's
+    reconciliation path drew "Deployed" and "Reachable" stages a
+    Component can no longer reach. It now ends at "Released", and the
+    page points to the Deploy tab for endpoints.
+    - **Left as is in `core/`:** the Component reconciler's generic
+      reachability, for providers that report it on Components. With
+      OpenChoreo's provider a Component shows `Reachable=Pending` only
+      before it's released (`gateway.md`).
+  - **A stale code comment** in the provider was corrected (comment
+    only).

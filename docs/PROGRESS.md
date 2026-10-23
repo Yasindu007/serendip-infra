@@ -16,93 +16,92 @@ Last updated: 2026-10-23
 
 ## Current phase
 
-**Spec 020 (OpenChoreo's portal features in Serendip's console): IN
-PROGRESS.** The plan was approved 2026-10-22. T001–T016 are done and
-committed, one commit each (`fd01e8c` … `a62170a`, not pushed). Every
-task's "Done as" note in `specs/020-openchoreo-console-features/tasks.md`
-records what was built and decided.
+**Spec 020 (OpenChoreo's portal features in Serendip's console):
+COMPLETE** (T001–T017, 2026-10-23).
+- **Commits:** `fd01e8c` … T017's, on local `main`, **not pushed**. By
+  the GitHub pacing rule they go up as a branch, a spec or two at a time.
+- **Records:**
+  - `specs/020-openchoreo-console-features/`: spec, plan, tasks (with
+    "Done as" notes), and `verification.md` for the real cluster;
+  - **ADR 0019:** the environment model, and direct Kubernetes access to
+    OpenChoreo;
+  - `docs/architecture/application-platform.md` ("Environments and
+    Deployments (spec 020)"), `resource-model.md`, `authorization.md` and
+    `ai-operations.md`;
+  - the risk register (RP-028 to RP-037), `build-vs-adopt.md`, and
+    `docs/cli-and-mcp.md`.
 
-**What exists now (server side complete; the console through T012):**
+**What exists now:**
 - **Environments, Azure-style:** a Project is the subscription and an
-  Environment the resource group. Migration 0008 moved Applications up to
-  their Project.
-- **Deployments:** `/v1/deployments` plus `POST .../promote`.
-  - Serendip enforces the Project's pipeline.
-  - Rollback is a `PUT` to a release from `status.history`.
-  - Serendip writes the releases itself (`autoDeploy: false`).
-- **Runtime:** `GET .../runtime`, `/events` and `/logs` (with
-  `follow=true` as NDJSON). Streams are capped, and logs need their own
-  permission (the Log Reader role).
-- **Configuration:** `core/jsonschema` checks overrides against the
-  platform's schemas (fail closed), and `GET /v1/components/{id}/schemas`
-  serves them.
-- **Topology:** `ComponentSpec.dependencies` (within one Application),
-  `GET /v1/components/{id}/dependencies`, and
-  `GET /v1/applications/{id}/topology`.
-- **The platform view:** `GET /v1/platform`.
-- **Packages:** a `ProviderInstance` installs a package. Its removal goes
-  through an Approval. Readiness is per optional capability, and
-  `GET /v1/packages` lists them. The `build` and `observability`
-  catalogue entries have no installer until 022 and 023.
-- **The CLI:** `serendip deployments logs <id> --follow` streams, with
-  workload text escaped. `catalog.Param.CLIOnly` keeps `follow` off MCP.
-- **The console (T012):**
-  - **Component tabs:** Deploy (the pipeline; deploy, promote, roll
-    back, undeploy; Restart shown "not available yet") and Runtime
-    (objects, events, logs with follow and reconnect).
-  - **Builds and Observability** are greyed out from readiness, naming
-    the package.
-  - **Pages:** a Configure form generated from schemas, Application
-    Topology, Platform, and Packages.
-  - **New Applications** can choose their Project.
-  - **Gates:** 109 tests, 94.5 KiB gz.
-- **Acceptance (T013):** `api/spec020_acceptance_test.go` proves
-  criteria 1–7, 10 and 11 in process, on a fake platform with the real
-  reconcilers.
-- **Footprint (T014):** no regression against a same-day baseline of
-  `cecc037` on the simulated T470. `serendipd` idles at 35.6 MiB, and
-  rule 4 passes. The cross-day comparison with spec 019 fails on
-  Kubernetes system because of the host, not the code. The first deploy
-  into a new Environment serves in 70 s (RP-035). The harness now
-  deploys through Deployments.
-- **Real cluster (T015):** `verification.md`. Every criterion that can
-  be shown without packages was shown on `serendip-t018`, including
-  Claude Code promoting through `serendip mcp` and its undeploy waiting
-  for a person. Findings F1–F3 and U1–U5 go to T016.
-- **Reviews (T016):** `contract-guardian` passed, and `go-reviewer`
-  and the security review found no blocker.
-  - **Fixed:** T015's findings and the reviews' should-fixes. These
-    include a latent hole that would have let a Project's Contributor
-    install platform-wide packages once one has an installer, and a cap
-    on recent-log reads.
-  - **Not changed, on purpose:** listed under T016 in `tasks.md`.
-- **Records:** RP-028 to RP-036 were added (RP-034: the console can't
-  state a package's measured cost until the catalogue carries it). `docs/cli-and-mcp.md` is
-  regenerated.
+  Environment the resource group.
+  - Applications sit under their Project; migration 0008 moved existing
+    ones up.
+  - A **Deployment** runs one Component in one Environment.
+  - **Promotion** follows the Project's pipeline, which Serendip
+    enforces. Each Environment keeps its own overrides.
+  - **Rollback** is a `PUT` naming a release from `history`.
+  - **Undeploy** goes through an Approval.
+- **The platform side:** Serendip writes every release and binding (the
+  platform's auto-deploy is off), straight through the Kubernetes API.
+- **Runtime view:** objects, events, and logs (recent lines, or followed
+  as NDJSON), all capped. Logs need their own permission (Log Reader).
+- **Configuration:** checked against the platform's schemas, failing
+  closed; the console builds its form from them.
+- **Topology:** declared dependencies within an Application. A
+  Deployment waiting for a Component it calls says which one.
+- **Platform view and packages:** read-only platform; packages are
+  platform-wide `ProviderInstance`s, decided at `/`.
+- **Every surface:**
+  - **the console:** Deploy, Runtime, Builds and Observability tabs,
+    Configure, Topology, Platform, Packages;
+  - **the CLI,** with `--follow`;
+  - **MCP tools,** where an assistant's promotion is immediate and its
+    undeploy waits for a person.
+- **Proven:**
+  - **In process:** T013's acceptance tests.
+  - **On `serendip-t018`:** T015, including Claude Code through
+    `serendip mcp`.
+  - **Footprint:** T014, with no regression against a same-day baseline;
+    `serendipd` idles at 35.6 MiB.
+  - **Reviews:** T016. Four passed with no blockers, and their findings
+    were fixed or recorded.
+
+**Open from spec 020** (risk register):
+- **RP-034:** the console can't state a package's measured cost until
+  the catalogue carries it. That's needed before 022's installer ships.
+- **RP-035:** the first deploy into a new Environment took 70 s on the
+  simulated T470, but 18–24 s on `serendip-t018`.
+- **RP-036:** a brief not-ready flicker after a restart.
+- **RP-037:** no provider declares its RAM and CPU in code.
+- **Also:** RP-028 to RP-033, all accepted.
+- **Deferred:**
+  - a rollout restart (shown "not available yet");
+  - editing dependencies in the console (the API and CLI do it);
+  - remote data planes.
 
 **Next:**
-- **T017:**
-  - ADR 0019 (the environment model; direct Kubernetes access);
-  - `application-platform.md`, `resource-model.md`, `authorization.md`
-    and `ai-operations.md`;
-  - the risk register, `build-vs-adopt.md`, and the known gap that no
-    provider declares its RAM and CPU in code;
-  - PROGRESS (next: 022).
-- **Restart** (a rollout restart) is still deferred from T006.
+- **Spec 022: builds.** The workflow-plane package, with its first real
+  installer. Its catalogue entry must carry measured cost (RP-034, and
+  the registry's requirements field, RP-037). Installs must be cheap
+  no-ops on resync (T016 review note).
+- **Then spec 023: observability.**
+- **Also queued:**
+  - the self-service autonomous agents spec;
+  - the `occ` admin escape hatch;
+  - a real browser sign-in for the CLI, still to be shown (from spec
+    021).
 
-**Leftovers (spec 020):**
-- **`serendipd`** (spec 020) is **stopped**: Claude Code reaped its
-  background shell under memory pressure after T015. It isn't needed
-  until something must be shown live again.
-  - **Its scratch:** the T015 store copy, the run script, the CLI
-    config, the console driver and the screenshots are in
+**Leftovers on this machine:**
+- **`serendip-t018` is running.** It carries T015's `t020-staging`,
+  `t020-production`, `t020-web` and `t020-api`.
+- **`serendipd` (spec 020) is stopped.** Claude Code reaped its
+  background shell under memory pressure after T015.
+  - **Its scratch:** the T015 store copy, `run.ps1` (API keys `verifier`,
+    Owner, and `t015-reader`, Reader at `t019-agents`), the CLI config,
+    the console driver and the screenshots are in
     `%TEMP%/claude/D--serendip-infra/5c3ed502-4ff6-4bd9-94ad-ac55cfc89763/scratchpad/t015/`.
-  - **Restart it** with that folder's `run.ps1`. The API keys are
-    `verifier` (Owner) and `t015-reader` (Reader at `t019-agents`).
-- **On the cluster:** `t020-staging`, `t020-production`, `t020-web` and
-  `t020-api` are left from T015.
-- **T017:** the docs, ADR 0019 and PROGRESS.
-- **Restart** (a rollout restart) was deferred in T006.
+  - **When running it again:** start the keep-awake beside long
+    background jobs.
 
 Previous phase:
 

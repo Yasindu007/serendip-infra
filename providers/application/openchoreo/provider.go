@@ -16,11 +16,12 @@ import (
 )
 
 // Provider implements reconcile.ApplicationPlatformProvider on
-// OpenChoreo: a Serendip Application becomes a Project plus its one
-// ProjectReleaseBinding; a Component becomes a Component (autoDeploy) plus
-// its Workload. OpenChoreo's own controllers create the ComponentRelease
-// and ReleaseBinding, and render the real Deployment into the Project's
-// data-plane cell namespace. Everything lives in ControlPlaneNamespace,
+// OpenChoreo: a Serendip Application becomes a Project; a Component becomes
+// a Component (auto-deploy off) plus its Workload and a ComponentRelease
+// per spec. Since spec 020 (ADR 0019) it also implements the Deployment
+// side: each Deployment becomes a ReleaseBinding, plus the Application's
+// ProjectReleaseBinding for that Environment, and OpenChoreo renders the
+// real Deployment into that (project, environment) data-plane namespace. Everything lives in ControlPlaneNamespace,
 // labeled as the org namespace by EnsurePlatformDefaults.
 type Provider struct {
 	client  *kubernetes.Client

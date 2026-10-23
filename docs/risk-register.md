@@ -710,6 +710,9 @@ purpose), **Closed** (fixed).
   - The engine re-checks a converging Deployment fast for one resync
     interval (30 s), then only on the 30 s resync. Up to about 30 s of
     the 70 can be that wait.
+- **Since measured on a real cluster** (spec 020 T015, `serendip-t018`):
+  first deploys into the new staging and production Environments served
+  in 18 s and 24 s. The 70 s is the simulated T470's.
 - **Why accepted:** memory and CPU don't regress. A first deploy into a
   new Environment is rare. Later deploys and promotions into an existing
   Environment weren't measured, and don't create a namespace.
@@ -739,3 +742,23 @@ purpose), **Closed** (fixed).
 - **Revisit:** if people take the flicker for an outage, keep the last
   observed state with a "not re-checked since the restart" note instead
   of flipping to not-ready.
+
+## RP-037 — No provider declares its resource requirements in code
+
+- **Kind:** honesty and documentation. **Status:** Accepted, 2026-10-23.
+  **Found:** spec 020 T016 contract review.
+- **What:** `providers/CLAUDE.md` and `provider-model.md` say a provider
+  declares its capabilities, resource requirements (RAM and CPU on
+  reference hardware), health check and upgrade behaviour.
+  - **No provider declares RAM and CPU in code.** That includes the
+    OpenChoreo provider spec 020 extended. Their measured footprints live
+    in the benchmark results
+    (`profiles/edge-1/bench/results/`, `002-edge1-footprint.md`) instead.
+  - **True of every provider since before spec 020.** It isn't new with
+    this spec.
+- **Why accepted:** the measured numbers exist and are what's honest to
+  quote (constitution 6). A declared number nothing measures would be
+  worse.
+- **Revisit:** when the provider registry gains a requirements field.
+  Spec 022's packages need it anyway, to state a package's cost before
+  installing it (RP-034). Fill it from the benchmark results then.

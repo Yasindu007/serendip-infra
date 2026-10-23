@@ -111,6 +111,22 @@ the graph and readiness; other kinds are read through `resources_list` and
 `resources_get`. Never exposed: access-management writes, directory reads
 and approving or rejecting (an AI never decides an approval).
 
+Spec 020 adds the application platform's operations (ADR 0019):
+- **Deployments:** `deployments_*` CRUD and `deployments_promote`.
+- **The runtime view:** `deployments_runtime`, `deployments_events` and
+  `deployments_logs`.
+  - Logs need their own permission (the Log Reader role).
+  - The MCP tool answers once with recent lines. Following a stream is
+    the CLI's alone (`catalog.Param.CLIOnly`): a tool call must end.
+- **Reads:** `components_schemas`, `components_dependencies`,
+  `applications_topology`, `platform_get` and `packages_list`.
+
+An assistant promotes at once, since promotion is a write its person's
+roles allow. Its undeploy is a delete, so it waits for a person. Shown
+with Claude Code on a real cluster in `specs/020-openchoreo-console-features/verification.md`.
+Log lines are workload output, so they reach the AI as data: the
+assistant reads them as text, like any other tool result.
+
 ### Two ways in
 
 | Path | Who | Identity |

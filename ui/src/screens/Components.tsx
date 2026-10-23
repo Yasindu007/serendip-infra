@@ -135,7 +135,7 @@ export function ComponentDetail({ appId, id, tab = "overview" }: { appId: string
                   ...(c.status.endpoints ?? []).map((e): [string, React.ReactNode] => [`Endpoint ${e.name}`, <SafeLink href={e.url} />]),
                 ]}
               />
-              {exposedPorts(c).length > 0 && !endpoint && <p className="field-hint">An endpoint appears here once it's actually serving.</p>}
+              {exposedPorts(c).length > 0 && <p className="field-hint">Each Environment's endpoints are on the Deploy tab.</p>}
             </section>
 
             <section className="section" aria-labelledby="comp-conditions">

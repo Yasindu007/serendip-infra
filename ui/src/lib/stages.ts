@@ -33,24 +33,18 @@ export function componentStages(component: Component, app: Application | undefin
     detail: app ? (appReady?.reason ?? "Not reconciled yet") : "Owning application not found",
   });
 
+  // Since spec 020 a Component runs nowhere by itself: it's Ready once its
+  // current spec is a release. Running, health and endpoints belong to each
+  // Deployment (the Deploy tab), so there's no "Reachable" stage here.
   const ready = findCondition(component.status.conditions, "Ready");
   const deployed = stateOf(ready);
   stages.push({
-    label: "Deployed",
+    label: "Released",
     // While the application isn't ready, the component's own state can only
     // be "waiting"; show that rather than a stale failure.
     state: stages[1]!.state === "done" ? deployed : deployed === "done" ? "done" : "pending",
     detail: ready?.reason ?? "Not reconciled yet",
   });
 
-  if (exposedPorts(component).length > 0) {
-    const reachable = findCondition(component.status.conditions, "Reachable");
-    const serving = component.status.endpoints?.length ?? 0;
-    stages.push({
-      label: "Reachable",
-      state: stateOf(reachable),
-      detail: reachable?.status === "True" ? `${serving} endpoint${serving === 1 ? "" : "s"} serving` : (reachable?.reason ?? "Not checked yet"),
-    });
-  }
   return stages;
 }

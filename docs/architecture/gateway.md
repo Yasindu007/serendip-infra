@@ -162,9 +162,25 @@ port gets a route. Un-expose works because the Workload is server-side
 applied without the visibility key, and the API server removes a field the
 `serendip` manager no longer applies (spec 012 had to send an explicit null in
 a merge patch); the route disappears and status follows. Toggling only changes the
-Workload; autoDeploy cuts a new release.
+Workload; `EnsureComponent` cuts a new release (since spec 020, auto-deploy is
+off), and each Deployment rolls onto it when it runs the latest.
 
-## The `Reachable` Condition
+## Reachability since spec 020: per Deployment
+
+A Component runs nowhere by itself since spec 020 (ADR 0019), so it no longer
+reports reachability once released. `Deploy` checks each exposed port's routes
+in the Deployment's data-plane namespace, with the rules below, and publishes
+`DeploymentStatus.Endpoints` only while its binding is Ready and every route is
+serving. Otherwise the Deployment stays `Deployed` with an empty `endpoints`
+and a message saying why ("endpoints not reachable yet: …"). The console shows
+each Environment's endpoints on the Deploy tab.
+
+The `Reachable` Condition below is spec 012's, kept by the Component
+reconciler for providers that report it on Components. With the OpenChoreo
+provider a Component shows it only as `Pending` ("workload is not deployed")
+before it's released, and not at all after.
+
+## The `Reachable` Condition (spec 012)
 
 Written only when at least one port is exposed. `EnsureComponent` returns a
 `ComponentObservation` (`Ready`, `Reachable *Reachability`); a nil

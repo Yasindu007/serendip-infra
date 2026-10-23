@@ -16,19 +16,17 @@ function comp(conditions: Condition[], expose = true, endpoints = 0): Component 
 const app = (conditions: Condition[]): Application => ({ metadata: { id: "a1", name: "storefront", kind: "Application", createdAt: "", updatedAt: "", resourceVersion: 1 }, spec: {}, status: { conditions } });
 
 describe("componentStages", () => {
-  it("is done end to end when everything is serving", () => {
-    const s = componentStages(comp([cond("Ready", "True", "Deployed"), cond("Reachable", "True", "Serving")], true, 1), app([cond("Ready", "True", "Deployed")]));
+  it("is done end to end once released", () => {
+    const s = componentStages(comp([cond("Ready", "True", "Released")], true), app([cond("Ready", "True", "Deployed")]));
     expect(s.map((x) => [x.label, x.state])).toEqual([
       ["Saved", "done"],
       ["Application ready", "done"],
-      ["Deployed", "done"],
-      ["Reachable", "done"],
+      ["Released", "done"],
     ]);
-    expect(s[3]!.detail).toBe("1 endpoint serving");
   });
 
-  it("has no Reachable stage when nothing is exposed", () => {
-    expect(componentStages(comp([], false), app([])).map((x) => x.label)).not.toContain("Reachable");
+  it("has no Reachable stage: reachability belongs to each Deployment (spec 020)", () => {
+    expect(componentStages(comp([cond("Reachable", "False", "Pending")], true), app([])).map((x) => x.label)).not.toContain("Reachable");
   });
 
   it("never claims progress it has no Condition for", () => {
@@ -40,11 +38,6 @@ describe("componentStages", () => {
     const s = componentStages(comp([cond("Ready", "False", "WaitingForApplication")]), app([cond("Ready", "False", "Progressing")]));
     expect(s[1]!.state).toBe("active");
     expect(s[2]!.state).toBe("pending");
-  });
-
-  it("marks a rejected route as failed", () => {
-    const s = componentStages(comp([cond("Ready", "True", "Deployed"), cond("Reachable", "False", "RouteRejected")]), app([cond("Ready", "True", "Deployed")]));
-    expect(s[3]!.state).toBe("failed");
   });
 
   it("says when the owning application is missing", () => {
