@@ -79,6 +79,42 @@ describe("schema forms", () => {
   });
 });
 
+describe("schema references", () => {
+  // The shape of the platform's real per-environment schema
+  // (core/jsonschema/testdata/serendip-service-environment.json).
+  const real: JSONSchema = {
+    type: "object",
+    $defs: {
+      Quantity: { type: "object", properties: { cpu: { type: "string" }, memory: { type: "string" } } },
+      Requirements: { type: "object", properties: { requests: { $ref: "#/$defs/Quantity" }, limits: { $ref: "#/$defs/Quantity" } } },
+    },
+    properties: { replicas: { type: "integer" }, resources: { $ref: "#/$defs/Requirements" }, odd: { $ref: "#/$defs/Missing" } },
+  };
+
+  it("follows local references into fields, and leaves unresolved ones as JSON", () => {
+    expect(schemaFields(real).map((f) => `${f.path}:${f.kind}`)).toEqual([
+      "replicas:integer",
+      "resources.requests.cpu:text",
+      "resources.requests.memory:text",
+      "resources.limits.cpu:text",
+      "resources.limits.memory:text",
+      "odd:json",
+    ]);
+    expect(fromFormState(real, { "resources.limits.cpu": "500m" }).values).toEqual({ resources: { limits: { cpu: "500m" } } });
+  });
+});
+
+describe("hostile schemas", () => {
+  it("never steps into the prototype, and stops a schema that refers to itself", () => {
+    const evil = JSON.parse('{"type":"object","properties":{"__proto__":{"type":"object","properties":{"polluted":{"type":"string"}}},"ok":{"type":"string"}}}') as JSONSchema;
+    expect(schemaFields(evil).map((f) => f.path)).toEqual(["ok"]);
+    fromFormState(evil, { "__proto__.polluted": "yes", ok: "x" });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    const loop: JSONSchema = { type: "object", $defs: { N: { type: "object", properties: { v: { type: "string" }, next: { $ref: "#/$defs/N" } } } }, properties: { head: { $ref: "#/$defs/N" } } };
+    expect(schemaFields(loop).length).toBeLessThan(20);
+  });
+});
+
 describe("package availability", () => {
   it("reads installed-but-not-ready as installing or not ready, never unavailable", () => {
     const r = (ready: boolean, reason: string) => ({ ready, reason, since: "" });

@@ -180,6 +180,31 @@ func TestProviderInstanceReconciler_RefusesWhatItCantInstall(t *testing.T) {
 	}
 }
 
+// An invalid record (written past the API) doesn't make an installed
+// package's capability read not ready (T016 review).
+func TestProviderInstanceReconciler_InvalidDoesntHideAnInstalledPackage(t *testing.T) {
+	ctx := context.Background()
+	s := newAppStores(t)
+	insts := sqlite.NewStore[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](s.db, resource.KindProviderInstance)
+	pkg, catalogue := newPackages(t)
+	pkg.state = reconcile.PackageState{Ready: true}
+	log := readinessLog{}
+	r := reconcile.NewProviderInstanceReconciler(insts, catalogue, log.report)
+	good, err := insts.Create(ctx, resource.ProviderInstance{Metadata: resource.Metadata{Name: "good"}, Spec: resource.ProviderInstanceSpec{CapabilityID: "build", ProviderID: "test-builder"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkRequeue(t, r.Reconcile(ctx, graph.ResourceRef{Kind: resource.KindProviderInstance, ID: good.Metadata.ID}), false)
+	bad, err := insts.Create(ctx, resource.ProviderInstance{Metadata: resource.Metadata{Name: "bad"}, Spec: resource.ProviderInstanceSpec{CapabilityID: "build", ProviderID: "unknown"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkRequeue(t, r.Reconcile(ctx, graph.ResourceRef{Kind: resource.KindProviderInstance, ID: bad.Metadata.ID}), false)
+	if log["build"] != "ready "+reconcile.ReasonInstalled {
+		t.Errorf("readiness = %v, want the installed package still ready", log)
+	}
+}
+
 func TestUninstallCleanup(t *testing.T) {
 	pkg, catalogue := newPackages(t)
 	log := readinessLog{"build": "ready Ready"}
@@ -200,10 +225,15 @@ func TestUninstallCleanup(t *testing.T) {
 	}
 	// A missing or damaged last spec can't strand the clean-up: every
 	// package removes what the instance might have installed.
+	// And the capability it provided reads not installed (T016 review).
 	for _, last := range [][]byte{nil, []byte("{oops")} {
 		pkg.uninstalled = nil
+		log["build"] = "ready Ready"
 		if err := clean(context.Background(), resource.ApprovalRef{ID: "pi-3", LastSpec: last}); err != nil || len(pkg.uninstalled) != 1 || pkg.uninstalled[0] != "pi-3" {
 			t.Errorf("last spec %q: %v, uninstalled %v", last, err, pkg.uninstalled)
+		}
+		if log["build"] != reconcile.ReasonNotInstalled {
+			t.Errorf("last spec %q: readiness %v", last, log)
 		}
 	}
 }

@@ -318,6 +318,47 @@ func TestDeploy_NotYetReported(t *testing.T) {
 	}
 }
 
+// A binding held back for its connections says which Components it calls
+// aren't deployed in the Environment (T015 finding F1), instead of a bare
+// Progressing.
+func TestDeploy_WaitingForComponentsItCalls(t *testing.T) {
+	spec := webSpec
+	spec.Dependencies = []resource.ComponentDependency{{Component: "api-id", Port: "http", Env: "API_URL"}}
+	comp := testComp(spec)
+	pending := mustJSON(map[string]any{"conditions": []any{
+		map[string]any{"type": "Ready", "status": "False", "reason": "ReleaseSynced", "message": "Release is not synced"},
+		map[string]any{"type": "ConnectionsResolved", "status": "False", "reason": "ConnectionsPending", "message": "1 connections pending, 0 resolved"},
+	}})
+	run := func(api *fakeAPI) reconcile.DeploymentObservation {
+		t.Helper()
+		api.put(bindingPath(), kubernetes.Object{Metadata: kubernetes.ObjectMeta{Name: deploymentBindingName(testCompID, testEnvID), Generation: 1}, Status: pending})
+		obs, err := NewProvider(newTestKubeClient(t, api.handler(t)), testGateway).Deploy(context.Background(), testApp(), comp, testEnv(), testDeployment(resource.DeploymentSpec{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return obs
+	}
+
+	obs := run(newFakeAPI().withComponentType())
+	if obs.Ready || obs.Reason != reconcile.ReasonWaitingForComponent || !strings.Contains(obs.Message, "deployed in this Environment: Component api-id") {
+		t.Errorf("the called Component isn't deployed: %+v", obs)
+	}
+
+	api := newFakeAPI().withComponentType()
+	api.put(nsItem("releasebindings", deploymentBindingName("api-id", testEnvID)), kubernetes.Object{Metadata: kubernetes.ObjectMeta{Name: deploymentBindingName("api-id", testEnvID)}})
+	if obs := run(api); obs.Reason != reconcile.ReasonWaitingForComponent || !strings.Contains(obs.Message, "to be ready in this Environment") {
+		t.Errorf("the called Component is deployed, not ready: %+v", obs)
+	}
+	// A real failure keeps its own reason, whatever its connections say.
+	pending = mustJSON(map[string]any{"conditions": []any{
+		map[string]any{"type": "Ready", "status": "False", "reason": "ResourcesDegraded", "message": "crash loop"},
+		map[string]any{"type": "ConnectionsResolved", "status": "False", "reason": "ConnectionsPending"},
+	}})
+	if obs := run(newFakeAPI().withComponentType()); obs.Reason != reconcile.ReasonDeployFailed {
+		t.Errorf("a failure while connections are pending: %+v", obs)
+	}
+}
+
 func TestDeploy_StatusMapping(t *testing.T) {
 	tests := []struct {
 		status, reason string

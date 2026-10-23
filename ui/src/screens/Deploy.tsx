@@ -172,14 +172,16 @@ function EnvironmentStage({
           Deploy the latest release of {comp.metadata.name} to {env.metadata.name}?
         </p>
       </ActionConfirm>
-    ) : (
+    ) : canWrite ? (
+      // Deploying creates a Deployment, so it's offered only to those who
+      // may (ui/DESIGN.md "Permission-aware controls").
       <div className="form-actions">
-        <Guarded allowed={canWrite} label="Deploy" reason="Your roles here don't allow deploying.">
-          <button type="button" className="button button--primary" onClick={() => setOpen({ kind: "deploy", env: id })}>
-            Deploy
-          </button>
-        </Guarded>
+        <button type="button" className="button button--primary" onClick={() => setOpen({ kind: "deploy", env: id })}>
+          Deploy
+        </button>
       </div>
+    ) : (
+      <p className="field-hint">Nothing runs here yet.</p>
     );
   }
 
@@ -346,6 +348,7 @@ function keepUndescribed(stored: Record<string, unknown> | undefined, schema: Co
 export function DeploymentConfigure({ appId, compId, id }: { appId: string; compId: string; id: string }) {
   const [d, setD] = useState<Deployment>();
   const [envName, setEnvName] = useState<string>();
+  const [names, setNames] = useState<{ app?: string; comp?: string }>({});
   const [schemas, setSchemas] = useState<ConfigSchemas>();
   const [schemaError, setSchemaError] = useState<ApiError | NetworkError>();
   const [loadError, setLoadError] = useState<ApiError | NetworkError>();
@@ -362,13 +365,16 @@ export function DeploymentConfigure({ appId, compId, id }: { appId: string; comp
     (async () => {
       const dep = await apiFetch<Deployment>("GET", `/v1/deployments/${enc(id)}`, undefined, ctrl.signal);
       const envId = ownerOf(dep.metadata, "Environment");
-      const [e, s] = await Promise.all([
+      const [e, s, app, comp] = await Promise.all([
         envId ? apiFetch<Environment>("GET", `/v1/environments/${enc(envId)}`, undefined, ctrl.signal).catch(() => undefined) : undefined,
         apiFetch<ConfigSchemas>("GET", `/v1/components/${enc(dep.spec.component)}/schemas`, undefined, ctrl.signal).catch((err) => {
           if (isShown(err)) setSchemaError(err);
           return undefined;
         }),
+        apiFetch<Application>("GET", `/v1/applications/${enc(appId)}`, undefined, ctrl.signal).catch(() => undefined),
+        apiFetch<Component>("GET", `/v1/components/${enc(dep.spec.component)}`, undefined, ctrl.signal).catch(() => undefined),
       ]);
+      setNames({ ...(app ? { app: app.metadata.name } : {}), ...(comp ? { comp: comp.metadata.name } : {}) });
       const o = dep.spec.overrides ?? {};
       setD(dep);
       setEnvName(e?.metadata.name);
@@ -378,7 +384,7 @@ export function DeploymentConfigure({ appId, compId, id }: { appId: string; comp
       setTraits(Object.fromEntries(Object.entries(s?.traits ?? {}).map(([t, schema]) => [t, toFormState(schema, o.traits?.[t])])));
     })().catch((err) => isShown(err) && setLoadError(err));
     return () => ctrl.abort();
-  }, [id]);
+  }, [id, appId]);
 
   if (loadError) return <RequestError error={loadError} what="deployment" />;
   if (!d) return <LoadingState what="the deployment" />;
@@ -437,7 +443,14 @@ export function DeploymentConfigure({ appId, compId, id }: { appId: string; comp
   const errorCount = Object.keys(errors).length;
   return (
     <>
-      <PageHeader crumbs={[{ label: "Component", to: back }]} title={`Configure ${where}`} />
+      <PageHeader
+        crumbs={[
+          { label: "Applications", to: "/applications" },
+          { label: names.app ?? "Application", to: `/applications/${enc(appId)}` },
+          { label: names.comp ?? "Component", to: back },
+        ]}
+        title={`Configure ${where}`}
+      />
       <form className="form" onSubmit={submit} noValidate>
         <p>
           These settings apply in {where} only. Promoting a release here keeps them, and promoting from here doesn't carry them on.

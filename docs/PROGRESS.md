@@ -17,7 +17,7 @@ Last updated: 2026-10-23
 ## Current phase
 
 **Spec 020 (OpenChoreo's portal features in Serendip's console): IN
-PROGRESS.** The plan was approved 2026-10-22. T001–T015 are done and
+PROGRESS.** The plan was approved 2026-10-22. T001–T016 are done and
 committed, one commit each (`fd01e8c` … `97599d8`, not pushed). Every
 task's "Done as" note in `specs/020-openchoreo-console-features/tasks.md`
 records what was built and decided.
@@ -69,15 +69,31 @@ records what was built and decided.
   be shown without packages was shown on `serendip-t018`, including
   Claude Code promoting through `serendip mcp` and its undeploy waiting
   for a person. Findings F1–F3 and U1–U5 go to T016.
-- **Records:** RP-028 to RP-035 were added (RP-034: the console can't
+- **Reviews (T016):** `contract-guardian` passed, and `go-reviewer`
+  and the security review found no blocker.
+  - **Fixed:** T015's findings and the reviews' should-fixes. These
+    include a latent hole that would have let a Project's Contributor
+    install platform-wide packages once one has an installer, and a cap
+    on recent-log reads.
+  - **Not changed, on purpose:** listed under T016 in `tasks.md`.
+- **Records:** RP-028 to RP-036 were added (RP-034: the console can't
   state a package's measured cost until the catalogue carries it). `docs/cli-and-mcp.md` is
   regenerated.
 
 **Next:**
-- **T016:** the reviews, plus T015's findings (F1 dependency wait reason, F3 audit of handler refusals, F2, UI U1–U5).
+- **T017:**
+  - ADR 0019 (the environment model; direct Kubernetes access);
+  - `application-platform.md`, `resource-model.md`, `authorization.md`
+    and `ai-operations.md`;
+  - the risk register, `build-vs-adopt.md`, and the known gap that no
+    provider declares its RAM and CPU in code;
+  - PROGRESS (next: 022).
+- **Restart** (a rollout restart) is still deferred from T006.
 
 **Leftovers (spec 020):**
-- **`serendipd`** (spec 020) runs on `:8088` against `serendip-t018`.
+- **`serendipd`** (spec 020) is **stopped**: Claude Code reaped its
+  background shell under memory pressure after T015. It isn't needed
+  until something must be shown live again.
   - **Its scratch:** the T015 store copy, the run script, the CLI
     config, the console driver and the screenshots are in
     `%TEMP%/claude/D--serendip-infra/5c3ed502-4ff6-4bd9-94ad-ac55cfc89763/scratchpad/t015/`.

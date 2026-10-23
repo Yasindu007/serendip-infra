@@ -61,6 +61,7 @@ function DeploymentRuntime({ d, envName }: { d: Deployment; envName: string }) {
   const access = usePermissions({ kind: "Deployment", id });
   const canRead = access.can(readRuntime);
   const canLogs = access.can(readLogs);
+  const [allEvents, setAllEvents] = useState(false);
   const objects = usePoll(
     (s) => (canRead ? apiFetch<{ objects: RuntimeObject[] }>("GET", `/v1/deployments/${enc(id)}/runtime`, undefined, s) : Promise.resolve(undefined)),
     10_000,
@@ -117,6 +118,8 @@ function DeploymentRuntime({ d, envName }: { d: Deployment; envName: string }) {
         <ApiEquivalent request={{ method: "GET", path: `/v1/deployments/${id}/runtime` }} />
       </section>
 
+      <Logs id={id} allowed={canLogs} />
+
       <section className="section" aria-labelledby="rt-events">
         <h2 id="rt-events" className="section-title">
           Events
@@ -140,7 +143,7 @@ function DeploymentRuntime({ d, envName }: { d: Deployment; envName: string }) {
                 </tr>
               </thead>
               <tbody>
-                {events.data.events.map((e, i) => (
+                {(allEvents ? events.data.events : events.data.events.slice(0, EVENTS_SHOWN)).map((e, i) => (
                   <tr key={i}>
                     <td>
                       <time dateTime={e.time} title={e.time}>
@@ -158,12 +161,20 @@ function DeploymentRuntime({ d, envName }: { d: Deployment; envName: string }) {
             </table>
           </div>
         )}
+        {(events.data?.events.length ?? 0) > EVENTS_SHOWN && (
+          <div>
+            <button type="button" className="button" onClick={() => setAllEvents(!allEvents)}>
+              {allEvents ? `Show the newest ${EVENTS_SHOWN}` : `Show all ${events.data!.events.length} events`}
+            </button>
+          </div>
+        )}
       </section>
-
-      <Logs id={id} allowed={canLogs} />
     </>
   );
 }
+
+/** Events shown before "Show all": the newest, which is what explains the state now. */
+const EVENTS_SHOWN = 10;
 
 /** At most this many lines are kept on screen while following. */
 const MAX_LINES = 5_000;

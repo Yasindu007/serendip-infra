@@ -38,6 +38,16 @@ func (h *PackageHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"packages": out})
 }
 
+// platformWide refuses an owner on a ProviderInstance: a package is
+// installed for the whole platform, and an owner would let roles at that
+// owner reach it (T016 security review).
+func platformWide(m resource.Metadata) error {
+	if len(m.OwnerRefs) > 0 {
+		return fmt.Errorf("%w: metadata.ownerRefs: a package is installed platform-wide and has no owner", resource.ErrValidation)
+	}
+	return nil
+}
+
 // packageValidator checks a ProviderInstance names a package this server
 // offers, and that its capability has no other instance: one package per
 // optional capability. Two simultaneous installs could both pass the

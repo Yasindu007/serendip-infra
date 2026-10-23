@@ -315,6 +315,56 @@ func TestDeployments_Authorization(t *testing.T) {
 	}
 }
 
+// TestDeployments_HandlerRefusalsAreAudited: refusals the handler decides
+// itself, beyond the route's rule, leave an audit row like the
+// authorizer's (constitution 8; found on a real cluster in T015).
+func TestDeployments_HandlerRefusalsAreAudited(t *testing.T) {
+	d := newDeployWorld(t)
+	denied := func(actor string) []string {
+		t.Helper()
+		rows, err := d.db.QueryContext(context.Background(),
+			`SELECT kind || ' ' || resource_id || ' ' || policy_decision FROM audit_log WHERE actor = ? AND policy_decision LIKE 'deny: %' ORDER BY at`, actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var s string
+			rows.Scan(&s)
+			out = append(out, s)
+		}
+		return out
+	}
+
+	// Deploying without reading the Component.
+	if got := d.do("tok-envonly", http.MethodPost, "/v1/deployments", d.deployment(d.dev, "")); got.Code != http.StatusForbidden {
+		t.Fatalf("deploy without reading the Component: %d", got.Code)
+	}
+	if rows := denied("person:envonly"); len(rows) != 1 || !strings.HasPrefix(rows[0], "Deployment  deny: missing serendip/components/read at Component/"+d.web) {
+		t.Errorf("the refused deploy's audit: %q", rows)
+	}
+
+	// Promoting without writing at the target Environment.
+	dev := decodeDeployment(t, d.do("tok-owner", http.MethodPost, "/v1/deployments", d.deployment(d.dev, "")).Body.Bytes())
+	d.running(t, dev.Metadata.ID, "cmp-web-r1")
+	if got := d.do("tok-reader", http.MethodPost, "/v1/deployments/"+dev.Metadata.ID+"/promote", map[string]any{"to": d.staging}); got.Code != http.StatusForbidden {
+		t.Fatalf("Reader promotes: %d", got.Code)
+	}
+	want := "Deployment " + dev.Metadata.ID + " deny: missing serendip/deployments/write at Environment/" + d.staging
+	if rows := denied("person:reader"); len(rows) != 1 || rows[0] != want {
+		t.Errorf("the refused promotion's audit: %q, want %q", rows, want)
+	}
+
+	// A refused read stays out of the audit log.
+	if got := d.do("tok-envonly", http.MethodGet, "/v1/deployments/"+dev.Metadata.ID+"/logs", nil); got.Code != http.StatusForbidden && got.Code != http.StatusServiceUnavailable {
+		t.Errorf("logs: %d", got.Code)
+	}
+	if rows := denied("person:envonly"); len(rows) != 1 {
+		t.Errorf("a read was audited: %q", rows)
+	}
+}
+
 func TestProjects_PipelineNamesItsOwnEnvironments(t *testing.T) {
 	d := newDeployWorld(t)
 	get := d.do("tok-owner", http.MethodGet, "/v1/projects/"+d.proj, nil)

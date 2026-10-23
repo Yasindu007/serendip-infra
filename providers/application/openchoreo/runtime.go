@@ -450,6 +450,11 @@ func (s *logStream) read(ctx context.Context, instance string, body io.ReadClose
 			select {
 			case s.lines <- parseLogLine(instance, line):
 			case <-ctx.Done():
+				// Ended by anything but Close (a deadline), a line was
+				// dropped: the answer mustn't look complete.
+				if !s.closing.Load() {
+					s.fail(fmt.Errorf("logs of %s: %w", instance, ctx.Err()))
+				}
 				return
 			}
 		}

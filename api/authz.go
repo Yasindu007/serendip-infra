@@ -194,6 +194,16 @@ func routeTable() map[string]rule {
 		t["PUT /v1/"+path+"/{id}"] = rule{action: action(kind, "write"), target: targetResource, kind: kind}
 		t["DELETE /v1/"+path+"/{id}"] = rule{action: action(kind, "delete"), target: targetResource, kind: kind}
 	}
+	// A ProviderInstance installs a platform-wide package (spec 020), so
+	// writing one is decided at "/", whatever owner its body names: owning
+	// it by a Project must not let that Project's Contributor install a
+	// package for everyone (T016 security review). Its handler also refuses
+	// any owner, so its delete, decided at the instance, inherits from "/"
+	// alone.
+	pi := resourcePaths[resource.KindProviderInstance]
+	for _, route := range []string{"POST /v1/" + pi, "PUT /v1/" + pi + "/{id}"} {
+		t[route] = rule{action: action(resource.KindProviderInstance, "write"), target: targetRoot, kind: resource.KindProviderInstance}
+	}
 	return t
 }
 

@@ -718,3 +718,24 @@ purpose), **Closed** (fixed).
     promotion, to split the platform's time from the engine's wait.
   - **If the wait dominates,** let a converging Deployment keep its fast
     re-checks longer (a `core/reconcile` change, so a reviewed one).
+
+## RP-036 — Right after a restart, Applications, Components and Deployments read not-ready for a few seconds
+
+- **Kind:** honesty and noise. **Status:** Accepted, 2026-10-23.
+  **Found:** spec 020 T015 (finding F2).
+- **What:** for about 15 s after `serendipd` starts, while the
+  application platform capability re-checks the installed stack:
+  - each Application reads `ProviderNotReady`;
+  - its Components read `WaitingForApplication`;
+  - their Deployments read `WaitingForComponent`.
+
+  Nothing changed on the platform, and the workloads keep running. On
+  `serendip-t018` it lasted 14 s.
+- **Why accepted:** while the platform can't be read, "can't confirm
+  right now" is the honest state, and it clears without anyone acting.
+  T016 made the Deployment's message carry the Component's own reason
+  ("it isn't ready (WaitingForApplication)") instead of claiming it has
+  no release.
+- **Revisit:** if people take the flicker for an outage, keep the last
+  observed state with a "not re-checked since the restart" note instead
+  of flipping to not-ready.

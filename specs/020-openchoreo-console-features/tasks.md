@@ -559,7 +559,7 @@ Spec 020 authorises the UI work.
     - **F3:** the handlers' own 403s aren't audited.
     - **U1–U5:** console design issues.
 
-## T016 — Final reviews
+## T016 — Final reviews ✅ 2026-10-23
 
 - **Do:** run `contract-guardian`, `go-reviewer`, a security review scoped
   to the spec diff, and a UI review against the design rules. Fix the
@@ -570,6 +570,95 @@ Spec 020 authorises the UI work.
   - **F2:** look at it, and fix it or record it.
   - **U1–U5:** in the UI review.
 - **Verify:** all pass, and the gates are green.
+- **Done as:**
+  - **T015's findings:**
+    - **F3:** a handler's own 403 for a write now leaves a `deny: …`
+      audit row, as the authorizer's do (`auditRefusal`). That covers
+      promote's write at the target, deploying without reading the
+      Component, and depending on an unreadable Component.
+    - **F1:** a binding held back for its connections reads
+      `WaitingForComponent`, naming the called Components that have no
+      Deployment in the Environment. The cause of the old wording: an
+      unchanged reason never rewrote the message.
+    - **F2:** the post-restart flicker is accepted as RP-036. The
+      Deployment's message now gives the Component's own reason instead
+      of "isn't released yet".
+    - **U1–U5:**
+      - action rows align to the top;
+      - schema forms follow local `$ref`s (`resources` becomes cpu and
+        memory fields);
+      - the Configure breadcrumb names the Application and Component;
+      - logs come before events, and events show the newest 10 with
+        "Show all";
+      - no spec numbers in package descriptions.
+  - **UI review against `ui/DESIGN.md`:** Deploy and Install package
+    create things, so they're now hidden from people who may not, rather
+    than shown disabled.
+  - **`contract-guardian`:** PASS. Fixed:
+    - a failed lookup no longer fails `Deploy`;
+    - a real failure keeps its reason;
+    - package conditions keep `LastTransitionTime`.
+
+    Re-run on the later `core/` and `providers/` changes before the
+    commit.
+  - **`go-reviewer`:** no blockers; the follow streaming path is sound.
+    Fixed:
+    - **Messages Serendip words itself** (`WaitingForComponent`,
+      `WaitingForApplication`, `InvalidSpec`, `Unsupported`) are
+      rewritten when they change. The platform's wording still isn't
+      rewritten on churn alone.
+    - **Package readiness:** an invalid instance no longer hides an
+      installed package, and a damaged `LastSpec` clean-up reports the
+      capability not installed.
+    - **The platform schema check** runs before the Deployment lock,
+      bounded to 10 s. Promote takes the lock before reading its source.
+    - **A status write conflicting with an edit** is left to the edit's
+      own reconcile.
+    - **A log reader ended by a deadline** marks the answer incomplete.
+    - **The CLI's follow:** the watchdog uses a context cause, a
+      watchdog firing while connecting exits 1, and a failed write stops
+      following (exit 0 for a closed pipe).
+  - **Security review:** two findings at confidence 7 or above, both
+    fixed.
+    - **Medium, latent until a package has an installer:** a Project's
+      Contributor could install or remove platform-wide packages, by
+      owning the ProviderInstance under their Project. Now
+      ProviderInstance create and update are decided at `/`, and the
+      handler refuses any owner (`WithMetadataCheck(platformWide)`), so
+      its delete inherits from `/` alone.
+    - **Low:** reads of recent log lines are capped at 5 per caller and
+      20 in all (429 with `Retry-After`).
+    - **Below the threshold, also fixed:** schema forms skip
+      `__proto__`, `constructor` and `prototype`, and stop at depth 6.
+  - **Not changed, on purpose:**
+    - **A missing instance's failure reaches a follower at the end of
+      the stream** (Go review 8). Surfacing it earlier needs a synthetic
+      line, which is a behaviour change.
+    - **The stream's write deadline** is set before the limiter (Go
+      review 9). It's reset per request, so it's harmless.
+    - **Each admit lists every Deployment:** already RP-030.
+    - **Deploy errors carry the provider's text** into the Deployment's
+      message (Go review 12a), as Applications and Components always
+      have.
+    - **For spec 022:**
+      - "oldest wins" ignores validity (Go review 13; needs a record
+        written past the API);
+      - an installer's `Install` on resync must be a cheap no-op that
+        never blocks (Go review 14).
+    - **No provider declares its RAM and CPU in code** (contract note 5).
+      That's true of the whole repo since before spec 020; T017 records
+      it as a known gap.
+  - **The `contract-guardian` re-run** on the later fixes: PASS. Its
+    optional notes are accepted:
+    - an invalid other instance can mask a capability's state (needs a
+      record written past the API);
+    - a client's disconnect marks a stream no one reads as failed;
+    - one `Get` per dependency while a Deployment waits.
+  - **Gates:**
+    - `go vet ./...` and `go test -race ./...` pass;
+    - the UI: 113 tests, 94.8 KiB gzipped of 160, contrast passes in
+      both themes.
+
 
 ## T017 [A] — Docs, ADR, close
 

@@ -307,6 +307,7 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 		ResourceHandler: NewResourceHandler[resource.ComponentSpec, resource.ComponentStatus](compStore, "components"),
 		comps:           compStore,
 		apps:            appStore,
+		recordDenied:    recordDeniedIn(db),
 	}).Register(apiMux)
 	(&PlatformHandler{platform: opts.platform}).Register(apiMux)
 	// Deployments (spec 020): their own Create, Update and Promote.
@@ -314,9 +315,10 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 	(&DeploymentHandler{
 		ResourceHandler: NewResourceHandler[resource.DeploymentSpec, resource.DeploymentStatus](deployStore, "deployments"),
 		deployments:     deployStore, envs: envStore, comps: compStore,
-		apps:     appStore,
-		projects: projectStore,
-		schemas:  opts.schemas,
+		apps:         appStore,
+		projects:     projectStore,
+		schemas:      opts.schemas,
+		recordDenied: recordDeniedIn(db),
 	}).Register(apiMux)
 	(&SchemaHandler{comps: compStore, schemas: opts.schemas}).Register(apiMux)
 	NewRuntimeHandler(deployStore, envStore, opts.runtime).Register(apiMux)
@@ -328,7 +330,8 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 	NewResourceHandler[resource.CapabilitySpec, resource.CapabilityStatus](capStore, "capabilities").Register(apiMux)
 	mountResource[resource.ProviderSpec, resource.ProviderStatus](apiMux, db, bus, resource.KindProvider, "providers")
 	instStore := sqlite.NewStore[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](db, resource.KindProviderInstance).SetBus(bus)
-	instances := NewResourceHandler[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](instStore, "provider-instances")
+	instances := NewResourceHandler[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](instStore, "provider-instances").
+		WithMetadataCheck(platformWide)
 	if opts.packages != nil {
 		instances.WithValidate(packageValidator(opts.packages, instStore))
 	}

@@ -329,6 +329,9 @@ export type LogEnd = "idle" | "maxDuration" | "ended" | "error";
 
 /** A JSON Schema, as the platform publishes it. Only what the console reads is typed. */
 export interface JSONSchema {
+  $ref?: string;
+  $defs?: Record<string, JSONSchema>;
+  definitions?: Record<string, JSONSchema>;
   type?: string | string[];
   title?: string;
   description?: string;

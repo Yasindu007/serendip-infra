@@ -181,8 +181,16 @@ func (r *ProviderInstanceReconciler) Reconcile(ctx context.Context, ref graph.Re
 	}
 	capability := inst.Spec.CapabilityID
 	if err := r.catalogue.Validate(inst.Spec); err != nil {
+		// Reported for the capability only when nothing else provides it:
+		// an invalid record mustn't make an installed package look gone.
 		if r.catalogue.isCapability(capability) {
-			r.report(capability, false, ReasonInvalidSpec, err.Error())
+			other, oerr := oldestFor(ctx, r.store, capability, inst.Metadata.ID)
+			if oerr != nil {
+				return oerr
+			}
+			if other.Metadata.ID == "" {
+				r.report(capability, false, ReasonInvalidSpec, err.Error())
+			}
 		}
 		return r.setReady(ctx, inst, resource.ConditionFalse, ReasonInvalidSpec, err.Error())
 	}
@@ -234,7 +242,8 @@ func (r *ProviderInstanceReconciler) setReady(ctx context.Context, inst resource
 			return nil
 		}
 	}
-	inst.Status.Conditions = upsertCondition(inst.Status.Conditions, resource.Condition{Type: "Ready", Status: status, Reason: reason, Message: message})
+	ready := resource.Condition{Type: "Ready", Status: status, Reason: reason, Message: message, LastTransitionTime: time.Now()}
+	inst.Status.Conditions = upsertCondition(inst.Status.Conditions, keepTransitionTime(inst.Status.Conditions, ready))
 	_, err := r.store.Update(ctx, inst)
 	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 		return nil
@@ -257,6 +266,20 @@ func UninstallCleanup(s store.Store[resource.ProviderInstanceSpec, resource.Prov
 					if err := p.Installer.Uninstall(ctx, ref.ID); err != nil {
 						return err
 					}
+				}
+			}
+			// Which capability it provided is unknown, so each one nothing
+			// provides any more is reported not installed.
+			for _, p := range c.sorted() {
+				if p.Installer == nil {
+					continue
+				}
+				other, err := oldestFor(ctx, s, p.Capability, ref.ID)
+				if err != nil {
+					return err
+				}
+				if other.Metadata.ID == "" {
+					report(p.Capability, false, ReasonNotInstalled, "install the "+p.Provider+" package to use it")
 				}
 			}
 			return nil

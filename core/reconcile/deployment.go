@@ -13,7 +13,8 @@ import (
 )
 
 // ReasonWaitingForComponent: a Deployment's Component isn't there, or isn't
-// released yet.
+// released yet, or a Component it calls isn't running in the same
+// Environment (the platform holds the release until its calls resolve).
 const ReasonWaitingForComponent = "WaitingForComponent"
 
 // DeploymentReconciler runs Deployments (specs/020 plan decision 2): one
@@ -80,7 +81,14 @@ func (r *DeploymentReconciler) observe(ctx context.Context, d resource.Deploymen
 		return DeploymentObservation{}, err
 	}
 	if c := findCondition(comp.Status.Conditions, conditionReady); c == nil || c.Status != resource.ConditionTrue {
-		return DeploymentObservation{Reason: ReasonWaitingForComponent, Message: fmt.Sprintf("Component %s isn't released yet", comp.Metadata.ID)}, nil
+		// Say why, in the Component's own words: right after a restart it's
+		// often only that the platform can't be read yet, not that there's
+		// no release.
+		why := "it has no release yet"
+		if c != nil && c.Reason != "" {
+			why = "it isn't ready (" + c.Reason + ")"
+		}
+		return DeploymentObservation{Reason: ReasonWaitingForComponent, Message: fmt.Sprintf("waiting for Component %s: %s", comp.Metadata.ID, why)}, nil
 	}
 	appID := ownerOf(comp.Metadata, resource.KindApplication)
 	app, err := r.apps.Get(ctx, appID)
@@ -127,6 +135,12 @@ func (r *DeploymentReconciler) setState(ctx context.Context, d resource.Deployme
 	d.Status.Conditions = upsertCondition(d.Status.Conditions, keepTransitionTime(d.Status.Conditions, ready))
 	d.Status.Release, d.Status.History, d.Status.Endpoints = release, history, endpoints
 	_, err := r.deployments.Update(ctx, d)
+	if errors.Is(err, store.ErrConflict) {
+		// Edited while the platform was asked: the edit's own reconcile
+		// observes again and writes the state (as setReady does for
+		// packages).
+		return nil
+	}
 	return err
 }
 

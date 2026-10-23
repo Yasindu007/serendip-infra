@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -148,6 +150,39 @@ func TestSafe(t *testing.T) {
 	} {
 		if got := safe(in); got != want {
 			t.Errorf("safe(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// failingWriter fails every write with err.
+type failingWriter struct{ err error }
+
+func (f failingWriter) Write([]byte) (int, error) { return 0, f.err }
+
+// When the output can't be written, following stops: quietly for a closed
+// pipe (| head), as an error otherwise (T016 review).
+func TestFollowStopsWhenTheOutputFails(t *testing.T) {
+	c := followClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"instance":"web-1","line":"a"}` + "\n"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done() // the CLI must stop on its own, not wait for the server
+	})
+	for _, tt := range []struct {
+		err  error
+		want int
+	}{{syscall.EPIPE, exitOK}, {errors.New("disk full"), exitError}} {
+		var errOut bytes.Buffer
+		done := make(chan int, 1)
+		go func() {
+			done <- runOperation(context.Background(), c, logsOp(t), map[string]any{"id": "d1", "follow": true}, globals{}, failingWriter{tt.err}, &errOut)
+		}()
+		select {
+		case code := <-done:
+			if code != tt.want {
+				t.Errorf("%v: exit %d, want %d (%s)", tt.err, code, tt.want, errOut.String())
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%v: still following after the output failed", tt.err)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -205,6 +206,65 @@ func TestDeploymentReconciler_RefusesBeforeDeploying(t *testing.T) {
 				t.Error("the provider was asked to deploy")
 			}
 		})
+	}
+}
+
+// While its Component isn't ready, a Deployment says why in the
+// Component's own words: after a restart that's usually only that the
+// platform can't be read yet (T015 finding F2).
+func TestDeploymentReconciler_SaysWhyItWaitsForTheComponent(t *testing.T) {
+	ctx := context.Background()
+	for _, tt := range []struct {
+		conditions []resource.Condition
+		want       string
+	}{
+		{nil, "it has no release yet"},
+		{[]resource.Condition{{Type: "Ready", Status: resource.ConditionFalse, Reason: reconcile.ReasonWaitingForApplication}}, "it isn't ready (WaitingForApplication)"},
+	} {
+		s := newDeployStores(t)
+		c, err := s.components.Get(ctx, s.comp.Metadata.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Status.Conditions = tt.conditions
+		if _, err := s.components.Update(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+		r := reconcile.NewDeploymentReconciler(s.deployments, s.envs, s.components, s.apps, &fakeDeployments{})
+		d := s.deployment(t, s.env)
+		checkRequeue(t, r.Reconcile(ctx, graph.ResourceRef{Kind: resource.KindDeployment, ID: d.Metadata.ID}), true)
+		got, _ := s.deployments.Get(ctx, d.Metadata.ID)
+		if c := readyCondition(t, got.Status.Conditions); c.Reason != reconcile.ReasonWaitingForComponent || !strings.HasSuffix(c.Message, tt.want) {
+			t.Errorf("Ready = %+v, want a message ending %q", c, tt.want)
+		}
+	}
+}
+
+// A message Serendip writes from its own state is rewritten when that
+// state changes, though the reason stays the same (T016 review).
+func TestDeploymentReconciler_RefreshesItsOwnMessages(t *testing.T) {
+	ctx := context.Background()
+	s := newDeployStores(t)
+	fake := &fakeDeployments{obs: reconcile.DeploymentObservation{Reason: reconcile.ReasonWaitingForComponent, Message: "waiting for: Component a"}}
+	r := reconcile.NewDeploymentReconciler(s.deployments, s.envs, s.components, s.apps, fake)
+	d := s.deployment(t, s.env)
+	ref := graph.ResourceRef{Kind: resource.KindDeployment, ID: d.Metadata.ID}
+	checkRequeue(t, r.Reconcile(ctx, ref), true)
+	fake.obs.Message = "waiting for: Component b"
+	checkRequeue(t, r.Reconcile(ctx, ref), true)
+	got, _ := s.deployments.Get(ctx, d.Metadata.ID)
+	if c := readyCondition(t, got.Status.Conditions); c.Message != "waiting for: Component b" {
+		t.Errorf("message = %q, want it refreshed", c.Message)
+	}
+	// The platform's own wording churning under Progressing isn't written.
+	fake.obs = reconcile.DeploymentObservation{Reason: reconcile.ReasonProgressing, Message: "one"}
+	checkRequeue(t, r.Reconcile(ctx, ref), true)
+	before, _ := s.deployments.Get(ctx, d.Metadata.ID)
+	fake.obs.Message = "two"
+	checkRequeue(t, r.Reconcile(ctx, ref), true)
+	after, _ := s.deployments.Get(ctx, d.Metadata.ID)
+	if after.Metadata.ResourceVersion != before.Metadata.ResourceVersion {
+		t.Error("Progressing message churn was written")
 	}
 }
 

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
@@ -290,6 +292,13 @@ func (p *Provider) Deploy(ctx context.Context, app resource.Application, comp re
 	ready, reason, message := mapReady(binding)
 	obs := reconcile.DeploymentObservation{Release: release, Ready: ready, Reason: reason, Message: message}
 	if !ready {
+		// Only a binding still on its way is explained as waiting: a real
+		// failure keeps its own reason.
+		if reason == reconcile.ReasonProgressing {
+			if waiting := p.waitingForCalls(ctx, binding, comp, env); waiting != "" {
+				obs.Reason, obs.Message = reconcile.ReasonWaitingForComponent, waiting
+			}
+		}
 		return obs, nil
 	}
 	if exposed := exposedPorts(comp.Spec); len(exposed) > 0 {
@@ -308,6 +317,46 @@ func (p *Provider) Deploy(ctx context.Context, app resource.Application, comp re
 	// a running Deployment look failed.
 	_ = p.deleteIgnoringNotFound(ctx, namespacedPath("releasebindings")+"/"+releaseBindingName(comp.Metadata.ID))
 	return obs, nil
+}
+
+// waitingForCalls explains a binding held back because the Components it
+// calls aren't running in its Environment: the platform syncs a release
+// only once every connection resolves, and says so only as "connections
+// pending". It names the Components called that have no Deployment here,
+// or answers "" when that isn't why (T015 finding F1). It only improves a
+// not-ready observation's wording, so a failed lookup leaves the plain
+// observation rather than failing the Deploy.
+func (p *Provider) waitingForCalls(ctx context.Context, binding kubernetes.Object, comp resource.Component, env resource.Environment) string {
+	var st objectStatus
+	if len(binding.Status) == 0 || json.Unmarshal(binding.Status, &st) != nil {
+		return ""
+	}
+	pending := false
+	for _, c := range st.Conditions {
+		if c.Type == "ConnectionsResolved" && c.Status == "False" {
+			pending = true
+		}
+	}
+	if !pending {
+		return ""
+	}
+	var missing []string
+	for _, d := range comp.Spec.Dependencies {
+		_, err := p.client.Get(ctx, namespacedPath("releasebindings")+"/"+deploymentBindingName(d.Component, env.Metadata.ID))
+		switch {
+		case errors.Is(err, kubernetes.ErrNotFound):
+			if !slices.Contains(missing, d.Component) {
+				missing = append(missing, d.Component)
+			}
+		case err != nil:
+			log.Printf("openchoreo: explain a waiting Deployment: get the binding of Component %s: %v", d.Component, err)
+			return ""
+		}
+	}
+	if len(missing) == 0 {
+		return "waiting for the Components it calls to be ready in this Environment"
+	}
+	return "waiting for the Components it calls to be deployed in this Environment: Component " + strings.Join(missing, ", Component ")
 }
 
 // DeletePipeline removes a deleted Project's pipeline.

@@ -10,7 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync/atomic"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -87,6 +87,9 @@ type logLine struct {
 	End      string    `json:"end"`
 }
 
+// errSilent is why the watchdog ends a stream.
+var errSilent = errors.New("the stream went silent")
+
 // endReasons say what a stream's end means to the person following it.
 var endReasons = map[string]string{
 	"idle":        "no new lines for a while; run it again to keep following",
@@ -110,15 +113,19 @@ func runFollow(ctx context.Context, c *apiClient, op catalog.Operation, args map
 	// A watchdog ends a stream that has gone silent for longer than the
 	// server ever lets one idle: the connection died without closing.
 	parent := ctx
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var silent atomic.Bool
-	watchdog := time.AfterFunc(streamSilence, func() { silent.Store(true); cancel() })
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	watchdog := time.AfterFunc(streamSilence, func() { cancel(errSilent) })
 	defer watchdog.Stop()
+	silent := func() bool { return errors.Is(context.Cause(ctx), errSilent) }
 	resp, err := c.stream(ctx, req)
 	if err != nil {
-		if ctx.Err() != nil {
+		switch {
+		case parent.Err() != nil:
 			return exitOK // interrupted before it started
+		case silent():
+			fmt.Fprintf(stderr, "serendip: nothing came for %s; the server didn't answer.\n", streamSilence)
+			return exitError
 		}
 		fmt.Fprintln(stderr, "serendip:", err)
 		if errors.Is(err, errSignedOut) {
@@ -159,17 +166,29 @@ func runFollow(ctx context.Context, c *apiClient, op catalog.Operation, args map
 			}
 			return exitOK
 		}
+		var werr error
 		if g.json {
-			stdout.Write(append(raw, '\n'))
-			continue
+			// Two writes: raw is the scanner's own buffer.
+			if _, werr = stdout.Write(raw); werr == nil {
+				_, werr = io.WriteString(stdout, "\n")
+			}
+		} else {
+			when := "-"
+			if !l.Time.IsZero() {
+				when = l.Time.Local().Format(time.RFC3339)
+			}
+			_, werr = fmt.Fprintf(stdout, "%s %s %s\n", when, safe(l.Instance), safe(l.Line))
 		}
-		when := "-"
-		if !l.Time.IsZero() {
-			when = l.Time.Local().Format(time.RFC3339)
+		if werr != nil {
+			// The reader went away (| head): following is over.
+			if errors.Is(werr, syscall.EPIPE) {
+				return exitOK
+			}
+			fmt.Fprintln(stderr, "serendip: can't write the output:", werr)
+			return exitError
 		}
-		fmt.Fprintf(stdout, "%s %s %s\n", when, safe(l.Instance), safe(l.Line))
 	}
-	if !watchdog.Stop() && silent.Load() {
+	if watchdog.Stop(); silent() {
 		fmt.Fprintf(stderr, "serendip: nothing came for %s; the connection seems to have died. Some lines may be missing.\n", streamSilence)
 		return exitError
 	}

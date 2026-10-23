@@ -303,9 +303,21 @@ func keepTransitionTime(conditions []resource.Condition, c resource.Condition) r
 	return c
 }
 
+// ownWords are the reasons whose message Serendip writes itself from its
+// own state, so a new message is news (a different Component missing, a
+// different validation error) and is written. Other reasons carry the
+// platform's wording, whose churn alone isn't worth a store write.
+var ownWords = map[string]bool{
+	ReasonWaitingForComponent:   true,
+	ReasonWaitingForApplication: true,
+	ReasonInvalidSpec:           true,
+	ReasonUnsupported:           true,
+}
+
 func conditionUnchanged(conditions []resource.Condition, want resource.Condition) bool {
 	existing := findCondition(conditions, want.Type)
-	return existing != nil && existing.Status == want.Status && existing.Reason == want.Reason
+	return existing != nil && existing.Status == want.Status && existing.Reason == want.Reason &&
+		(!ownWords[want.Reason] || existing.Message == want.Message)
 }
 
 func reachableUnchanged(conditions []resource.Condition, want *resource.Condition) bool {

@@ -267,11 +267,13 @@ export function PackagesPage() {
                       {null}
                     </Guarded>
                   ) : (
-                    <Guarded allowed={canInstall} label="Install package" reason="Your roles don't allow installing packages.">
+                    // Installing creates a ProviderInstance: offered only
+                    // to those who may (ui/DESIGN.md).
+                    canInstall && (
                       <button type="button" className="button button--primary" onClick={() => setOpen({ kind: "install", pkg })}>
                         Install package
                       </button>
-                    </Guarded>
+                    )
                   )}
                 </div>
               )}

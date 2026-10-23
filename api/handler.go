@@ -32,6 +32,15 @@ type ResourceHandler[S, St any] struct {
 	// validate, when set, checks a spec on create and update; id is ""
 	// on create. Its error answers 400 (wrap resource.ErrValidation).
 	validate func(ctx context.Context, id string, spec S) error
+	// checkMeta, when set, checks metadata on create and update, before
+	// validate. Its error answers 400 (wrap resource.ErrValidation).
+	checkMeta func(m resource.Metadata) error
+}
+
+// WithMetadataCheck makes the handler check metadata with c before storing.
+func (h *ResourceHandler[S, St]) WithMetadataCheck(c func(m resource.Metadata) error) *ResourceHandler[S, St] {
+	h.checkMeta = c
+	return h
 }
 
 // WithValidate makes the handler check specs with v before storing them.
@@ -60,6 +69,12 @@ func (h *ResourceHandler[S, St]) Create(w http.ResponseWriter, r *http.Request) 
 	var res resource.Resource[S, St]
 	if !decodeBody(w, r, &res) {
 		return
+	}
+	if h.checkMeta != nil {
+		if err := h.checkMeta(res.Metadata); err != nil {
+			h.writeStoreError(w, r, err)
+			return
+		}
 	}
 	if h.validate != nil {
 		if err := h.validate(r.Context(), "", res.Spec); err != nil {
@@ -122,6 +137,12 @@ func (h *ResourceHandler[S, St]) Update(w http.ResponseWriter, r *http.Request) 
 	// The path's {id} is authoritative over whatever the body claims --
 	// standard REST semantics for PUT /resource/{id}.
 	res.Metadata.ID = r.PathValue("id")
+	if h.checkMeta != nil {
+		if err := h.checkMeta(res.Metadata); err != nil {
+			h.writeStoreError(w, r, err)
+			return
+		}
+	}
 	if h.validate != nil {
 		if err := h.validate(r.Context(), res.Metadata.ID, res.Spec); err != nil {
 			h.writeStoreError(w, r, err)

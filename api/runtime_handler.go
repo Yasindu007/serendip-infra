@@ -25,8 +25,13 @@ import (
 const (
 	maxStreamsPerCaller = 3
 	maxStreamsPerServer = 20
-	streamIdle          = 5 * time.Minute
-	streamMax           = 10 * time.Minute
+	// Recent-line reads buffer up to maxRecentBytes each and open a
+	// platform stream per instance, so they're capped too (T016 security
+	// review).
+	maxRecentPerCaller = 5
+	maxRecentPerServer = 20
+	streamIdle         = 5 * time.Minute
+	streamMax          = 10 * time.Minute
 	// maxTailLines caps the recent lines asked of each instance.
 	maxTailLines = 1000
 	// maxRecentLines caps a non-following answer across all instances,
@@ -48,13 +53,16 @@ type RuntimeHandler struct {
 	// runtime is nil when no application platform is configured.
 	runtime reconcile.RuntimeProvider
 	streams streamLimiter
+	// recent caps reads of recent lines (no follow).
+	recent streamLimiter
 	// idle and max are streamIdle and streamMax; tests shorten them.
 	idle, max time.Duration
 }
 
 func NewRuntimeHandler(deployments store.Store[resource.DeploymentSpec, resource.DeploymentStatus], envs store.Store[resource.EnvironmentSpec, resource.EnvironmentStatus], runtime reconcile.RuntimeProvider) *RuntimeHandler {
 	return &RuntimeHandler{deployments: deployments, envs: envs, runtime: runtime, idle: streamIdle, max: streamMax,
-		streams: streamLimiter{perCaller: maxStreamsPerCaller, total: maxStreamsPerServer, open: map[string]int{}}}
+		streams: streamLimiter{perCaller: maxStreamsPerCaller, total: maxStreamsPerServer, open: map[string]int{}},
+		recent:  streamLimiter{perCaller: maxRecentPerCaller, total: maxRecentPerServer, open: map[string]int{}}}
 }
 
 func (h *RuntimeHandler) Register(mux Mux) {
@@ -225,6 +233,18 @@ func (h *RuntimeHandler) Logs(w http.ResponseWriter, r *http.Request) {
 		h.follow(w, r, d, env, opts)
 		return
 	}
+	caller, ok := callerFrom(r.Context())
+	if !ok {
+		WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", reqID)
+		return
+	}
+	if !h.recent.acquire(caller.ID) {
+		w.Header().Set("Retry-After", "5")
+		WriteProblem(w, http.StatusTooManyRequests, "too many requests",
+			"too many log reads at once: at most "+strconv.Itoa(h.recent.perCaller)+" per caller and "+strconv.Itoa(h.recent.total)+" in all; retry shortly", reqID)
+		return
+	}
+	defer h.recent.release(caller.ID)
 	ctx, cancel := context.WithTimeout(r.Context(), recentTimeout)
 	defer cancel()
 	stream, err := h.runtime.Logs(ctx, d, env, opts)

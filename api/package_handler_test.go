@@ -55,6 +55,16 @@ func TestPackages(t *testing.T) {
 	if got := d.do("tok-devops", http.MethodPost, "/v1/provider-instances", install("test-builder", "build")); got.Code != http.StatusForbidden {
 		t.Errorf("a Project's Contributor installs: %d", got.Code)
 	}
+	// Not even by naming their Project as its owner, and nobody may give a
+	// package an owner (T016 security review).
+	owned := install("test-builder", "build")
+	owned["metadata"].(map[string]any)["ownerRefs"] = []any{map[string]any{"kind": "Project", "id": d.proj}}
+	if got := d.do("tok-devops", http.MethodPost, "/v1/provider-instances", owned); got.Code != http.StatusForbidden || !strings.Contains(got.Body.String(), "serendip/provider-instances/write at /") {
+		t.Errorf("a Project's Contributor installs under their Project: %d %s", got.Code, got.Body)
+	}
+	if got := d.do("tok-owner", http.MethodPost, "/v1/provider-instances", owned); got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), "platform-wide") {
+		t.Errorf("an owned package: %d %s", got.Code, got.Body)
+	}
 	got = d.do("tok-owner", http.MethodPost, "/v1/provider-instances", install("test-builder", "build"))
 	if got.Code != http.StatusCreated {
 		t.Fatalf("install: %d %s", got.Code, got.Body)

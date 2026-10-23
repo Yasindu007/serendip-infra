@@ -19,11 +19,11 @@ func packageCatalogue() reconcile.Catalogue {
 	return reconcile.Catalogue{
 		"openchoreo-workflow-plane": {
 			Provider: "openchoreo-workflow-plane", Capability: "build",
-			Description: "Builds container images from source in the cluster (spec 022)",
+			Description: "Builds container images from source in the cluster",
 		},
 		"openchoreo-observability-plane": {
 			Provider: "openchoreo-observability-plane", Capability: "observability",
-			Description: "Stored logs, metrics, traces and alerts; heavy on a 16 GB machine (spec 023)",
+			Description: "Stored logs, metrics, traces and alerts; heavy on a 16 GB machine",
 		},
 	}
 }

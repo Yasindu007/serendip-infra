@@ -308,3 +308,42 @@ func TestFollow_Caps(t *testing.T) {
 		return resp.StatusCode == http.StatusOK
 	}, "alice's freed place")
 }
+
+// Reads of recent lines are capped as well (T016 security review): each
+// buffers lines and holds a platform stream per instance.
+func TestRecentLogs_Caps(t *testing.T) {
+	rt := &chanRuntime{lines: make(chan reconcile.LogLine)}
+	var handler *RuntimeHandler
+	_, url := streamServer(t, rt, func(h *RuntimeHandler) { h.recent.perCaller = 1; handler = h })
+	recent := strings.TrimSuffix(url, "?follow=true")
+	first := make(chan int, 1)
+	go func() {
+		resp := follow(t, context.Background(), recent, "alice")
+		resp.Body.Close()
+		first <- resp.StatusCode
+	}()
+	// The first read waits on the platform, holding its place; a second
+	// meanwhile is refused.
+	waitFor(t, func() bool {
+		handler.recent.mu.Lock()
+		defer handler.recent.mu.Unlock()
+		return handler.recent.open["alice"] == 1
+	}, "alice's first read to hold its place")
+	second := follow(t, context.Background(), recent, "alice")
+	second.Body.Close()
+	if second.StatusCode != http.StatusTooManyRequests || second.Header.Get("Retry-After") == "" {
+		t.Errorf("alice's second read: %d, Retry-After %q", second.StatusCode, second.Header.Get("Retry-After"))
+	}
+	close(rt.lines)
+	if code := <-first; code != http.StatusOK {
+		t.Errorf("the first read: %d", code)
+	}
+	// Her place is free again, and the limit is hers alone.
+	for _, who := range []string{"alice", "bob"} {
+		resp := follow(t, context.Background(), recent, who)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s afterwards: %d", who, resp.StatusCode)
+		}
+	}
+}

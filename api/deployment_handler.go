@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
 	"github.com/serendip-infra/serendip-infra/core/jsonschema"
@@ -47,6 +48,8 @@ type DeploymentHandler struct {
 	// schemas checks configuration overrides; nil when no application
 	// platform is configured.
 	schemas reconcile.ConfigSchemaProvider
+	// recordDenied audits the handler's own refusals (auditRefusal).
+	recordDenied dbForAudit
 	// mu serialises Deployment writes, so two requests can't both pass
 	// the one-per-Environment check and both create (requests run
 	// concurrently; one control plane, so a mutex is enough).
@@ -74,9 +77,23 @@ func deployRefuse(status int, title, format string, args ...any) error {
 	return &deployRefusal{status: status, title: title, detail: fmt.Sprintf(format, args...)}
 }
 
+// auditRefusal records a refused mutation the handler decided itself (a
+// 403 from a check beyond the route's rule, such as promote's write at the
+// target Environment), as the authorizer records its own: a refused
+// mutation gets an audit row (constitution 8). Reads are only refused.
+func auditRefusal(r *http.Request, rf *deployRefusal, kind resource.Kind, record dbForAudit) {
+	if rf.status != http.StatusForbidden || record == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return
+	}
+	if err := record(r.Context(), kind, r.PathValue("id"), "deny: "+rf.detail); err != nil {
+		log.Printf("api: audit a refused %s %s (request %s): %v", r.Method, r.URL.Path, audit.RequestIDFrom(r.Context()), err)
+	}
+}
+
 func (h *DeploymentHandler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var rf *deployRefusal
 	if errors.As(err, &rf) {
+		auditRefusal(r, rf, resource.KindDeployment, h.recordDenied)
 		h.writeError(w, r, rf.status, rf.title, rf.detail)
 		return
 	}
@@ -112,6 +129,32 @@ func owner(m resource.Metadata, kind resource.Kind) string {
 		}
 	}
 	return ""
+}
+
+// schemaCheckTimeout bounds reading the platform's schemas for a write.
+const schemaCheckTimeout = 10 * time.Second
+
+// checkConfig checks d's configuration against the platform's schemas. It
+// runs before the handler's lock, since it reads the platform: a slow
+// platform mustn't hold up every other Deployment write (T016 review).
+// Unchanged configuration isn't checked again, so promoting and changing
+// releases work while the platform is away (RP-032). current is the
+// Deployment as read before the lock (nil on create); if it changes
+// meanwhile, the store's version check refuses the write.
+func (h *DeploymentHandler) checkConfig(ctx context.Context, d resource.Deployment, current *resource.Deployment) error {
+	same, err := overridesEqual(current, d.Spec.Overrides)
+	if err != nil || same {
+		return err
+	}
+	comp, err := h.comps.Get(ctx, d.Spec.Component)
+	if errors.Is(err, store.ErrNotFound) {
+		return deployRefuse(http.StatusBadRequest, "validation failed", "Component %s not found", d.Spec.Component)
+	} else if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, schemaCheckTimeout)
+	defer cancel()
+	return h.checkOverrides(ctx, comp, d.Spec.Overrides)
 }
 
 // admit checks d may run in envID. current is the Deployment as stored
@@ -153,17 +196,6 @@ func (h *DeploymentHandler) coherent(ctx context.Context, d resource.Deployment,
 		return deployRefuse(http.StatusBadRequest, "validation failed", "Component %s not found", d.Spec.Component)
 	} else if err != nil {
 		return err
-	}
-	// Unchanged configuration isn't checked again, so promoting and
-	// changing releases work while the platform is away (RP-032).
-	same, err := overridesEqual(current, d.Spec.Overrides)
-	if err != nil {
-		return err
-	}
-	if !same {
-		if err := h.checkOverrides(ctx, comp, d.Spec.Overrides); err != nil {
-			return err
-		}
 	}
 	app, err := h.apps.Get(ctx, owner(comp.Metadata, resource.KindApplication))
 	if err != nil {
@@ -306,6 +338,10 @@ func (h *DeploymentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	if err := h.checkConfig(ctx, d, nil); err != nil {
+		h.fail(w, r, err)
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	envID, err := environmentOf(d)
@@ -333,9 +369,17 @@ func (h *DeploymentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	d.Metadata.ID = r.PathValue("id")
+	before, err := h.deployments.Get(ctx, d.Metadata.ID)
+	if err == nil && d.Spec.Component == before.Spec.Component {
+		err = h.checkConfig(ctx, d, &before)
+	}
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	d.Metadata.ID = r.PathValue("id")
 	current, err := h.deployments.Get(ctx, d.Metadata.ID)
 	if err != nil {
 		h.fail(w, r, err)
@@ -380,6 +424,10 @@ func (h *DeploymentHandler) Promote(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body) {
 		return
 	}
+	// Locked before reading the source, so the release promoted is the one
+	// it runs now, not one a concurrent write is replacing.
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	src, err := h.deployments.Get(ctx, r.PathValue("id"))
 	if err != nil {
 		h.fail(w, r, err)
@@ -405,8 +453,6 @@ func (h *DeploymentHandler) Promote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
 	all, err := h.deployments.List(ctx, store.ListOptions{OwnerID: body.To})
 	if err != nil {
 		h.fail(w, r, err)

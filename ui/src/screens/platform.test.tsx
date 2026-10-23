@@ -237,6 +237,17 @@ describe("runtime tab", () => {
     expect(screen.getByLabelText("Environment")).toBeTruthy();
   });
 
+  it("shows the newest events first, and the rest on request", async () => {
+    goTo("/applications/app1/components/c1?tab=runtime");
+    const many = Array.from({ length: 14 }, (_, i) => ({ time: at, type: "Normal", reason: `Reason${i}`, message: "m", objectKind: "Pod", objectName: "p" }));
+    mockFetch({ ...runtime, "/v1/deployments/d1/events": { events: many } });
+    render(<App />);
+    expect(await screen.findByText("Reason9")).toBeTruthy();
+    expect(screen.queryByText("Reason10")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show all 14 events" }));
+    expect(await screen.findByText("Reason13")).toBeTruthy();
+  });
+
   it("doesn't read logs without the Log Reader permission", async () => {
     goTo("/applications/app1/components/c1?tab=runtime");
     mockFetch(runtime, () => [{ actions: ["*/read"], notActions: ["serendip/components/logs/read"] }]);
@@ -336,6 +347,16 @@ describe("packages page", () => {
     const sent = calls.find((c) => c.init.method === "POST")!;
     expect(sent.url).toBe("/v1/provider-instances");
     expect(JSON.parse(sent.init.body as string)).toEqual({ metadata: { name: "test-pkg" }, spec: { capabilityId: "build", providerId: "test-pkg" } });
+  });
+
+  it("doesn't offer installing to someone who may not", async () => {
+    goTo("/packages");
+    mockFetch({ "/v1/session": base["/v1/session"], "/v1/packages": pkgs }, () => reader);
+    render(<App />);
+    expect(await screen.findByText("A test package")).toBeTruthy();
+    await waitFor(() => expect(calls.some((c) => c.url.startsWith("/v1/authorization/permissions"))).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryAllByRole("button", { name: "Install package" }).filter((b) => !(b as HTMLButtonElement).disabled)).toHaveLength(0);
   });
 
   it("removes an installed package through an approval, saying what's lost", async () => {

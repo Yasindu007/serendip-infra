@@ -28,6 +28,8 @@ type ComponentHandler struct {
 	*ResourceHandler[resource.ComponentSpec, resource.ComponentStatus]
 	comps store.Store[resource.ComponentSpec, resource.ComponentStatus]
 	apps  store.Store[resource.ApplicationSpec, resource.ApplicationStatus]
+	// recordDenied audits the handler's own refusals (auditRefusal).
+	recordDenied dbForAudit
 	// mu serialises Component writes, so a port can't be removed while a
 	// dependency on it is being added.
 	mu sync.Mutex
@@ -46,6 +48,7 @@ func (h *ComponentHandler) Register(mux Mux) {
 func (h *ComponentHandler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var rf *deployRefusal
 	if errors.As(err, &rf) {
+		auditRefusal(r, rf, resource.KindComponent, h.recordDenied)
 		h.writeError(w, r, rf.status, rf.title, rf.detail)
 		return
 	}

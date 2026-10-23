@@ -42,13 +42,42 @@ function kindOf(s: JSONSchema): FieldKind {
 
 const isObject = (s: JSONSchema) => typeOf(s) === "object" && s.properties !== undefined;
 
+/**
+ * deref follows a local reference ("#/$defs/Name" or "#/definitions/Name")
+ * into root, as platform schemas share definitions that way. Anything
+ * else, or a reference that doesn't resolve, is left as it is (and so
+ * edited as JSON).
+ */
+function deref(s: JSONSchema, root: JSONSchema, depth = 0): JSONSchema {
+  const ref = s.$ref;
+  if (typeof ref !== "string" || depth > 8) return s;
+  const m = /^#\/(\$defs|definitions)\/([^/]+)$/.exec(ref);
+  const target = m ? (root[m[1] as "$defs" | "definitions"] as Record<string, JSONSchema> | undefined)?.[m[2]!] : undefined;
+  return target ? deref({ ...target, ...withoutRef(s) }, root, depth + 1) : s;
+}
+
+function withoutRef(s: JSONSchema): JSONSchema {
+  const { $ref: _ref, ...rest } = s;
+  return rest;
+}
+
+/** Keys never used as a path step: they'd reach Object.prototype. */
+const unsafeKeys = new Set(["__proto__", "constructor", "prototype"]);
+
+/** How deep nested objects become fields; a schema that refers to itself stops here. */
+const MAX_DEPTH = 6;
+
 /** The fields a schema describes, in its own property order. */
-export function schemaFields(schema: JSONSchema | undefined, prefix = "", group = ""): SchemaField[] {
-  if (!schema || !isObject(schema)) return [];
-  const required = new Set(schema.required ?? []);
-  return Object.entries(schema.properties ?? {}).flatMap(([name, s]) => {
+export function schemaFields(schema: JSONSchema | undefined, prefix = "", group = "", root: JSONSchema | undefined = schema, depth = 0): SchemaField[] {
+  if (!schema || !root || depth > MAX_DEPTH) return [];
+  const own = deref(schema, root);
+  if (!isObject(own)) return [];
+  const required = new Set(own.required ?? []);
+  return Object.entries(own.properties ?? {}).flatMap(([name, raw]) => {
+    if (unsafeKeys.has(name)) return [];
+    const s = deref(raw, root);
     const path = prefix ? `${prefix}.${name}` : name;
-    if (isObject(s)) return schemaFields(s, path, path);
+    if (isObject(s)) return schemaFields(s, path, path, root, depth + 1);
     return [{ path, label: s.title ?? name, kind: kindOf(s), schema: s, required: required.has(name), group }];
   });
 }
