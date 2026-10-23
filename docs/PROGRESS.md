@@ -18,7 +18,7 @@ Last updated: 2026-10-23
 
 **Spec 020 (OpenChoreo's portal features in Serendip's console):
 COMPLETE** (T001–T017, 2026-10-23).
-- **Commits:** `fd01e8c` … T017's, on local `main`, **not pushed**. By
+- **Commits:** `fd01e8c` … `7ea6a2d`, on local `main`, **not pushed**. By
   the GitHub pacing rule they go up as a branch, a spec or two at a time.
 - **Records:**
   - `specs/020-openchoreo-console-features/`: spec, plan, tasks (with
