@@ -99,7 +99,8 @@ func Tools(o Options) []catalog.Operation {
 	var out []catalog.Operation
 	for _, op := range catalog.Operations() {
 		if op.MCP && !(o.NoSecretValues && op.SecretValue) {
-			out = append(out, op)
+			// Without CLI-only parameters (an MCP tool answers once).
+			out = append(out, op.ForMCP())
 		}
 	}
 	return out

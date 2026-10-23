@@ -330,7 +330,7 @@ T006's route rule.
     proves install to ready, failure, not ready, and uninstall.
 
 
-## T011 — The CLI and MCP surfaces
+## T011 — The CLI and MCP surfaces ✅ 2026-10-23
 
 - **Do:**
   - Add a catalogue entry for every new route: CLI command and MCP tool,
@@ -341,6 +341,21 @@ T006's route rule.
   `docs/cli-and-mcp.md`, and tests.
 - **Verify:** `TestCatalogueCoversEveryRoute`,
   `TestReferenceListsEveryOperation`, and a CLI follow test.
+- **Done as:**
+  - **The catalogue entries** landed with each route (T006–T010),
+    because the parity test refuses a route without one.
+  - **`catalog.Param.CLIOnly`** leaves a parameter off MCP, with its
+    reason. `Operation.ForMCP()` drops such parameters from both the
+    tool's schema and its requests. `deployments_logs`'s `follow` is the
+    first ("an MCP tool answers once").
+  - **`serendip deployments logs <id> --follow`** (`cmd/serendip/follow.go`)
+    streams without the client's 30-second limit.
+    - It prints `time instance line`, or the raw NDJSON with `--json`.
+    - It explains the server's end reason. Ctrl-C exits 0.
+    - A stream cut off, or ended by `error`, exits 1 ("some lines may be
+      missing").
+  - **`docs/cli-and-mcp.md`** gains a Logs section, and the tables are
+    regenerated.
 
 ## T012 — The console
 

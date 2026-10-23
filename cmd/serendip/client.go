@@ -43,10 +43,13 @@ func newHTTPClient() *http.Client {
 			}
 			return d.DialContext(ctx, network, addr)
 		},
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          10,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        10,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		// A server that takes the request and never answers can't hang
+		// the CLI, followed streams included.
+		ResponseHeaderTimeout: 30 * time.Second,
 		ExpectContinueTimeout: time.Second,
 	}
 	return &http.Client{

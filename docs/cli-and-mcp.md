@@ -90,6 +90,21 @@ the process list shows it:
   serendip secrets value set <id> --data - < value.json
   ```
 
+## Logs
+
+- **Reading logs** needs the logs permission
+  (`serendip/components/logs/read`), which Reader doesn't have; Log
+  Reader does.
+- **Recent lines:** `serendip deployments logs <id>`, with `--tailLines`,
+  `--sinceSeconds` and `--previous`.
+- **Following:** add `--follow` to keep printing new lines as
+  `time instance line` (`--json` gives the raw NDJSON). Ctrl-C stops it.
+  - **The server ends a stream** after 5 minutes without new lines, or
+    10 minutes in all; run the command again to keep following.
+  - **Limits:** at most 3 streams at once per person, and 20 per server.
+- **MCP tools answer once,** so `deployments_logs` reads recent lines and
+  has no `follow`.
+
 ## AI assistants: `serendip mcp` (local)
 
 `serendip mcp` serves Serendip's MCP tools on standard input and output

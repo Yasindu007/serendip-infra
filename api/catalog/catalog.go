@@ -62,6 +62,9 @@ type Param struct {
 	// Expand marks a path parameter whose values name separate routes
 	// (/v1/{kind}/... for each kind in Enum).
 	Expand bool
+	// CLIOnly leaves the parameter off MCP, saying why: an MCP tool
+	// answers once, so a streaming option has no place there.
+	CLIOnly string
 }
 
 func (p Param) typ() Type { return cmp.Or(p.Type, String) }
@@ -239,6 +242,13 @@ func scalar(v any) (string, error) {
 	default:
 		return "", fmt.Errorf("want a string, number or boolean, got %T", v)
 	}
+}
+
+// ForMCP is the operation as an MCP tool offers it: without CLI-only
+// parameters, so neither its schema nor its requests can use them.
+func (o Operation) ForMCP() Operation {
+	o.Params = slices.DeleteFunc(slices.Clone(o.Params), func(p Param) bool { return p.CLIOnly != "" })
+	return o
 }
 
 // InputSchema is the JSON Schema of the operation's arguments, an object

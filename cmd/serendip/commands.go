@@ -201,6 +201,9 @@ func paramValue(op catalog.Operation, p catalog.Param, value string, stdin io.Re
 // runOperation sends one catalogue operation and prints the answer,
 // returning the exit code.
 func runOperation(ctx context.Context, c *apiClient, op catalog.Operation, args map[string]any, g globals, stdout, stderr io.Writer) int {
+	if following(op, args) {
+		return runFollow(ctx, c, op, args, g, stdout, stderr)
+	}
 	req, err := op.Request(args)
 	if err != nil {
 		fmt.Fprintln(stderr, "serendip:", err)
