@@ -1,5 +1,7 @@
 package resource
 
+import "fmt"
+
 const (
 	KindApplication Kind = "Application"
 	KindComponent   Kind = "Component"
@@ -26,6 +28,76 @@ type ComponentSpec struct {
 	Image string            `json:"image"`
 	Ports []ComponentPort   `json:"ports,omitempty"`
 	Env   map[string]string `json:"env,omitempty"`
+	// Dependencies are the other Components this one calls (spec 020).
+	// Each becomes a depends-on edge, and the platform puts the target's
+	// address in an environment variable.
+	Dependencies []ComponentDependency `json:"dependencies,omitempty"`
+}
+
+// ComponentDependency is one call to another Component's port: Env names
+// the variable that receives its address.
+type ComponentDependency struct {
+	Component string `json:"component"`
+	Port      string `json:"port"`
+	Env       string `json:"env"`
+}
+
+// MaxComponentDependencies is the platform's limit on one workload's
+// dependencies.
+const MaxComponentDependencies = 50
+
+// ValidateComponentDependencies checks a Component's dependencies on
+// their own: whether each target exists, shares the Application and has
+// the port is decided where Components are known. self is the Component's
+// own ID ("" on create).
+func ValidateComponentDependencies(self string, s ComponentSpec) error {
+	if len(s.Dependencies) > MaxComponentDependencies {
+		return fmt.Errorf("%w: dependencies: at most %d", ErrValidation, MaxComponentDependencies)
+	}
+	envs := map[string]bool{}
+	calls := map[[2]string]bool{}
+	for i, d := range s.Dependencies {
+		at := fmt.Sprintf("dependencies[%d]", i)
+		switch {
+		case d.Component == "" || !idRE.MatchString(d.Component) || d.Component == "." || d.Component == "..":
+			return fmt.Errorf("%w: %s.component: a Component ID is required", ErrValidation, at)
+		case self != "" && d.Component == self:
+			return fmt.Errorf("%w: %s.component: a Component can't depend on itself", ErrValidation, at)
+		case len(d.Port) > 63 || !dnsLabelRE.MatchString(d.Port):
+			return fmt.Errorf("%w: %s.port: the name of one of the target's ports", ErrValidation, at)
+		case !envNameRE.MatchString(d.Env):
+			return fmt.Errorf("%w: %s.env: %q isn't a variable name", ErrValidation, at, d.Env)
+		case envs[d.Env]:
+			return fmt.Errorf("%w: %s.env: %s is already used by another dependency", ErrValidation, at, d.Env)
+		case calls[[2]string{d.Component, d.Port}]:
+			return fmt.Errorf("%w: %s: this port is already a dependency", ErrValidation, at)
+		}
+		if _, clash := s.Env[d.Env]; clash {
+			return fmt.Errorf("%w: %s.env: %s is also set in env", ErrValidation, at, d.Env)
+		}
+		envs[d.Env], calls[[2]string{d.Component, d.Port}] = true, true
+	}
+	return nil
+}
+
+// ComponentRelationships replaces rels' depends-on edges to Components
+// with the ones s's dependencies declare, keeping any others: the server
+// owns those edges.
+func ComponentRelationships(rels []Relationship, s ComponentSpec) []Relationship {
+	var out []Relationship
+	for _, r := range rels {
+		if r.Type != EdgeDependsOn || r.TargetKind != KindComponent {
+			out = append(out, r)
+		}
+	}
+	seen := map[string]bool{}
+	for _, d := range s.Dependencies {
+		if !seen[d.Component] {
+			seen[d.Component] = true
+			out = append(out, Relationship{Type: EdgeDependsOn, TargetKind: KindComponent, TargetID: d.Component})
+		}
+	}
+	return out
 }
 
 // ComponentPort is one port the Component's container listens on. Name

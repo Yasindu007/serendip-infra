@@ -69,9 +69,31 @@ type workloadContainer struct {
 
 // workloadSpec models only the Workload fields this provider owns.
 type workloadSpec struct {
-	Owner     ownerRef                    `json:"owner"`
-	Container workloadContainer           `json:"container"`
-	Endpoints map[string]workloadEndpoint `json:"endpoints,omitempty"`
+	Owner        ownerRef                    `json:"owner"`
+	Container    workloadContainer           `json:"container"`
+	Endpoints    map[string]workloadEndpoint `json:"endpoints,omitempty"`
+	Dependencies *workloadDependencies       `json:"dependencies,omitempty"`
+}
+
+// workloadDependencies are the endpoints a workload calls (spike finding
+// 8): the platform resolves each into an address in an environment
+// variable, and lets the traffic through.
+type workloadDependencies struct {
+	Endpoints []workloadConnection `json:"endpoints"`
+}
+
+type workloadConnection struct {
+	Component string `json:"component"`
+	// Name is the target's endpoint, which is its port's name.
+	Name string `json:"name"`
+	// Visibility is "project": dependencies stay within an Application,
+	// which is one platform project.
+	Visibility  string               `json:"visibility"`
+	EnvBindings connectionEnvAddress `json:"envBindings"`
+}
+
+type connectionEnvAddress struct {
+	Address string `json:"address"`
 }
 
 type condition struct {
@@ -429,6 +451,15 @@ func desiredWorkload(project, name string, spec resource.ComponentSpec) workload
 	}
 	for _, port := range spec.Ports {
 		w.Endpoints[port.Name] = endpointFor(port)
+	}
+	if len(spec.Dependencies) > 0 {
+		w.Dependencies = &workloadDependencies{}
+		for _, d := range spec.Dependencies {
+			w.Dependencies.Endpoints = append(w.Dependencies.Endpoints, workloadConnection{
+				Component: componentName(d.Component), Name: d.Port, Visibility: "project",
+				EnvBindings: connectionEnvAddress{Address: d.Env},
+			})
+		}
 	}
 	keys := make([]string, 0, len(spec.Env))
 	for k := range spec.Env {

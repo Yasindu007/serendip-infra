@@ -87,8 +87,9 @@ type releaseComponentType struct {
 }
 
 type releaseWorkload struct {
-	Container workloadContainer           `json:"container"`
-	Endpoints map[string]workloadEndpoint `json:"endpoints,omitempty"`
+	Container    workloadContainer           `json:"container"`
+	Endpoints    map[string]workloadEndpoint `json:"endpoints,omitempty"`
+	Dependencies *workloadDependencies       `json:"dependencies,omitempty"`
 }
 
 // componentProject is the platform project of a Component's Application.
@@ -123,7 +124,7 @@ func (p *Provider) createRelease(ctx context.Context, project string, comp resou
 	spec := releaseSpec{
 		ComponentType: releaseComponentType{Kind: "ClusterComponentType", Name: typeName, Spec: ct.Spec},
 		Owner:         ownerRef{ProjectName: project, ComponentName: name},
-		Workload:      releaseWorkload{Container: w.Container, Endpoints: w.Endpoints},
+		Workload:      releaseWorkload{Container: w.Container, Endpoints: w.Endpoints, Dependencies: w.Dependencies},
 	}
 	content, err := json.Marshal(spec)
 	if err != nil {

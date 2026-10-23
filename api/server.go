@@ -240,6 +240,7 @@ type serverOptions struct {
 	directory identity.Directory
 	runtime   reconcile.RuntimeProvider
 	schemas   reconcile.ConfigSchemaProvider
+	platform  reconcile.PlatformViewProvider
 	metadata  *ResourceMetadata
 	mcp       bool
 }
@@ -256,6 +257,12 @@ func WithDirectory(d identity.Directory) ServerOption {
 // configuration is refused (503) and the schema route answers 503.
 func WithConfigSchemas(s reconcile.ConfigSchemaProvider) ServerOption {
 	return func(o *serverOptions) { o.schemas = s }
+}
+
+// WithPlatformView serves GET /v1/platform from the application platform
+// (spec 020). Without it the route answers 503.
+func WithPlatformView(p reconcile.PlatformViewProvider) ServerOption {
+	return func(o *serverOptions) { o.platform = p }
 }
 
 // WithRuntime lets the runtime routes read what Deployments run as, live
@@ -276,21 +283,29 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 	mountResource[resource.TeamSpec, resource.TeamStatus](apiMux, db, bus, resource.KindTeam, "teams")
 	envStore := sqlite.NewStore[resource.EnvironmentSpec, resource.EnvironmentStatus](db, resource.KindEnvironment).SetBus(bus)
 	projectStore := sqlite.NewStore[resource.ProjectSpec, resource.ProjectStatus](db, resource.KindProject).SetBus(bus)
+	appStore := sqlite.NewStore[resource.ApplicationSpec, resource.ApplicationStatus](db, resource.KindApplication).SetBus(bus)
 	// A Project's pipeline names only its own Environments (spec 020).
 	NewResourceHandler[resource.ProjectSpec, resource.ProjectStatus](projectStore, "projects").WithValidate(projectValidator(envStore)).Register(apiMux)
 	NewResourceHandler[resource.EnvironmentSpec, resource.EnvironmentStatus](envStore, "environments").Register(apiMux)
 	mountResource[resource.SiteSpec, resource.SiteStatus](apiMux, db, bus, resource.KindSite, "sites")
 	mountResource[resource.ClusterSpec, resource.ClusterStatus](apiMux, db, bus, resource.KindCluster, "clusters")
 	mountResource[resource.NodeSpec, resource.NodeStatus](apiMux, db, bus, resource.KindNode, "nodes")
-	mountResource[resource.ApplicationSpec, resource.ApplicationStatus](apiMux, db, bus, resource.KindApplication, "applications")
+	NewResourceHandler[resource.ApplicationSpec, resource.ApplicationStatus](appStore, "applications").Register(apiMux)
 	compStore := sqlite.NewStore[resource.ComponentSpec, resource.ComponentStatus](db, resource.KindComponent).SetBus(bus)
-	NewResourceHandler[resource.ComponentSpec, resource.ComponentStatus](compStore, "components").Register(apiMux)
+	// Components (spec 020 T009): their own Create and Update keep declared
+	// dependencies coherent; plus dependencies and an Application's topology.
+	(&ComponentHandler{
+		ResourceHandler: NewResourceHandler[resource.ComponentSpec, resource.ComponentStatus](compStore, "components"),
+		comps:           compStore,
+		apps:            appStore,
+	}).Register(apiMux)
+	(&PlatformHandler{platform: opts.platform}).Register(apiMux)
 	// Deployments (spec 020): their own Create, Update and Promote.
 	deployStore := sqlite.NewStore[resource.DeploymentSpec, resource.DeploymentStatus](db, resource.KindDeployment).SetBus(bus)
 	(&DeploymentHandler{
 		ResourceHandler: NewResourceHandler[resource.DeploymentSpec, resource.DeploymentStatus](deployStore, "deployments"),
 		deployments:     deployStore, envs: envStore, comps: compStore,
-		apps:     sqlite.NewStore[resource.ApplicationSpec, resource.ApplicationStatus](db, resource.KindApplication).SetBus(bus),
+		apps:     appStore,
 		projects: projectStore,
 		schemas:  opts.schemas,
 	}).Register(apiMux)

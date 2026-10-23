@@ -44,10 +44,12 @@ type kubeWiring struct {
 	// runtime reads what Deployments run as, once the platform is ready.
 	runtime *lazyRuntime
 	// schemas checks configuration, once the platform is ready.
-	schemas   *lazySchemas
-	authn     *lazyAuthenticator
-	login     *lazyLogin
-	directory *lazyDirectory
+	schemas *lazySchemas
+	// platformView describes the platform, once it's ready.
+	platformView *lazyPlatformView
+	authn        *lazyAuthenticator
+	login        *lazyLogin
+	directory    *lazyDirectory
 	// issuer is the human issuer once identity is set up, or "".
 	issuer func() string
 	plan   setupPlan
@@ -127,7 +129,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 	credentialsPath := envOr("SERENDIP_OPENBAO_CREDENTIALS_PATH", defaultOpenBaoCredentialsPath)
 
 	storage, secrets, platform, authn := &lazyStorage{}, &lazySecrets{}, &lazyPlatform{}, &lazyAuthenticator{}
-	deployments, runtime, schemas := &lazyDeployments{}, &lazyRuntime{}, &lazySchemas{}
+	deployments, runtime, schemas, platformView := &lazyDeployments{}, &lazyRuntime{}, &lazySchemas{}, &lazyPlatformView{}
 	directory := &lazyDirectory{}
 	login := &lazyLogin{}
 	// verifier is the identity setup's token verifier, shared with the
@@ -215,6 +217,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 			deployments.set(p)
 			runtime.set(p)
 			schemas.set(p)
+			platformView.set(p)
 			log.Print("serendipd: kubernetes: application platform provider (openchoreo) active")
 			return nil
 		},
@@ -312,7 +315,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		resource.KindEnvironment: reconcile.EnvironmentCleanup(deployments),
 		resource.KindProject:     reconcile.PipelineCleanup(deployments),
 	}
-	return &kubeWiring{secretReconciler: secretReconciler, cleaners: cleaners, runtime: runtime, schemas: schemas, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject, issuer: issuer}, nil
+	return &kubeWiring{secretReconciler: secretReconciler, cleaners: cleaners, runtime: runtime, schemas: schemas, platformView: platformView, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject, issuer: issuer}, nil
 }
 
 // ensureGatewayReady ensures the shared gateway and treats "not programmed

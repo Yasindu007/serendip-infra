@@ -180,6 +180,7 @@ tools.
 | `serendip applications delete <id>` | `applications_delete` | `DELETE /v1/applications/{id}` | Delete a Application. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
 | `serendip applications get <id>` | `applications_get` | `GET /v1/applications/{id}` | Get one Application |
 | `serendip applications list` | `applications_list` | `GET /v1/applications` | List applications the caller may read |
+| `serendip applications topology <id>` | `applications_topology` | `GET /v1/applications/{id}/topology` | An Application's declared topology: its Components and the calls between them (not live traffic) |
 | `serendip applications update <id>` | `applications_update` | `PUT /v1/applications/{id}` | Replace a Application's spec (send the version read, for a conflict check) |
 | `serendip approvals approve <id>` | — | `POST /v1/approvals/{id}/approve` | Approve a request; the approval reconciler then carries it out |
 | `serendip approvals get <id>` | `approvals_get` | `GET /v1/approvals/{id}` | One approval, with its decision and what it removed |
@@ -200,6 +201,7 @@ tools.
 | `serendip clusters update <id>` | — | `PUT /v1/clusters/{id}` | Replace a Cluster's spec (send the version read, for a conflict check) |
 | `serendip components create` | `components_create` | `POST /v1/components` | Create a Component |
 | `serendip components delete <id>` | `components_delete` | `DELETE /v1/components/{id}` | Delete a Component. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
+| `serendip components dependencies <id>` | `components_dependencies` | `GET /v1/components/{id}/dependencies` | A Component's declared dependencies: the Components it calls, and those of its Application that call it |
 | `serendip components get <id>` | `components_get` | `GET /v1/components/{id}` | Get one Component |
 | `serendip components list` | `components_list` | `GET /v1/components` | List components the caller may read |
 | `serendip components schemas <id>` | `components_schemas` | `GET /v1/components/{id}/schemas` | What can be configured on a Component, as JSON Schemas: its per-environment configuration (a Deployment's overrides.config) and each trait's |
@@ -236,6 +238,7 @@ tools.
 | `serendip organizations get <id>` | — | `GET /v1/organizations/{id}` | Get one Organization |
 | `serendip organizations list` | — | `GET /v1/organizations` | List organizations the caller may read |
 | `serendip organizations update <id>` | — | `PUT /v1/organizations/{id}` | Replace a Organization's spec (send the version read, for a conflict check) |
+| `serendip platform` | `platform_get` | `GET /v1/platform` | The application platform, read-only: where workloads run, and the component types and traits installed with what each allows |
 | `serendip projects create` | — | `POST /v1/projects` | Create a Project |
 | `serendip projects delete <id>` | — | `DELETE /v1/projects/{id}` | Delete a Project. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
 | `serendip projects get <id>` | — | `GET /v1/projects/{id}` | Get one Project |

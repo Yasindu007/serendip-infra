@@ -151,6 +151,9 @@ type PlatformComponent struct {
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 	Environment json.RawMessage `json:"environment,omitempty"`
+	// AllowedTraits names the traits a component type lets Components
+	// add (component types only).
+	AllowedTraits []string `json:"allowedTraits,omitempty"`
 }
 
 // PlatformViewProvider describes the platform.

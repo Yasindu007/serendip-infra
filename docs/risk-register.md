@@ -579,6 +579,10 @@ purpose), **Closed** (fixed).
   and the mutex is never contended in practice. Consistent failure
   handling across the platform reconcilers is worth more than one being
   different.
+  - **Component writes and deletes** (spec 020 T009) are serialised
+    the same way, by a process-local lock across their checks. That
+    keeps a dependency from being added to a Component being deleted,
+    or to a port being removed.
 - **Revisit:**
   - **Scan and mutex:** when Deployments reach the hundreds, or when
     more than one `serendipd` writes. Options are an index by Component,

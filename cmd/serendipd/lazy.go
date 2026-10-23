@@ -316,3 +316,19 @@ func (l *lazySchemas) ConfigSchemas(ctx context.Context, comp resource.Component
 	}
 	return p.ConfigSchemas(ctx, comp)
 }
+
+// lazyPlatformView is the platform's PlatformViewProvider (spec 020), set
+// with lazyPlatform when the platform is ready.
+type lazyPlatformView struct {
+	lazy[reconcile.PlatformViewProvider]
+}
+
+var _ reconcile.PlatformViewProvider = (*lazyPlatformView)(nil)
+
+func (l *lazyPlatformView) Platform(ctx context.Context) (reconcile.PlatformView, error) {
+	p, err := l.get()
+	if err != nil {
+		return reconcile.PlatformView{}, err
+	}
+	return p.Platform(ctx)
+}

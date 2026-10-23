@@ -168,6 +168,10 @@ func routeTable() map[string]rule {
 		"POST /v1/approvals/{id}/approve": {action: approvalsAction("write"), target: targetApprovalDecide, kind: resource.KindApproval},
 		"POST /v1/approvals/{id}/reject":  {action: approvalsAction("write"), target: targetApprovalDecide, kind: resource.KindApproval},
 
+		// Declared dependencies and topology, and the platform (spec 020).
+		"GET /v1/components/{id}/dependencies": {action: action(resource.KindComponent, "read"), target: targetResource, kind: resource.KindComponent},
+		"GET /v1/applications/{id}/topology":   {action: action(resource.KindApplication, "read"), target: targetResource, kind: resource.KindApplication},
+		"GET /v1/platform":                     {action: policy.Action{Name: policy.ActionPlatformRead}, target: targetRoot},
 		// What a Component can be configured with (spec 020).
 		"GET /v1/components/{id}/schemas": {action: action(resource.KindComponent, "read"), target: targetResource, kind: resource.KindComponent},
 		// What a Deployment runs as, and its logs, read live (spec 020);

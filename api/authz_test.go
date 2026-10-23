@@ -240,9 +240,10 @@ func TestAuthz_Contributor(t *testing.T) {
 // Moving a resource under a parent the caller can't write is refused.
 func TestAuthz_MoveNeedsWriteAtTheNewParent(t *testing.T) {
 	w := newAuthzWorld(t, func(w *authzWorld) { w.grant("tok-contrib", policy.ContributorRoleID, "prod") })
-	w.put("tok-contrib", "/v1/components", "web", "devapp", http.StatusForbidden)
+	// An Application: a Component's Application is fixed (spec 020 T009).
+	w.put("tok-contrib", "/v1/applications", "app", "projB", http.StatusForbidden)
 	// Moving within what they control is fine.
-	w.put("tok-contrib", "/v1/components", "web", "prod", http.StatusOK)
+	w.put("tok-contrib", "/v1/applications", "app", "prod", http.StatusOK)
 }
 
 // Acceptance criterion 3.

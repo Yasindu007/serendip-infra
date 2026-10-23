@@ -233,7 +233,7 @@ T006's route rule.
     the only forms are the per-environment configuration. A trait's
     schema joins `traits` once a Component can carry one.
 
-## T009 [P] — Topology and the platform view
+## T009 [P] — Topology and the platform view ✅ 2026-10-23
 
 - **Do:**
   - **`ComponentSpec` gains `dependencies`:** the Component and the
@@ -247,6 +247,34 @@ T006's route rule.
 - **Files:** `providers/application/openchoreo/{topology,platform}.go`,
   the API and tests.
 - **Verify:** `go test`.
+- **Done as:**
+  - **`ComponentSpec.dependencies`:** `[{component, port, env}]`, at most
+    50 (the platform's limit).
+    - The Component handler checks each target: a Component of the same
+      Application, which has that port, and which the caller may read.
+    - The server derives the `depends-on` edges.
+    - A port another Component calls can't be removed, and a Component
+      others call can't be deleted (409). A Component's Application is
+      fixed once created.
+  - **The provider** writes them to the Workload and into each release
+    as `project`-visible connections, with the address in `env` (spike
+    finding 8). A Component without dependencies keeps its release
+    names.
+  - **Within one Application only,** for now. An Application is one
+    platform project. Calling across Applications would need the
+    target's endpoints opened namespace-wide, which weakens isolation for
+    every Component. That's a later, explicit choice.
+  - **Routes:**
+    - `GET /v1/components/{id}/dependencies` answers `{calls,
+      calledBy}`.
+    - `GET /v1/applications/{id}/topology` answers `{components,
+      dependencies}`, declared rather than live, and checked per item
+      with `allowedAt`.
+    - `GET /v1/platform` (`serendip/platform/read` at `/`) answers data
+      planes, component types (with `allowedTraits`) and traits, with
+      their schemas.
+  - **Environments and the pipeline** come from their own routes. The
+    console (T012) puts the platform page together.
 
 ## T010 [P] — The package framework
 
