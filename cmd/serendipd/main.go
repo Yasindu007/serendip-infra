@@ -147,7 +147,7 @@ func run() error {
 	}
 	var serverOpts []api.ServerOption
 	if kube != nil {
-		serverOpts = append(serverOpts, api.WithDirectory(kube.directory), api.WithResourceMetadata(api.ResourceMetadata{
+		serverOpts = append(serverOpts, api.WithDirectory(kube.directory), api.WithRuntime(kube.runtime), api.WithResourceMetadata(api.ResourceMetadata{
 			Issuer: kube.issuer, CLIClient: thunderid.ClientID, AssistantClient: thunderid.DelegateClientID,
 		}), api.WithMCP())
 	}

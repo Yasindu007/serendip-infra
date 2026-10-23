@@ -168,6 +168,11 @@ func routeTable() map[string]rule {
 		"POST /v1/approvals/{id}/approve": {action: approvalsAction("write"), target: targetApprovalDecide, kind: resource.KindApproval},
 		"POST /v1/approvals/{id}/reject":  {action: approvalsAction("write"), target: targetApprovalDecide, kind: resource.KindApproval},
 
+		// What a Deployment runs as, and its logs, read live (spec 020);
+		// logs are their own action, as they can hold sensitive data.
+		"GET /v1/deployments/{id}/runtime": {action: policy.Action{Name: policy.ActionComponentRuntimeRead}, target: targetResource, kind: resource.KindDeployment},
+		"GET /v1/deployments/{id}/events":  {action: policy.Action{Name: policy.ActionComponentRuntimeRead}, target: targetResource, kind: resource.KindDeployment},
+		"GET /v1/deployments/{id}/logs":    {action: policy.Action{Name: policy.ActionComponentLogsRead}, target: targetResource, kind: resource.KindDeployment},
 		// Promote reads the source Deployment; the handler checks writing
 		// deployments at the target Environment (spec 020).
 		"POST /v1/deployments/{id}/promote": {action: action(resource.KindDeployment, "read"), target: targetResource, kind: resource.KindDeployment},

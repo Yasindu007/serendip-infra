@@ -238,6 +238,7 @@ type ServerOption func(*serverOptions)
 
 type serverOptions struct {
 	directory identity.Directory
+	runtime   reconcile.RuntimeProvider
 	metadata  *ResourceMetadata
 	mcp       bool
 }
@@ -247,6 +248,12 @@ type serverOptions struct {
 // it they answer from the principals seen at sign-in.
 func WithDirectory(d identity.Directory) ServerOption {
 	return func(o *serverOptions) { o.directory = d }
+}
+
+// WithRuntime lets the runtime routes read what Deployments run as, live
+// from the application platform (spec 020). Without it they answer 503.
+func WithRuntime(rt reconcile.RuntimeProvider) ServerOption {
+	return func(o *serverOptions) { o.runtime = rt }
 }
 
 // registerAPI registers every /v1 route on mux. NewServer passes its
@@ -278,6 +285,7 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 		apps:     sqlite.NewStore[resource.ApplicationSpec, resource.ApplicationStatus](db, resource.KindApplication).SetBus(bus),
 		projects: projectStore,
 	}).Register(apiMux)
+	NewRuntimeHandler(deployStore, envStore, opts.runtime).Register(apiMux)
 	// Capability's store is shared with RegistryHandler below (T019 gap
 	// fix -- specs/002-http-api/spec.md Scope-IN item 2, "get/set a
 	// capability's default provider", was never wired up) rather than

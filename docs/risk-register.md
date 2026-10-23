@@ -587,3 +587,36 @@ purpose), **Closed** (fixed).
     resync latency turns out to hurt.
   - **Deleted Environments:** remove them from pipelines when they are
     deleted.
+
+## RP-031 — Log reads aren't audited; following logs holds connections open
+
+- **Kind:** security and performance. **Status:** Accepted, 2026-10-23.
+  **Found:** spec 020 T007.
+- **What:**
+  - **Reading a Deployment's logs leaves no audit row.** Logs can hold
+    sensitive data, which is why they have their own permission
+    (`serendip/components/logs/read`, outside Reader). Who read them
+    isn't recorded, the same as Secret value reads
+    (`docs/architecture/secrets.md`, "reads don't").
+  - **Each followed stream holds open:**
+    - a client connection;
+    - one platform stream per instance (up to 10);
+    - a few goroutines.
+
+    That's capped at 3 per caller and 20 per server, for at most 10
+    minutes, ending after 5 idle.
+- **Why accepted:**
+  - The constitution audits mutations. Auditing reads needs a
+    `core/audit` extension, which is already deferred for Secrets.
+  - The caps bound the cost on a T470: at most 200 platform streams.
+- **Also accepted:**
+  - **A stalled client** keeps its stream and its place until the
+    stream's write deadline, 10.5 minutes at most.
+  - **A stream that has started** isn't stopped when the caller's role
+    is removed or their session ends. It runs out within 10 minutes.
+  - **More than 10 instances:** only the newest 10 are read.
+- **Revisit:**
+  - **Audit:** add read auditing for logs and Secret values together,
+    when `core/audit` gains reads.
+  - **Caps:** if the console's reconnects make 20 streams too few for
+    a team.

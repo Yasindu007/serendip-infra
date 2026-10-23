@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/serendip-infra/serendip-infra/api"
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/policy"
 	"github.com/serendip-infra/serendip-infra/core/resource"
@@ -22,12 +23,14 @@ type deployWorld struct {
 	proj, other, dev, staging, prod, elsewhere, app, web string
 }
 
-func newDeployWorld(t *testing.T) *deployWorld {
+func newDeployWorld(t *testing.T, opts ...api.ServerOption) *deployWorld {
 	t.Helper()
 	people["tok-devops"] = identity.Principal{Subject: "sub-devops", Name: "devops"}
 	people["tok-envonly"] = identity.Principal{Subject: "sub-envonly", Name: "envonly"}
 	people["tok-owner-ai"] = identity.Principal{Subject: "sub-owner", Name: "owner", Via: "serendip-mcp"}
+	people["tok-logreader"] = identity.Principal{Subject: "sub-logreader", Name: "logreader"}
 	t.Cleanup(func() {
+		delete(people, "tok-logreader")
 		delete(people, "tok-devops")
 		delete(people, "tok-envonly")
 		delete(people, "tok-owner-ai")
@@ -78,7 +81,8 @@ func newDeployWorld(t *testing.T) *deployWorld {
 		// Contributor at dev only: may write deployments there, but can't
 		// read the Component, which lives under the Project.
 		grant(t, w.db, resource.PrincipalPerson, "sub-envonly", policy.ContributorRoleID, resource.Scope{Kind: resource.KindEnvironment, ID: d.dev})
-	})
+		grant(t, w.db, resource.PrincipalPerson, "sub-logreader", policy.LogReaderRoleID, resource.Scope{Kind: resource.KindProject, ID: d.proj})
+	}, opts...)
 	return d
 }
 

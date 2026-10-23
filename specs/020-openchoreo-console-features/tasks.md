@@ -150,7 +150,7 @@ T006's route rule.
     on the data plane), and no acceptance criterion depends on it. It
     lands with T007's runtime work or later.
 
-## T007 [P] — The runtime view: tree, events, pod logs
+## T007 [P] — The runtime view: tree, events, pod logs ✅ 2026-10-23
 
 - **Do:**
   - **Kubernetes client additions:** a raw read that keeps every field
@@ -165,6 +165,32 @@ T006's route rule.
   `api/runtime_handler.go`, and tests.
 - **Verify:** `go test`. Covers stream caps, the stream ending on client
   close, and logs needing `components/logs/read` (a Reader is refused).
+- **Done as:**
+  - **Routes:** `GET /v1/deployments/{id}/runtime`, `/events?since=` and
+    `/logs`.
+    - Logs take `tailLines` (at most 1000), `sinceSeconds`, `previous`
+      and `follow`.
+    - Recent lines come back as `{"lines": [...], "truncated": bool}`:
+      the newest 5000 across instances (within 4 MiB), oldest first.
+    - `follow=true` streams NDJSON, ending with `{"end": "idle" |
+      "maxDuration" | "ended" | "error"}`. A platform failure part-way
+      is reported, so a partial answer never looks complete.
+  - **Caps:** 3 streams per caller and 20 per server (beyond that, 429
+    with `Retry-After`). A stream ends after 5 minutes idle or 10
+    minutes in all. Each stream sets its own write deadline past the
+    server's 60 s.
+  - **The tree:** the rendered objects with their health, then the
+    pods. A pod's message names a waiting reason such as
+    `CrashLoopBackOff`, and its restarts.
+  - **Events:** asked for by exact object name, because the namespace
+    holds the whole project's: the rendered objects, the pods, and their
+    ReplicaSets. Newest first, at most 200.
+  - **Logs:** at most 10 instances are merged, and lines are cut at
+    16 KiB.
+  - **The client:** `kubernetes.Client` gains `GetRaw` (capped at 8 MiB)
+    and `Stream`.
+  - **Checked live:** the log format and the previous-container 400.
+    The full read path runs in T015.
 
 ## T008 [P] — Configuration from schemas
 

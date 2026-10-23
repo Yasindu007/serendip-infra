@@ -299,7 +299,68 @@ func (c *Client) List(ctx context.Context, path string) ([]Object, error) {
 	return result.Items, nil
 }
 
+// StatusError is an answer with a status the call didn't expect; Code is
+// the HTTP status and Body the start of the answer.
+type StatusError struct {
+	Code int
+	Body string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("kubernetes: unexpected status %d: %s", e.Code, e.Body)
+}
+
 func unexpectedStatus(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	return fmt.Errorf("kubernetes: unexpected status %d: %s", resp.StatusCode, string(body))
+	return &StatusError{Code: resp.StatusCode, Body: string(body)}
+}
+
+// maxRawBody caps GetRaw's answer, so one oversized list can't exhaust
+// serendipd's memory on a small machine.
+const maxRawBody = 8 << 20
+
+// GetRaw fetches path and returns the body as it came. Use it for objects
+// whose fields sit outside metadata/spec/status/data (Events: reason,
+// message, involvedObject), which Object would drop. Returns ErrNotFound
+// on a 404, and an error for a body over 8 MiB.
+func (c *Client) GetRaw(ctx context.Context, path string) (json.RawMessage, error) {
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, unexpectedStatus(resp)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRawBody+1))
+	if err != nil {
+		return nil, fmt.Errorf("kubernetes: read GET %s response: %w", path, err)
+	}
+	if len(body) > maxRawBody {
+		return nil, fmt.Errorf("kubernetes: GET %s answered more than %d bytes", path, maxRawBody)
+	}
+	return body, nil
+}
+
+// Stream GETs path and returns the open body for the caller to read and
+// close, for answers that keep coming (pod logs with follow=true). The
+// client sets no deadline of its own: the stream lasts until ctx ends,
+// the server ends it, or the caller closes it. Returns ErrNotFound on a
+// 404.
+func (c *Client) Stream(ctx context.Context, path string) (io.ReadCloser, error) {
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusOK {
+		return resp.Body, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrNotFound
+	}
+	return nil, unexpectedStatus(resp)
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/identity"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
@@ -266,4 +267,36 @@ func (l *lazyDeployments) Undeploy(ctx context.Context, d resource.Deployment) e
 		return err
 	}
 	return p.Undeploy(ctx, d)
+}
+
+// lazyRuntime is the platform's RuntimeProvider (spec 020), set with
+// lazyPlatform when the platform is ready.
+type lazyRuntime struct {
+	lazy[reconcile.RuntimeProvider]
+}
+
+var _ reconcile.RuntimeProvider = (*lazyRuntime)(nil)
+
+func (l *lazyRuntime) RuntimeObjects(ctx context.Context, d resource.Deployment, env resource.Environment) ([]reconcile.RuntimeObject, error) {
+	p, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return p.RuntimeObjects(ctx, d, env)
+}
+
+func (l *lazyRuntime) Events(ctx context.Context, d resource.Deployment, env resource.Environment, since time.Time) ([]reconcile.RuntimeEvent, error) {
+	p, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return p.Events(ctx, d, env, since)
+}
+
+func (l *lazyRuntime) Logs(ctx context.Context, d resource.Deployment, env resource.Environment, opts reconcile.LogOptions) (reconcile.LogStream, error) {
+	p, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return p.Logs(ctx, d, env, opts)
 }

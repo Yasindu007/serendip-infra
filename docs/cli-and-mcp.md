@@ -205,9 +205,12 @@ tools.
 | `serendip components update <id>` | `components_update` | `PUT /v1/components/{id}` | Replace a Component's spec (send the version read, for a conflict check) |
 | `serendip deployments create` | `deployments_create` | `POST /v1/deployments` | Create a Deployment |
 | `serendip deployments delete <id>` | `deployments_delete` | `DELETE /v1/deployments/{id}` | Delete a Deployment. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
+| `serendip deployments events <id>` | `deployments_events` | `GET /v1/deployments/{id}/events` | Recent platform events about what a Deployment runs as, newest first |
 | `serendip deployments get <id>` | `deployments_get` | `GET /v1/deployments/{id}` | Get one Deployment |
 | `serendip deployments list` | `deployments_list` | `GET /v1/deployments` | List deployments the caller may read |
+| `serendip deployments logs <id>` | `deployments_logs` | `GET /v1/deployments/{id}/logs` | Recent log lines from a Deployment's running instances, oldest first. Logs can hold sensitive data, so they need their own permission |
 | `serendip deployments promote <id>` | `deployments_promote` | `POST /v1/deployments/{id}/promote` | Run the release a Deployment runs now in the next Environment of the Project's pipeline. The target keeps its own overrides |
+| `serendip deployments runtime <id>` | `deployments_runtime` | `GET /v1/deployments/{id}/runtime` | What a Deployment runs as on the platform: its objects with their health, then each running instance |
 | `serendip deployments update <id>` | `deployments_update` | `PUT /v1/deployments/{id}` | Replace a Deployment's spec (send the version read, for a conflict check) |
 | `serendip environments create` | — | `POST /v1/environments` | Create a Environment |
 | `serendip environments delete <id>` | — | `DELETE /v1/environments/{id}` | Delete a Environment. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |

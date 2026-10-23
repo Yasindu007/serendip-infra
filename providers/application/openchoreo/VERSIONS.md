@@ -66,6 +66,13 @@ Notes:
   is created.
 - **`RenderedRelease.status.resources`** lists kind, name, namespace and
   `healthStatus`.
+  - The RenderedRelease is named after, and owned by, its
+    `ReleaseBinding`.
+  - Pods carry `openchoreo.dev/component` and `openchoreo.dev/environment`
+    labels (the object names), and the workload container is `main`.
+  - Pod logs with `timestamps=true` start each line with an RFC 3339
+    nanosecond time. `previous=true` without a previous container
+    answers 400 (spec 020 T007).
 - **Workload dependencies:** `spec.dependencies.endpoints[]`, resolved
   into an address environment variable (`ConnectionsResolved`).
 - **Serendip-made releases (spec 020 T005, verified):** a `ComponentRelease`
