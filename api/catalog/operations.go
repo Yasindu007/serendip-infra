@@ -221,6 +221,10 @@ var operations = func() []Operation {
 			Summary: "Reject a request", Method: "POST", Path: "/v1/approvals/{id}/reject",
 			Params: []Param{approvalID, comment}},
 
+		Operation{Name: "components_schemas", CLI: []string{"components", "schemas"}, MCP: true,
+			Summary: "What can be configured on a Component, as JSON Schemas: its per-environment configuration (a Deployment's overrides.config) and each trait's",
+			Method:  "GET", Path: "/v1/components/{id}/schemas",
+			Params: []Param{id("Component")}, Hints: Hints{ReadOnly: true}},
 		Operation{Name: "deployments_runtime", CLI: []string{"deployments", "runtime"}, MCP: true,
 			Summary: "What a Deployment runs as on the platform: its objects with their health, then each running instance",
 			Method:  "GET", Path: "/v1/deployments/{id}/runtime",

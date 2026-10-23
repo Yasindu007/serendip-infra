@@ -620,3 +620,22 @@ purpose), **Closed** (fixed).
     when `core/audit` gains reads.
   - **Caps:** if the console's reconnects make 20 streams too few for
     a team.
+
+## RP-032 — A Deployment's unchanged configuration isn't checked again
+
+- **Kind:** correctness. **Status:** Accepted, 2026-10-23. **Found:**
+  spec 020 T008 review.
+- **What:** configuration overrides are checked against the platform's
+  schema only when they change.
+  - A Deployment stored before T008, or under an older component type
+    whose schema has since tightened, keeps configuration the current
+    schema would refuse. Promoting it, or changing its release, doesn't
+    re-check it.
+  - Numbers are checked as float64, so integer bounds beyond 2^53 are
+    approximate.
+- **Why accepted:** re-checking on every write would make promotion and
+  rollback depend on the platform answering. The platform still refuses
+  invalid configuration when the reconciler deploys it, and the
+  Deployment's Ready condition shows that.
+- **Revisit:** if a component type upgrade changes its schema
+  incompatibly, re-validate stored Deployments when the type changes.

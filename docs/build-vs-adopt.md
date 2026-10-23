@@ -32,6 +32,7 @@ Last updated: 2026-10-21.
 | CLI | `cmd/serendip`, a client of the API | Spec 021 |
 | Operation catalogue | `api/catalog`: one list of actions the CLI and MCP both build from, with a route parity test | Spec 021 |
 | Benchmark harness | `cmd/bench-edge1` | Spec 013 |
+| JSON Schema validation | `core/jsonschema`: the platform's schemas use 7 keywords. It's about 300 lines of stdlib, fails closed on anything else, and refuses unknown settings the platform would silently drop | Spec 020 T008 |
 
 ## Adopted (other projects, integrated)
 
@@ -69,6 +70,7 @@ Last updated: 2026-10-21.
 | Serendip issuing its own tokens | ThunderID | Building an identity provider | Spec 021 plan decision 1 |
 | `mark3labs/mcp-go` | The official MCP Go SDK | Community-maintained, no 2026-07-28 support when checked | ADR 0017 |
 | ThunderID's `act` claim (an actor token) to mark an AI | A dedicated exchange-only client, `serendip-mcp` | An actor token needs a confidential client, so a secret on disk | Spec 021 T001 |
+| A full JSON Schema library (e.g. `santhosh-tekuri/jsonschema`) | `core/jsonschema`, a small subset | A new dependency and ADR for keywords nothing uses; revisit if installed traits need `oneOf`, `if` or remote `$ref` | Spec 020 T008 |
 | OpenSearch and Prometheus as the edge-1 default | Optional package only (spec 023); a lighter backend for edge-1 later | Too heavy for a 16 GB T470 | Spec 020 |
 
 ## Open (decided later)

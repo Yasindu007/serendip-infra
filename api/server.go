@@ -239,6 +239,7 @@ type ServerOption func(*serverOptions)
 type serverOptions struct {
 	directory identity.Directory
 	runtime   reconcile.RuntimeProvider
+	schemas   reconcile.ConfigSchemaProvider
 	metadata  *ResourceMetadata
 	mcp       bool
 }
@@ -248,6 +249,13 @@ type serverOptions struct {
 // it they answer from the principals seen at sign-in.
 func WithDirectory(d identity.Directory) ServerOption {
 	return func(o *serverOptions) { o.directory = d }
+}
+
+// WithConfigSchemas lets Deployments' configuration be checked against
+// the platform's schemas, and serves them (spec 020). Without it,
+// configuration is refused (503) and the schema route answers 503.
+func WithConfigSchemas(s reconcile.ConfigSchemaProvider) ServerOption {
+	return func(o *serverOptions) { o.schemas = s }
 }
 
 // WithRuntime lets the runtime routes read what Deployments run as, live
@@ -284,7 +292,9 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 		deployments:     deployStore, envs: envStore, comps: compStore,
 		apps:     sqlite.NewStore[resource.ApplicationSpec, resource.ApplicationStatus](db, resource.KindApplication).SetBus(bus),
 		projects: projectStore,
+		schemas:  opts.schemas,
 	}).Register(apiMux)
+	(&SchemaHandler{comps: compStore, schemas: opts.schemas}).Register(apiMux)
 	NewRuntimeHandler(deployStore, envStore, opts.runtime).Register(apiMux)
 	// Capability's store is shared with RegistryHandler below (T019 gap
 	// fix -- specs/002-http-api/spec.md Scope-IN item 2, "get/set a

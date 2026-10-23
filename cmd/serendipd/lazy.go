@@ -300,3 +300,19 @@ func (l *lazyRuntime) Logs(ctx context.Context, d resource.Deployment, env resou
 	}
 	return p.Logs(ctx, d, env, opts)
 }
+
+// lazySchemas is the platform's ConfigSchemaProvider (spec 020), set with
+// lazyPlatform when the platform is ready.
+type lazySchemas struct {
+	lazy[reconcile.ConfigSchemaProvider]
+}
+
+var _ reconcile.ConfigSchemaProvider = (*lazySchemas)(nil)
+
+func (l *lazySchemas) ConfigSchemas(ctx context.Context, comp resource.Component) (reconcile.ConfigSchemas, error) {
+	p, err := l.get()
+	if err != nil {
+		return reconcile.ConfigSchemas{}, err
+	}
+	return p.ConfigSchemas(ctx, comp)
+}

@@ -1,0 +1,50 @@
+{
+  "$defs": {
+    "ResourceQuantity": {
+      "default": {},
+      "properties": {
+        "cpu": {
+          "default": "100m",
+          "type": "string"
+        },
+        "memory": {
+          "default": "256Mi",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ResourceRequirements": {
+      "default": {},
+      "properties": {
+        "limits": {
+          "$ref": "#/$defs/ResourceQuantity"
+        },
+        "requests": {
+          "$ref": "#/$defs/ResourceQuantity"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "imagePullPolicy": {
+      "default": "IfNotPresent",
+      "enum": [
+        "Always",
+        "IfNotPresent",
+        "Never"
+      ],
+      "type": "string"
+    },
+    "replicas": {
+      "default": 1,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "resources": {
+      "$ref": "#/$defs/ResourceRequirements"
+    }
+  },
+  "type": "object"
+}

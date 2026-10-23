@@ -192,7 +192,7 @@ T006's route rule.
   - **Checked live:** the log format and the previous-container 400.
     The full read path runs in T015.
 
-## T008 [P] — Configuration from schemas
+## T008 [P] — Configuration from schemas ✅ 2026-10-23
 
 - **Do:**
   - `ConfigSchema` for component types and traits.
@@ -204,6 +204,34 @@ T006's route rule.
   and tests.
 - **Verify:** `go test`. Table tests of valid and invalid values with
   the schema's messages, over T001's real sample schemas.
+- **Done as:**
+  - **`core/jsonschema`:**
+    - It checks `type`, `properties`, `required`, `additionalProperties`,
+      `enum`, the number, length and item limits, `pattern`, `items`, and
+      local `$ref`/`$defs`.
+    - It also reads OpenAPI 3.0's `nullable` and boolean
+      `exclusiveMinimum`/`exclusiveMaximum`.
+    - Annotations are ignored. Any other keyword, a mistyped keyword
+      value, a `null` schema, or a `$ref` outside `$defs`/`definitions`
+      makes the schema unsupported (fail closed). Such a schema is
+      refused with a 502.
+    - Unknown settings are refused where the schema lists `properties`,
+      because the platform would prune them.
+    - It's tested over serendip-service's real schema (`testdata/`).
+  - **`GET /v1/components/{id}/schemas`** (Component read) answers
+    `{environment, traits}`, read live from the component type.
+  - **Deployment writes** check `overrides.config` and
+    `overrides.traits` when they change.
+    - Problems are listed with their paths, for example
+      `overrides.config.replicas: must be at least 0`.
+    - A trait instance the Component doesn't have is refused.
+    - With no platform, or one not ready, a configuration change is a
+      503. Promotions and release changes go through, because they leave
+      the configuration as it is.
+  - **Component trait parameters:** Serendip's Components have no
+    trait instances yet (no ClusterTraits are installed, finding 7), so
+    the only forms are the per-environment configuration. A trait's
+    schema joins `traits` once a Component can carry one.
 
 ## T009 [P] — Topology and the platform view
 

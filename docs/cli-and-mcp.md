@@ -202,6 +202,7 @@ tools.
 | `serendip components delete <id>` | `components_delete` | `DELETE /v1/components/{id}` | Delete a Component. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
 | `serendip components get <id>` | `components_get` | `GET /v1/components/{id}` | Get one Component |
 | `serendip components list` | `components_list` | `GET /v1/components` | List components the caller may read |
+| `serendip components schemas <id>` | `components_schemas` | `GET /v1/components/{id}/schemas` | What can be configured on a Component, as JSON Schemas: its per-environment configuration (a Deployment's overrides.config) and each trait's |
 | `serendip components update <id>` | `components_update` | `PUT /v1/components/{id}` | Replace a Component's spec (send the version read, for a conflict check) |
 | `serendip deployments create` | `deployments_create` | `POST /v1/deployments` | Create a Deployment |
 | `serendip deployments delete <id>` | `deployments_delete` | `DELETE /v1/deployments/{id}` | Delete a Deployment. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |

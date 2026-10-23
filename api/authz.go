@@ -168,6 +168,8 @@ func routeTable() map[string]rule {
 		"POST /v1/approvals/{id}/approve": {action: approvalsAction("write"), target: targetApprovalDecide, kind: resource.KindApproval},
 		"POST /v1/approvals/{id}/reject":  {action: approvalsAction("write"), target: targetApprovalDecide, kind: resource.KindApproval},
 
+		// What a Component can be configured with (spec 020).
+		"GET /v1/components/{id}/schemas": {action: action(resource.KindComponent, "read"), target: targetResource, kind: resource.KindComponent},
 		// What a Deployment runs as, and its logs, read live (spec 020);
 		// logs are their own action, as they can hold sensitive data.
 		"GET /v1/deployments/{id}/runtime": {action: policy.Action{Name: policy.ActionComponentRuntimeRead}, target: targetResource, kind: resource.KindDeployment},

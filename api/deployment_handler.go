@@ -2,14 +2,20 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
+	"github.com/serendip-infra/serendip-infra/core/jsonschema"
 	"github.com/serendip-infra/serendip-infra/core/policy"
+	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 )
@@ -38,6 +44,9 @@ type DeploymentHandler struct {
 	comps       store.Store[resource.ComponentSpec, resource.ComponentStatus]
 	apps        store.Store[resource.ApplicationSpec, resource.ApplicationStatus]
 	projects    store.Store[resource.ProjectSpec, resource.ProjectStatus]
+	// schemas checks configuration overrides; nil when no application
+	// platform is configured.
+	schemas reconcile.ConfigSchemaProvider
 	// mu serialises Deployment writes, so two requests can't both pass
 	// the one-per-Environment check and both create (requests run
 	// concurrently; one control plane, so a mutex is enough).
@@ -145,6 +154,17 @@ func (h *DeploymentHandler) coherent(ctx context.Context, d resource.Deployment,
 	} else if err != nil {
 		return err
 	}
+	// Unchanged configuration isn't checked again, so promoting and
+	// changing releases work while the platform is away (RP-032).
+	same, err := overridesEqual(current, d.Spec.Overrides)
+	if err != nil {
+		return err
+	}
+	if !same {
+		if err := h.checkOverrides(ctx, comp, d.Spec.Overrides); err != nil {
+			return err
+		}
+	}
 	app, err := h.apps.Get(ctx, owner(comp.Metadata, resource.KindApplication))
 	if err != nil {
 		return deployRefuse(http.StatusBadRequest, "validation failed", "the Component's Application can't be read: %v", err)
@@ -176,6 +196,101 @@ func (h *DeploymentHandler) coherent(ctx context.Context, d resource.Deployment,
 		return nil
 	}
 	return resource.AdmitRelease(project.Spec.Pipeline, envID, d.Spec.Release, running, history)
+}
+
+// overridesEqual reports whether next configures what current (nil on
+// create) already does.
+func overridesEqual(current *resource.Deployment, next resource.DeploymentOverrides) (bool, error) {
+	if current == nil {
+		return false, nil
+	}
+	a := current.Spec.Overrides
+	ja, err := json.Marshal(struct{ C, T any }{a.Config, a.Traits})
+	if err != nil {
+		return false, fmt.Errorf("encode the stored configuration: %w", err)
+	}
+	jb, err := json.Marshal(struct{ C, T any }{next.Config, next.Traits})
+	if err != nil {
+		return false, fmt.Errorf("encode the configuration: %w", err)
+	}
+	return string(ja) == string(jb), nil
+}
+
+// checkOverrides validates configuration against the schemas the
+// Component's type publishes (spec 020 T008). Environment variables need
+// no schema. A schema that can't be read or checked refuses rather than
+// letting unchecked configuration through.
+func (h *DeploymentHandler) checkOverrides(ctx context.Context, comp resource.Component, o resource.DeploymentOverrides) error {
+	if len(o.Config) == 0 && len(o.Traits) == 0 {
+		return nil
+	}
+	if h.schemas == nil {
+		return deployRefuse(http.StatusServiceUnavailable, "service unavailable", "configuration can't be checked: no application platform is configured")
+	}
+	schemas, err := h.schemas.ConfigSchemas(ctx, comp)
+	if errors.Is(err, reconcile.ErrProviderNotReady) {
+		return deployRefuse(http.StatusServiceUnavailable, "service unavailable", "configuration can't be checked until the application platform is ready; retry shortly")
+	}
+	if err != nil {
+		return schemaFailure(ctx, "read configuration schemas", err)
+	}
+	var problems []string
+	check := func(prefix string, raw json.RawMessage, value map[string]any) error {
+		schema, err := jsonschema.Parse(raw)
+		if err != nil {
+			return schemaFailure(ctx, "the platform's schema for "+prefix, err)
+		}
+		v, err := toJSONValue(value)
+		if err != nil {
+			return fmt.Errorf("encode %s: %w", prefix, err)
+		}
+		for _, p := range schema.Validate(v) {
+			problems = append(problems, prefix+"."+p.String())
+		}
+		return nil
+	}
+	if len(o.Config) > 0 {
+		if len(schemas.Environment) == 0 {
+			problems = append(problems, "overrides.config: this Component's type takes no configuration")
+		} else if err := check("overrides.config", schemas.Environment, o.Config); err != nil {
+			return err
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(o.Traits)) {
+		raw, ok := schemas.Traits[name]
+		if !ok {
+			problems = append(problems, "overrides.traits."+name+": the Component has no trait instance "+name)
+			continue
+		}
+		if err := check("overrides.traits."+name, raw, o.Traits[name]); err != nil {
+			return err
+		}
+	}
+	if len(problems) > 0 {
+		return deployRefuse(http.StatusBadRequest, "validation failed", "%s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// schemaFailure refuses configuration whose schema couldn't be read or
+// checked: 502 with a fixed message, the cause logged for the operator.
+func schemaFailure(ctx context.Context, what string, err error) error {
+	log.Printf("api: %s (request %s): %v", what, audit.RequestIDFrom(ctx), err)
+	return deployRefuse(http.StatusBadGateway, "bad gateway", "the configuration couldn't be checked against the platform's schema; retry later, quoting the request ID")
+}
+
+// toJSONValue gives v the shape encoding/json decodes into (numbers as
+// float64), which is what the validator reads.
+func toJSONValue(v map[string]any) (any, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func cmpOr(a, b string) string {
@@ -371,4 +486,35 @@ func projectValidator(envs store.Store[resource.EnvironmentSpec, resource.Enviro
 		}
 		return nil
 	}
+}
+
+// SchemaHandler serves GET /v1/components/{id}/schemas: what can be
+// configured on a Component, as JSON Schemas read from the platform
+// (spec 020 T008), for forms. Read only; needs reading the Component.
+type SchemaHandler struct {
+	comps   store.Store[resource.ComponentSpec, resource.ComponentStatus]
+	schemas reconcile.ConfigSchemaProvider
+}
+
+func (h *SchemaHandler) Register(mux Mux) {
+	mux.HandleFunc("GET /v1/components/{id}/schemas", h.Get)
+}
+
+func (h *SchemaHandler) Get(w http.ResponseWriter, r *http.Request) {
+	reqID := audit.RequestIDFrom(r.Context())
+	comp, err := h.comps.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreErr(w, r, err)
+		return
+	}
+	if h.schemas == nil {
+		WriteProblem(w, http.StatusServiceUnavailable, "service unavailable", "no application platform is configured", reqID)
+		return
+	}
+	schemas, err := h.schemas.ConfigSchemas(r.Context(), comp)
+	if err != nil {
+		platformFailed(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, schemas)
 }
