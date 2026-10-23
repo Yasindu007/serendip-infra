@@ -17,12 +17,12 @@ Last updated: 2026-10-23
 ## Current phase
 
 **Spec 020 (OpenChoreo's portal features in Serendip's console): IN
-PROGRESS.** The plan was approved 2026-10-22. T001–T011 are done and
-committed, one commit each (`fd01e8c` … `f81d33f`, not pushed). Every
+PROGRESS.** The plan was approved 2026-10-22. T001–T012 are done and
+committed, one commit each (`fd01e8c` … `2dc7b7b`, not pushed). Every
 task's "Done as" note in `specs/020-openchoreo-console-features/tasks.md`
 records what was built and decided.
 
-**What exists now (server side, complete):**
+**What exists now (server side complete; the console through T012):**
 - **Environments, Azure-style:** a Project is the subscription and an
   Environment the resource group. Migration 0008 moved Applications up to
   their Project.
@@ -46,11 +46,21 @@ records what was built and decided.
   catalogue entries have no installer until 022 and 023.
 - **The CLI:** `serendip deployments logs <id> --follow` streams, with
   workload text escaped. `catalog.Param.CLIOnly` keeps `follow` off MCP.
-- **Records:** RP-028 to RP-033 were added. `docs/cli-and-mcp.md` is
+- **The console (T012):**
+  - **Component tabs:** Deploy (the pipeline; deploy, promote, roll
+    back, undeploy; Restart shown "not available yet") and Runtime
+    (objects, events, logs with follow and reconnect).
+  - **Builds and Observability** are greyed out from readiness, naming
+    the package.
+  - **Pages:** a Configure form generated from schemas, Application
+    Topology, Platform, and Packages.
+  - **New Applications** can choose their Project.
+  - **Gates:** 109 tests, 94.5 KiB gz.
+- **Records:** RP-028 to RP-034 were added (RP-034: the console can't
+  state a package's measured cost until the catalogue carries it). `docs/cli-and-mcp.md` is
   regenerated.
 
 **Next:**
-- **T012:** the console (screens for all of the above).
 - **T013:** acceptance tests.
 - **T014:** footprint.
 - **T015:** the real cluster run on `serendip-t018`, which still has the
