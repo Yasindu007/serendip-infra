@@ -241,6 +241,7 @@ type serverOptions struct {
 	runtime   reconcile.RuntimeProvider
 	schemas   reconcile.ConfigSchemaProvider
 	platform  reconcile.PlatformViewProvider
+	packages  reconcile.Catalogue
 	metadata  *ResourceMetadata
 	mcp       bool
 }
@@ -257,6 +258,14 @@ func WithDirectory(d identity.Directory) ServerOption {
 // configuration is refused (503) and the schema route answers 503.
 func WithConfigSchemas(s reconcile.ConfigSchemaProvider) ServerOption {
 	return func(o *serverOptions) { o.schemas = s }
+}
+
+// WithPackages offers the optional packages in c (spec 020): GET
+// /v1/packages lists them, and a ProviderInstance must name one of them,
+// one per capability. Without it, ProviderInstances stay unchecked
+// records nothing installs.
+func WithPackages(c reconcile.Catalogue) ServerOption {
+	return func(o *serverOptions) { o.packages = c }
 }
 
 // WithPlatformView serves GET /v1/platform from the application platform
@@ -318,7 +327,13 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 	capStore := sqlite.NewStore[resource.CapabilitySpec, resource.CapabilityStatus](db, resource.KindCapability).SetBus(bus)
 	NewResourceHandler[resource.CapabilitySpec, resource.CapabilityStatus](capStore, "capabilities").Register(apiMux)
 	mountResource[resource.ProviderSpec, resource.ProviderStatus](apiMux, db, bus, resource.KindProvider, "providers")
-	mountResource[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](apiMux, db, bus, resource.KindProviderInstance, "provider-instances")
+	instStore := sqlite.NewStore[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](db, resource.KindProviderInstance).SetBus(bus)
+	instances := NewResourceHandler[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](instStore, "provider-instances")
+	if opts.packages != nil {
+		instances.WithValidate(packageValidator(opts.packages, instStore))
+	}
+	instances.Register(apiMux)
+	(&PackageHandler{catalogue: opts.packages}).Register(apiMux)
 	mountResource[resource.IncidentSpec, resource.IncidentStatus](apiMux, db, bus, resource.KindIncident, "incidents")
 	mountResource[resource.AlertSpec, resource.AlertStatus](apiMux, db, bus, resource.KindAlert, "alerts")
 	mountResource[resource.VolumeSpec, resource.VolumeStatus](apiMux, db, bus, resource.KindVolume, "volumes")

@@ -238,6 +238,7 @@ tools.
 | `serendip organizations get <id>` | — | `GET /v1/organizations/{id}` | Get one Organization |
 | `serendip organizations list` | — | `GET /v1/organizations` | List organizations the caller may read |
 | `serendip organizations update <id>` | — | `PUT /v1/organizations/{id}` | Replace a Organization's spec (send the version read, for a conflict check) |
+| `serendip packages list` | `packages_list` | `GET /v1/packages` | The optional packages this server offers (builds, observability) and whether each is available. Install one by creating a ProviderInstance naming it |
 | `serendip platform` | `platform_get` | `GET /v1/platform` | The application platform, read-only: where workloads run, and the component types and traits installed with what each allows |
 | `serendip projects create` | — | `POST /v1/projects` | Create a Project |
 | `serendip projects delete <id>` | — | `DELETE /v1/projects/{id}` | Delete a Project. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |

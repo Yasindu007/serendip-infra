@@ -276,7 +276,7 @@ T006's route rule.
   - **Environments and the pipeline** come from their own routes. The
     console (T012) puts the platform page together.
 
-## T010 [P] — The package framework
+## T010 [P] — The package framework ✅ 2026-10-23
 
 - **Do:**
   - **A `ProviderInstance` reconciler:** install through the provider
@@ -292,7 +292,43 @@ T006's route rule.
   Approval, readiness states, and an agent's removal waiting for a
   person.
 - **Then:** `contract-guardian` and `go-reviewer` on T005–T010, then
-  commit.
+  commit. (Each task was reviewed and committed on its own.)
+- **Done as:**
+  - **A package** is a `ProviderInstance`: `capabilityId` is the
+    capability's name and `providerId` the package's provider name, with
+    no `environmentId` (platform-wide).
+  - **`core/reconcile`:** a `PackageInstaller` interface (idempotent
+    `Install` and `Uninstall`), a `Catalogue`, the
+    `ProviderInstanceReconciler` and the `UninstallCleanup` approval
+    clean-up. It reports readiness through a function, so it doesn't
+    import the registry.
+  - **The catalogue lives in `cmd/serendipd`,** because it names
+    products. It declares `openchoreo-workflow-plane` (build) and
+    `openchoreo-observability-plane` (observability), with no installer
+    yet. 022 and 023 add them on ADR 0010's Helm path.
+  - **Readiness** (`GET /v1/readiness`) shows `Unavailable`,
+    `NotInstalled`, `Installing`, `Ready` or `InstallFailed` per
+    optional capability.
+  - **The API:** `GET /v1/packages` lists the packages and whether each
+    is available. A ProviderInstance must name an offered, available
+    package, one per capability (400 otherwise). Install and remove need
+    `provider-instances` write and delete at `/`, so a Project's
+    Contributor can't. Removing goes through an Approval, and an agent's
+    waits for a person.
+  - **After review:**
+    - Only the oldest instance of a capability installs; others are
+      `Duplicate` and leave readiness alone.
+    - Which package an instance installs can't change.
+    - An invalid instance reports its capability invalid.
+    - On restart, an installed package reads `Installing` ("starting"),
+      not `NotInstalled`.
+    - Installer error text stays in the server log.
+    - The uninstall clean-up survives a damaged `LastSpec`, and doesn't
+      report `NotInstalled` while another instance provides the
+      capability.
+  - **A test package** (`core/reconcile/providerinstance_test.go`)
+    proves install to ready, failure, not ready, and uninstall.
+
 
 ## T011 — The CLI and MCP surfaces
 

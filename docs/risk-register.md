@@ -643,3 +643,18 @@ purpose), **Closed** (fixed).
   Deployment's Ready condition shows that.
 - **Revisit:** if a component type upgrade changes its schema
   incompatibly, re-validate stored Deployments when the type changes.
+
+## RP-033 — Two simultaneous package installs could both pass the one-per-capability check
+
+- **Kind:** correctness. **Status:** Accepted, 2026-10-23. **Found:**
+  spec 020 T010.
+- **What:** the API checks a capability has no package before storing a
+  new ProviderInstance. Two requests at the same moment could both pass,
+  leaving two packages for one capability. Their installs would compete.
+- **Why accepted:**
+  - Installing a package is an Owner's rare, deliberate act, made from
+    one console screen.
+  - A second instance is visible in the API and can be removed through
+    an Approval.
+- **Revisit:** with the first real package (spec 022). A store-level
+  unique constraint on capability would close it.

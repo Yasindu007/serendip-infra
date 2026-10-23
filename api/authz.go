@@ -171,6 +171,7 @@ func routeTable() map[string]rule {
 		// Declared dependencies and topology, and the platform (spec 020).
 		"GET /v1/components/{id}/dependencies": {action: action(resource.KindComponent, "read"), target: targetResource, kind: resource.KindComponent},
 		"GET /v1/applications/{id}/topology":   {action: action(resource.KindApplication, "read"), target: targetResource, kind: resource.KindApplication},
+		"GET /v1/packages":                     {action: action(resource.KindProviderInstance, "read"), target: targetRoot},
 		"GET /v1/platform":                     {action: policy.Action{Name: policy.ActionPlatformRead}, target: targetRoot},
 		// What a Component can be configured with (spec 020).
 		"GET /v1/components/{id}/schemas": {action: action(resource.KindComponent, "read"), target: targetResource, kind: resource.KindComponent},

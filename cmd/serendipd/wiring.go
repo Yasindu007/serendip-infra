@@ -41,6 +41,8 @@ type kubeWiring struct {
 	// cleaners are the platform's clean-ups for removed Deployments,
 	// Environments and Projects (spec 020), run by the approval reconciler.
 	cleaners map[resource.Kind]reconcile.CleanupFunc
+	// packages are the optional packages offered (spec 020).
+	packages reconcile.Catalogue
 	// runtime reads what Deployments run as, once the platform is ready.
 	runtime *lazyRuntime
 	// schemas checks configuration, once the platform is ready.
@@ -315,7 +317,9 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		resource.KindEnvironment: reconcile.EnvironmentCleanup(deployments),
 		resource.KindProject:     reconcile.PipelineCleanup(deployments),
 	}
-	return &kubeWiring{secretReconciler: secretReconciler, cleaners: cleaners, runtime: runtime, schemas: schemas, platformView: platformView, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject, issuer: issuer}, nil
+	packages := packageCatalogue()
+	cleaners[resource.KindProviderInstance] = registerPackages(db, bus, engine, registry, packages)
+	return &kubeWiring{secretReconciler: secretReconciler, cleaners: cleaners, packages: packages, runtime: runtime, schemas: schemas, platformView: platformView, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject, issuer: issuer}, nil
 }
 
 // ensureGatewayReady ensures the shared gateway and treats "not programmed
