@@ -53,10 +53,18 @@ export interface ComponentPort {
   expose?: boolean;
 }
 
+/** One call to another Component's port; env receives its address (spec 020). */
+export interface ComponentDependency {
+  component: string;
+  port: string;
+  env: string;
+}
+
 export interface ComponentSpec {
   image: string;
   ports?: ComponentPort[];
   env?: Record<string, string>;
+  dependencies?: ComponentDependency[];
 }
 
 export interface ComponentEndpoint {
@@ -248,3 +256,140 @@ export interface GraphRef {
 
 export type SecretSpec = { path: string };
 export type Secret = Resource<SecretSpec, BaseStatus>;
+
+// Environments and deployments (spec 020): a Project is the subscription
+// and an Environment the resource group a Component is deployed into.
+
+export interface PromotionPath {
+  from: string;
+  to: string[];
+}
+
+export interface Pipeline {
+  paths?: PromotionPath[];
+}
+
+export type Project = Resource<{ pipeline?: Pipeline }, BaseStatus>;
+
+export type AvailabilityLevel = "single-instance" | "ha";
+export type Environment = Resource<{ capabilityOverrides?: Record<string, string> }, BaseStatus & { availability?: AvailabilityLevel }>;
+
+/** What differs in one Environment for the same release. */
+export interface DeploymentOverrides {
+  env?: Record<string, string>;
+  config?: Record<string, unknown>;
+  traits?: Record<string, Record<string, unknown>>;
+}
+
+export interface DeploymentSpec {
+  component: string;
+  /** Empty means the Component's latest release. */
+  release?: string;
+  overrides?: DeploymentOverrides;
+}
+
+export interface DeploymentStatus extends BaseStatus {
+  release?: string;
+  endpoints?: ComponentEndpoint[];
+  /** Releases it ran before, newest first: what it may roll back to. */
+  history?: string[];
+}
+
+export type Deployment = Resource<DeploymentSpec, DeploymentStatus>;
+
+/** GET /v1/deployments/{id}/runtime */
+export interface RuntimeObject {
+  kind: string;
+  name: string;
+  /** Healthy, Progressing, Degraded, Suspended or Unknown. */
+  health: string;
+  message?: string;
+}
+
+/** GET /v1/deployments/{id}/events */
+export interface RuntimeEvent {
+  time: string;
+  type: string;
+  reason: string;
+  message: string;
+  objectKind: string;
+  objectName: string;
+  count?: number;
+}
+
+/** GET /v1/deployments/{id}/logs, and each line of ?follow=true. */
+export interface LogLine {
+  time: string;
+  instance: string;
+  line: string;
+}
+
+/** How a followed log stream ended on its own. */
+export type LogEnd = "idle" | "maxDuration" | "ended" | "error";
+
+/** A JSON Schema, as the platform publishes it. Only what the console reads is typed. */
+export interface JSONSchema {
+  type?: string | string[];
+  title?: string;
+  description?: string;
+  properties?: Record<string, JSONSchema>;
+  required?: string[];
+  enum?: unknown[];
+  default?: unknown;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  items?: JSONSchema;
+}
+
+/** GET /v1/components/{id}/schemas */
+export interface ConfigSchemas {
+  environment?: JSONSchema;
+  traits?: Record<string, JSONSchema>;
+}
+
+/** GET /v1/components/{id}/dependencies */
+export interface ComponentLink {
+  from: string;
+  to: string;
+  port: string;
+  env: string;
+}
+
+export interface DependenciesView {
+  calls: ComponentLink[];
+  calledBy: ComponentLink[];
+}
+
+/** GET /v1/applications/{id}/topology: declared, not live traffic. */
+export interface TopologyView {
+  components: Array<{ id: string; name: string; ports: ComponentPort[] }>;
+  dependencies: ComponentLink[];
+}
+
+/** GET /v1/platform */
+export interface PlatformComponent {
+  name: string;
+  description?: string;
+  parameters?: JSONSchema;
+  environment?: JSONSchema;
+  allowedTraits?: string[];
+}
+
+export interface PlatformView {
+  runtimes: Array<{ name: string; ready: boolean; message?: string }>;
+  componentTypes: PlatformComponent[];
+  traits: PlatformComponent[];
+}
+
+/** GET /v1/packages */
+export interface Package {
+  provider: string;
+  capability: string;
+  description: string;
+  available: boolean;
+}
+
+export type ProviderInstance = Resource<{ capabilityId?: string; providerId?: string; environmentId?: string }, BaseStatus>;

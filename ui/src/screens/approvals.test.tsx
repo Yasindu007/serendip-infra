@@ -146,7 +146,13 @@ describe("secrets", () => {
     goTo("/secrets/s1");
     mockFetch(
       { "/v1/session": { actor: "person:pat", method: "session" }, [perms("Secret/s1")]: owner, "/v1/secrets/s1": secret, "/v1/applications": [app] },
-      (_url, init) => (init.method === "DELETE" ? json(204, undefined, { "Serendip-Approval-Id": "ap7" }) : undefined),
+      // The approval page it lands on gets a real answer, not the default [].
+      (url, init) =>
+        init.method === "DELETE"
+          ? json(204, undefined, { "Serendip-Approval-Id": "ap7" })
+          : url === "/v1/approvals/ap7"
+            ? json(404, { title: "not found", status: 404 })
+            : undefined,
     );
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Delete secret" }));

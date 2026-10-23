@@ -1,14 +1,15 @@
 import { useState, type FormEvent } from "react";
 import { apiFetch, apiList, ApiError, isShown, NetworkError } from "../api/client";
-import type { Application, Component } from "../api/types";
+import { FormFailure } from "../components/RequestError";
+import type { Application, Component, Project } from "../api/types";
 import { ApiEquivalent } from "../components/ApiEquivalent";
 import { ConditionsTable, SafeLink } from "../components/Data";
 import { DeleteConfirm } from "../components/Delete";
 import { Guarded } from "../components/Guarded";
-import { TextField } from "../components/Field";
+import { SelectField, TextField } from "../components/Field";
 import { RequestError } from "../components/RequestError";
 import { PageHeader } from "../components/Shell";
-import { EmptyState, LoadingState, Notice } from "../components/States";
+import { EmptyState, LoadingState } from "../components/States";
 import { ReadyStatus } from "../components/Status";
 import { usePermissions } from "../hooks/usePermissions";
 import { usePoll, useNow } from "../hooks/usePoll";
@@ -80,8 +81,11 @@ export function NewApplication() {
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ApiError | NetworkError>();
+  // An application in a Project deploys through its Environments (spec 020).
+  const projects = usePoll((s) => apiList<Project>("/v1/projects", s), 60_000, "new-app-projects");
+  const [project, setProject] = useState("");
   const nameError = touched ? dnsLabelError(name, "name") : undefined;
-  const body = { metadata: { name }, spec: {} };
+  const body = { metadata: project ? { name, ownerRefs: [{ kind: "Project", id: project }] } : { name }, spec: {} };
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -113,6 +117,16 @@ export function NewApplication() {
           {...(nameError ? { error: nameError } : {})}
           required
         />
+        {(projects.data?.length ?? 0) > 0 && (
+          <SelectField
+            id="app-project"
+            label="Project"
+            hint="Its components deploy to the Project's Environments, along its pipeline."
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            options={[{ value: "", label: "None" }, ...projects.data!.map((p) => ({ value: p.metadata.id, label: p.metadata.name }))]}
+          />
+        )}
         {failure && <FormFailure error={failure} />}
         <div className="form-actions">
           <button className="button button--primary" type="submit" disabled={busy}>
@@ -125,26 +139,6 @@ export function NewApplication() {
         <ApiEquivalent request={{ method: "POST", path: "/v1/applications", body }} />
       </form>
     </>
-  );
-}
-
-export function FormFailure({ error }: { error: ApiError | NetworkError }) {
-  if (error instanceof NetworkError) return <Notice tone="danger">{error.message} Nothing was saved; try again.</Notice>;
-  const detail =
-    error.status === 409
-      ? "Someone changed this since you opened it. Reload the page to see their change, then edit again."
-      : error.status === 413
-        ? "That's more data than Serendip accepts in one request (1 MiB)."
-        : (error.detail ?? error.title);
-  return (
-    <Notice tone="danger">
-      <p>{detail}</p>
-      {error.requestId && (
-        <p className="request-id">
-          Request ID <span className="mono">{error.requestId}</span>
-        </p>
-      )}
-    </Notice>
   );
 }
 
@@ -178,6 +172,9 @@ export function ApplicationDetail({ id }: { id: string }) {
           <>
             <Link className="button" to={accessPath(scope)}>
               Access control (IAM)
+            </Link>
+            <Link className="button" to={`/applications/${encodeURIComponent(id)}/topology`}>
+              Topology
             </Link>
             <Link className="button" to={`/secrets?owner=${encodeURIComponent(id)}`}>
               Secrets

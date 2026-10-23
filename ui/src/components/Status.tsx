@@ -27,7 +27,7 @@ export function StatusText({ kind, children }: { kind: StatusKind; children: str
 
 // Reasons the reconcilers set (core/reconcile/application.go). Anything else
 // is shown as-is with an "unknown" treatment rather than guessed at.
-const progressReasons = new Set(["Progressing", "Pending", "WaitingForApplication", "ProviderNotReady"]);
+const progressReasons = new Set(["Progressing", "Pending", "WaitingForApplication", "WaitingForComponent", "ProviderNotReady"]);
 const errorReasons = new Set(["DeployFailed", "Unsupported", "InvalidSpec", "EnsureFailed", "RouteRejected"]);
 
 export function conditionKind(c: Condition | undefined): StatusKind {

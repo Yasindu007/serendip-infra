@@ -60,6 +60,13 @@ const pairs = [
   ["focus", "surface-page", 3],
   ["focus", "surface-raised", 3],
   ["ok-mark", "surface-raised", 3],
+  // Greyed-out sections and the log view sit on the sunken surface (spec 020).
+  ["text-muted", "surface-sunken", 4.5],
+  ["accent", "surface-sunken", 4.5],
+  ["ok", "surface-sunken", 4.5],
+  ["progress", "surface-sunken", 4.5],
+  ["danger", "surface-sunken", 4.5],
+  ["unknown", "surface-sunken", 4.5],
 ];
 
 let failed = 0;

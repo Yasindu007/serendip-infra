@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 /**
  * Guarded shows an action the caller may take, or the same action disabled
@@ -8,8 +8,10 @@ import type { ReactNode } from "react";
  * a refused click.
  */
 export function Guarded({ allowed, label, reason, children }: { allowed: boolean | undefined; label: string; reason: string; children: ReactNode }) {
+  // The same action can appear more than once on a page (one per
+  // Environment), so the reason's ID is unique per instance.
+  const id = useId();
   if (allowed) return <>{children}</>;
-  const id = `guard-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <span className="guarded">
       <button type="button" className="button" disabled aria-describedby={id}>

@@ -658,3 +658,39 @@ purpose), **Closed** (fixed).
     an Approval.
 - **Revisit:** with the first real package (spec 022). A store-level
   unique constraint on capability would close it.
+
+## RP-034 — The console can't state a package's measured cost yet; follows reconnect; the Deploy tab lists every Deployment
+
+- **Kind:** honesty and performance. **Status:** Accepted, 2026-10-23.
+  **Found:** spec 020 T012.
+- **What:**
+  - **Package cost.** Spec 020 asks the console to say what a package
+    costs before it's installed. `GET /v1/packages` carries no measured
+    memory or CPU, and neither package has an installer yet, so the
+    Packages page reads "Not measured yet: it can't be installed in this
+    version". The observability package's description says it's heavy
+    on a 16 GB machine. An available package without a stated cost reads
+    "Not stated by this server", never a guessed number.
+  - **Log following reconnects.** The server ends a followed stream
+    after 10 minutes (RP-031). The console reconnects on its own, asking
+    only for lines since the last one, so a follow lasts until the
+    person stops it or leaves the page. It keeps running while the tab
+    is hidden. Each reconnect is authorised again, so a removed role
+    takes effect within 10 minutes.
+  - **The Deploy and Runtime tabs** read `GET /v1/deployments` every 5
+    seconds and keep the Component's own. The API has no filter by
+    Component.
+- **Why accepted:**
+  - No package can be installed in this build, so no one is asked to
+    decide without a number.
+  - A follow is one of the person's 3 streams, and they started it.
+  - Deployments number a few per Component on the target machines, and
+    the list is filtered by what the caller may read.
+- **Revisit:**
+  - **Cost:** before spec 022 or 023 ships an installer, the catalogue
+    must carry the measured idle memory and CPU, and the Packages page
+    must show them.
+  - **Follow:** stop following when the tab is hidden, if streams turn
+    out to be held open for hours.
+  - **Listing:** add a `component` filter to `GET /v1/deployments` if
+    the list grows large.

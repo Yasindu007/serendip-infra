@@ -1,5 +1,5 @@
 import { apiFetch, apiList } from "../api/client";
-import type { NodeResource, Readiness } from "../api/types";
+import type { CapabilityReadiness, NodeResource, Readiness } from "../api/types";
 import { RequestError } from "../components/RequestError";
 import { PageHeader } from "../components/Shell";
 import { EmptyState, LoadingState } from "../components/States";
@@ -7,6 +7,7 @@ import { StatusText } from "../components/Status";
 import { usePoll, useNow } from "../hooks/usePoll";
 import { accessPath } from "../lib/permissions";
 import { Link } from "../lib/router";
+import { availability, availabilityWords } from "../lib/health";
 import { formatAge } from "../lib/time";
 import { nodeCountSentence } from "../lib/topology";
 import { UpdatedLine } from "./common";
@@ -64,7 +65,7 @@ export function Overview() {
                   <tr key={name}>
                     <td>{name}</td>
                     <td>
-                      <StatusText kind={r.ready ? "ok" : r.reason === "SetupFailed" ? "error" : "progress"}>{r.ready ? "Ready" : "Not ready"}</StatusText>
+                      <CapabilityStatus r={r} />
                     </td>
                     <td className="mono">{r.reason}</td>
                     <td>{r.message ?? ""}</td>
@@ -82,4 +83,16 @@ export function Overview() {
       </section>
     </>
   );
+}
+
+// Optional capabilities (packages, spec 020) report why they aren't ready
+// in their own words: not installed isn't "in progress".
+const packageReasons = new Set(["NotInstalled", "Installing", "InstallFailed", "Unavailable"]);
+
+function CapabilityStatus({ r }: { r: CapabilityReadiness }) {
+  if (!r.ready && packageReasons.has(r.reason)) {
+    const { kind, word } = availabilityWords[availability(r)];
+    return <StatusText kind={kind}>{word}</StatusText>;
+  }
+  return <StatusText kind={r.ready ? "ok" : r.reason === "SetupFailed" ? "error" : "progress"}>{r.ready ? "Ready" : "Not ready"}</StatusText>;
 }

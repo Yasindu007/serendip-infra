@@ -357,7 +357,7 @@ T006's route rule.
   - **`docs/cli-and-mcp.md`** gains a Logs section, and the tables are
     regenerated.
 
-## T012 — The console
+## T012 — The console ✅ 2026-10-23
 
 Spec 020 authorises the UI work.
 
@@ -377,6 +377,72 @@ Spec 020 authorises the UI work.
 - **Files:** `ui/src/...` and tests.
 - **Verify:** `pnpm test`, `pnpm build`, and the size, contrast and
   design checks.
+- **Done as:**
+  - **The Component page has tabs** (`?tab=`, so each can be linked):
+    Overview, Deploy, Runtime, Builds and Observability. The Overview
+    gains the declared dependencies (calls and called by) and a link to
+    the topology.
+  - **Deploy:** the Project's pipeline in order, each Environment's
+    state, running release, a release it's moving to, overrides and
+    endpoints.
+    - **Deploy** only where new releases enter (anywhere without a
+      pipeline). **Promote** to each next Environment, checked against
+      write there. **Roll back** to a release from `status.history`
+      (a `PUT`). **Undeploy** through `DeleteConfirm` and an Approval.
+    - **Restart** is shown disabled, "not available yet" (deferred in
+      T006).
+    - An Application outside a Project says it has nowhere to deploy.
+      Creating an Application can now choose its Project.
+  - **Configure** (`…/deployments/{id}/configure`): environment
+    variables, plus the settings and each trait's, as a form generated
+    from `GET /v1/components/{id}/schemas`.
+    - Stored keys the schema doesn't describe are kept.
+    - If the schemas can't be read, only variables can change, and the
+      rest is sent back unchanged (RP-032).
+  - **Runtime:** objects with their health, events, and logs.
+    - Logs need the Log Reader permission. Without it, the console says
+      so and never asks.
+    - **Follow** streams NDJSON through `fetch` (`apiStream`). The
+      timeout covers only the wait for headers. It explains how a
+      stream ended, and reconnects after the 10-minute maximum without
+      repeating lines.
+  - **Topology** (`/applications/{id}/topology`): a drawn diagram, plus
+    the same calls as a table. It says it shows declared calls, not
+    traffic.
+  - **Platform** (`/platform`): where workloads run, the component types
+    and traits with their settings, and each Project's Environments with
+    where each promotes to.
+  - **Packages** (`/packages`): each package's state, description and
+    cost, with install (`POST /v1/provider-instances`) and removal
+    through an Approval, which warns that stored data is deleted.
+    - The API states no measured cost, and neither package can be
+      installed yet, so cost reads "not measured yet" (RP-034). Before
+      022 or 023 ships an installer, the catalogue must carry the
+      numbers.
+  - **Greyed out:** `AvailabilityGate` shows Builds, Observability and
+    the topology's live traffic as not available yet, not installed,
+    installing or not ready, from `GET /v1/readiness`, naming the
+    package. The Overview's capability table uses the same words.
+  - **New shared components,** documented in `ui/DESIGN.md`: `Tabs`,
+    `EnvironmentPipeline`, `ActionConfirm`, `SchemaForm`,
+    `TextAreaField`, `LogView`, `TopologyDiagram` and
+    `AvailabilityGate`.
+    - `FormFailure` moved to `components/`.
+    - `Guarded` uses `useId`, since one page now repeats an action per
+      Environment.
+    - `DeleteConfirm` takes a noun and a note.
+  - **Tests:** 27 new (`src/lib/platform.test.ts` and
+    `src/screens/platform.test.tsx`), 109 in all.
+    - **Fixed on the way:** a test (`approvals.test.tsx`) left an
+      unhandled error that made `pnpm test` exit 1 on `main`.
+  - **Checked:**
+    - JS is 94.5 KiB gz of the 160 KiB budget.
+    - Contrast passes in both themes. Six pairs on the sunken surface
+      were added for the greyed-out sections and logs.
+    - No raw HTML and no inline styles. Log text is shown as text.
+  - **Not done here:** editing dependencies in the console (declared
+    through the API and CLI). It isn't in T012's list.
+  - **Seen live in T015,** with a browser against `serendip-t018`.
 
 ## T013 [A] — Acceptance tests
 

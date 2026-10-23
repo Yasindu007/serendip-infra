@@ -10,7 +10,7 @@ import { usePermissions } from "../hooks/usePermissions";
 import { usePoll, useNow } from "../hooks/usePoll";
 import { assignRoles, removeRoles, scopeParam } from "../lib/permissions";
 import { formatAge } from "../lib/time";
-import { FormFailure } from "./Applications";
+import { FormFailure } from "../components/RequestError";
 import { UpdatedLine } from "./common";
 
 const principalTypes: Array<{ value: PrincipalType; label: string }> = [

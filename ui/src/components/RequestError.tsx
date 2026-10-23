@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { ApiError, NetworkError } from "../api/client";
-import { ErrorState } from "./States";
+import { ErrorState, Notice } from "./States";
 
 /**
  * RequestError turns a failed request into what happened and what to do
@@ -24,6 +24,27 @@ export function RequestError({ error, what, action }: { error: ApiError | Networ
     default:
       return <ErrorState title={`Couldn't load ${what}`} detail={error.detail ?? capitalise(error.title)} {...common} />;
   }
+}
+
+/** Why a form or an action failed, inside the form: nothing was saved. */
+export function FormFailure({ error }: { error: ApiError | NetworkError }) {
+  if (error instanceof NetworkError) return <Notice tone="danger">{error.message} Nothing was saved; try again.</Notice>;
+  const detail =
+    error.status === 409
+      ? "Someone changed this since you opened it. Reload the page to see their change, then edit again."
+      : error.status === 413
+        ? "That's more data than Serendip accepts in one request (1 MiB)."
+        : (error.detail ?? error.title);
+  return (
+    <Notice tone="danger">
+      <p>{detail}</p>
+      {error.requestId && (
+        <p className="request-id">
+          Request ID <span className="mono">{error.requestId}</span>
+        </p>
+      )}
+    </Notice>
+  );
 }
 
 function capitalise(s: string) {

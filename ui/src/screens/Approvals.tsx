@@ -15,7 +15,7 @@ import { usePoll, useNow } from "../hooks/usePoll";
 import { action } from "../lib/permissions";
 import { Link } from "../lib/router";
 import { formatAge } from "../lib/time";
-import { FormFailure } from "./Applications";
+import { FormFailure } from "../components/RequestError";
 import { UpdatedLine } from "./common";
 
 // Approvals (spec 019): every destructive action's record. Policy approves

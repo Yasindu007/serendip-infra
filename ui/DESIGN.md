@@ -53,20 +53,34 @@ plus a word in the state colour:
 | Kind | Icon | Used for |
 |---|---|---|
 | `ok` | check | Condition `True` |
-| `progress` | spinning arc | `Progressing`, `Pending`, `WaitingForApplication`, `ProviderNotReady` |
+| `progress` | spinning arc | `Progressing`, `Pending`, `WaitingForApplication`, `WaitingForComponent`, `ProviderNotReady` |
 | `warn` | triangle | `False` with an unrecognised reason |
 | `error` | circled x | `DeployFailed`, `Unsupported`, `InvalidSpec`, `EnsureFailed`, `RouteRejected` |
 | `unknown` | circled i | no Condition yet, or `Unknown` |
 
-The reasons come from `core/reconcile/application.go`. A new reason is
-shown as `warn` with its real text until it's added here; it's never
-guessed at.
+The reasons come from `core/reconcile/application.go` and
+`deployment.go`. A new reason is shown as `warn` with its real text until
+it's added here; it's never guessed at.
+
+Two other vocabularies map onto the same five (`src/lib/health.ts`):
+
+- **A runtime object's health** (spec 020): `Healthy` is `ok`,
+  `Progressing` is `progress`, `Degraded` is `error`, `Unknown` is
+  `unknown`, and anything else (`Suspended`) is `warn`, with the
+  platform's word shown.
+- **An optional package's availability**, from `GET /v1/readiness`:
+  `Ready` (`ok`), `Installing` (`progress`), "Not ready" for
+  `InstallFailed` or any other reason (`error`), "Not installed"
+  (`unknown`), and "Not available yet" for `Unavailable` or a capability
+  the server doesn't report (`unknown`). Installed but not ready never
+  reads "not available".
 
 ## Components (`src/components/`)
 
 | Component | Purpose |
 |---|---|
-| `Shell` | The rail (Overview, Applications, Secrets, Approvals with how many wait for a decision; Volumes labelled "not available yet"), skip link, signed-in person, sign-out, and the banner slot. |
+| `Shell` | The rail (Overview, Applications, Secrets, Approvals with how many wait for a decision, Platform, Packages; Volumes labelled "not available yet"), skip link, signed-in person, sign-out, and the banner slot. |
+| `Tabs` | Sections of one page as links (`?tab=`), the current one marked `aria-current="page"`, so a tab can be bookmarked and opened in a new tab. |
 | `PageHeader` | Breadcrumb, title, status, actions, and a meta line ("Updated 12 seconds ago"). |
 | `StatusText`, `ReadyStatus` | The status vocabulary above. |
 | `ReconciliationPath` | The signature element. Stages come from real Conditions only, and each stage's state is spoken to screen readers. |
@@ -76,6 +90,13 @@ guessed at.
 | `ApiEquivalent` | The request a screen sends (method, path, JSON body), never headers or credentials. On every form and detail page. |
 | `TextField` | Label, hint and error tied to one input with `aria-describedby`. |
 | `SelectField` | `TextField` for a fixed set of choices. |
+| `TextAreaField` | `TextField` for multi-line monospace text, such as a JSON value. |
+| `SchemaForm` | Fields generated from a platform JSON Schema (spec 020): text, numbers, booleans and enums as fields, nested objects as fieldsets, anything else as JSON. Optional fields say so, and "Not set" leaves the platform's default. The server checks the values again. |
+| `ActionConfirm` | Asks before a change that isn't a delete (deploy, promote, roll back, install): what it does, the exact request, and the failure inline. |
+| `EnvironmentPipeline` | A Project's Environments in the order releases move through them, each a panel with its state, what runs there and its actions, and where it promotes to in words. |
+| `LogView` | Workload log lines as plain text in a scrolling box (`role="log"`), time and instance muted. While following it keeps the newest line in view unless the person scrolled up. |
+| `TopologyDiagram` | An Application's declared calls drawn as boxes and arrows, callers left of callees. It's a picture (`role="img"`) of a table on the same page, which carries the facts for screen readers. Declared, never presented as observed traffic. |
+| `AvailabilityGate` | A feature that needs an optional package: the feature once ready, otherwise the section greyed out (sunken surface, muted text) with the package's state, why, and the package's name. Nothing is mocked in its place. |
 | `DeleteConfirm` | Asks before a delete (spec 019): what it removes (`BlastRadius`, walked from the graph for a cascade), a note when Secrets' values will be erased, and the DELETE request. The server records the delete as an Approval; the screen then opens it. |
 | `BlastRadius` | What an action removes: kind, name and ID, the target first. Used before a delete and on an approval. |
 | `Guarded` | An action the caller may take, or the same action disabled with the reason beneath (spec 017). Disabled while the caller's permissions are still loading, never offered on a guess. |

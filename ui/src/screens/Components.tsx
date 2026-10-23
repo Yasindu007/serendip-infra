@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { apiFetch, ApiError, isShown, NetworkError } from "../api/client";
-import type { Application, Component } from "../api/types";
+import { apiFetch, apiList, ApiError, isShown, NetworkError } from "../api/client";
+import type { Application, Component, DependenciesView } from "../api/types";
+import { Tabs } from "../components/Tabs";
+import { DeployTab } from "./Deploy";
+import { BuildsTab, ObservabilityTab, RuntimeTab } from "./Runtime";
 import { ApiEquivalent, type ApiRequest } from "../components/ApiEquivalent";
 import { ConditionsTable, KeyValueList, SafeLink } from "../components/Data";
 import { DeleteConfirm } from "../components/Delete";
@@ -18,13 +21,21 @@ import { accessPath, action } from "../lib/permissions";
 import { fromSpec, toSpec, validate, type ComponentFormState, type FormErrors } from "../lib/componentForm";
 import { Link, navigate } from "../lib/router";
 import { componentStages, exposedPorts } from "../lib/stages";
-import { FormFailure } from "./Applications";
+import { FormFailure } from "../components/RequestError";
 import { UpdatedLine } from "./common";
 
 const appPath = (id: string) => `/applications/${encodeURIComponent(id)}`;
 const compPath = (appId: string, id: string) => `${appPath(appId)}/components/${encodeURIComponent(id)}`;
 
-export function ComponentDetail({ appId, id }: { appId: string; id: string }) {
+const tabs = [
+  { id: "overview", label: "Overview" },
+  { id: "deploy", label: "Deploy" },
+  { id: "runtime", label: "Runtime" },
+  { id: "builds", label: "Builds" },
+  { id: "observability", label: "Observability" },
+];
+
+export function ComponentDetail({ appId, id, tab = "overview" }: { appId: string; id: string; tab?: string }) {
   const now = useNow();
   const comp = usePoll((s) => apiFetch<Component>("GET", `/v1/components/${encodeURIComponent(id)}`, undefined, s), 5_000, `comp-${id}`);
   const app = usePoll((s) => apiFetch<Application>("GET", `/v1/applications/${encodeURIComponent(appId)}`, undefined, s), 5_000, `comp-app-${appId}`);
@@ -90,53 +101,111 @@ export function ComponentDetail({ appId, id }: { appId: string; id: string }) {
         />
       )}
 
-      <section className="section panel" aria-labelledby="comp-path">
-        <h2 id="comp-path" className="section-title">
-          Reconciliation
-        </h2>
-        <ReconciliationPath label="Reconciliation stages" stages={componentStages(c, app.data)} />
-      </section>
+      <Tabs label="Component sections" base={compPath(appId, id)} current={tabs.some((t) => t.id === tab) ? tab : "overview"} tabs={tabs} />
 
-      <div className="section-row">
-        <section className="section" aria-labelledby="comp-config">
-          <h2 id="comp-config" className="section-title">
-            Configuration
-          </h2>
-          <KeyValueList
-            items={[
-              [
-                "Image",
-                <span className="mono" translate="no">
-                  {c.spec.image}
-                </span>,
-              ],
-              ...ports.map((p): [string, React.ReactNode] => [`Port ${p.name}`, `${p.port}, ${p.expose ? "exposed" : "inside the cluster only"}`]),
-              ["Environment", env.length === 0 ? "None" : `${env.length} variable${env.length === 1 ? "" : "s"}`],
-              ...(c.status.endpoints ?? []).map((e): [string, React.ReactNode] => [`Endpoint ${e.name}`, <SafeLink href={e.url} />]),
-            ]}
-          />
-          {exposedPorts(c).length > 0 && !endpoint && <p className="field-hint">An endpoint appears here once it's actually serving.</p>}
-        </section>
+      {tab === "deploy" && app.data && <DeployTab app={app.data} comp={c} />}
+      {tab === "runtime" && app.data && <RuntimeTab app={app.data} comp={c} />}
+      {tab === "builds" && <BuildsTab />}
+      {tab === "observability" && <ObservabilityTab />}
+      {(tab === "deploy" || tab === "runtime") && !app.data && (app.error ? <RequestError error={app.error} what="application" /> : <LoadingState what="the application" />)}
+      {!tabs.slice(1).some((t) => t.id === tab) && (
+        <>
+          <section className="section panel" aria-labelledby="comp-path">
+            <h2 id="comp-path" className="section-title">
+              Reconciliation
+            </h2>
+            <ReconciliationPath label="Reconciliation stages" stages={componentStages(c, app.data)} />
+          </section>
 
-        <section className="section" aria-labelledby="comp-conditions">
-          <h2 id="comp-conditions" className="section-title">
-            Conditions
-          </h2>
-          <ConditionsTable conditions={c.status.conditions} now={now} />
-        </section>
-      </div>
+          <div className="section-row">
+            <section className="section" aria-labelledby="comp-config">
+              <h2 id="comp-config" className="section-title">
+                Configuration
+              </h2>
+              <KeyValueList
+                items={[
+                  [
+                    "Image",
+                    <span className="mono" translate="no">
+                      {c.spec.image}
+                    </span>,
+                  ],
+                  ...ports.map((p): [string, React.ReactNode] => [`Port ${p.name}`, `${p.port}, ${p.expose ? "exposed" : "inside the cluster only"}`]),
+                  ["Environment", env.length === 0 ? "None" : `${env.length} variable${env.length === 1 ? "" : "s"}`],
+                  ...(c.status.endpoints ?? []).map((e): [string, React.ReactNode] => [`Endpoint ${e.name}`, <SafeLink href={e.url} />]),
+                ]}
+              />
+              {exposedPorts(c).length > 0 && !endpoint && <p className="field-hint">An endpoint appears here once it's actually serving.</p>}
+            </section>
 
-      {(c.metadata.relationships?.length ?? 0) > 0 && (
-        <section className="section" aria-labelledby="comp-rel">
-          <h2 id="comp-rel" className="section-title">
-            Relationships
-          </h2>
-          <KeyValueList items={(c.metadata.relationships ?? []).map((r): [string, React.ReactNode] => [r.type, <span className="mono">{`${r.targetKind} ${r.targetId}`}</span>])} />
-        </section>
+            <section className="section" aria-labelledby="comp-conditions">
+              <h2 id="comp-conditions" className="section-title">
+                Conditions
+              </h2>
+              <ConditionsTable conditions={c.status.conditions} now={now} />
+            </section>
+          </div>
+
+          {(c.metadata.relationships?.length ?? 0) > 0 && (
+            <section className="section" aria-labelledby="comp-rel">
+              <h2 id="comp-rel" className="section-title">
+                Relationships
+              </h2>
+              <KeyValueList items={(c.metadata.relationships ?? []).map((r): [string, React.ReactNode] => [r.type, <span className="mono">{`${r.targetKind} ${r.targetId}`}</span>])} />
+            </section>
+          )}
+
+          <Dependencies appId={appId} id={id} />
+
+          <ApiEquivalent request={{ method: "GET", path: `/v1/components/${id}` }} />
+        </>
       )}
-
-      <ApiEquivalent request={{ method: "GET", path: `/v1/components/${id}` }} />
     </>
+  );
+}
+
+/** What a Component calls, and what in its Application calls it: declared, not observed. */
+function Dependencies({ appId, id }: { appId: string; id: string }) {
+  const deps = usePoll(
+    (s) =>
+      apiFetch<Partial<DependenciesView>>("GET", `/v1/components/${encodeURIComponent(id)}/dependencies`, undefined, s).then((v): DependenciesView => ({
+        calls: v?.calls ?? [],
+        calledBy: v?.calledBy ?? [],
+      })),
+    15_000,
+    `deps-${id}`,
+  );
+  const comps = usePoll((s) => apiList<Component>(`/v1/components?ownerId=${encodeURIComponent(appId)}`, s), 15_000, `deps-comps-${appId}`);
+  const name = (cid: string) => comps.data?.find((c) => c.metadata.id === cid)?.metadata.name ?? cid;
+  const link = (cid: string) => <Link to={compPath(appId, cid)}>{name(cid)}</Link>;
+  return (
+    <section className="section" aria-labelledby="comp-deps">
+      <h2 id="comp-deps" className="section-title">
+        Dependencies
+      </h2>
+      {deps.error ? (
+        <RequestError error={deps.error} what="dependencies" />
+      ) : !deps.data ? (
+        <LoadingState what="dependencies" />
+      ) : deps.data.calls.length === 0 && deps.data.calledBy.length === 0 ? (
+        <p className="state-body">This component declares no calls to others in its application, and none declare calls to it.</p>
+      ) : (
+        <KeyValueList
+          items={[
+            ...deps.data.calls.map((l): [string, React.ReactNode] => [
+              `Calls ${name(l.to)}`,
+              <>
+                {link(l.to)} on port {l.port}, address in <span className="mono">{l.env}</span>
+              </>,
+            ]),
+            ...deps.data.calledBy.map((l): [string, React.ReactNode] => [`Called by ${name(l.from)}`, <>{link(l.from)} on port {l.port}</>]),
+          ]}
+        />
+      )}
+      <p>
+        <Link to={`${appPath(appId)}/topology`}>See the application's topology</Link>
+      </p>
+    </section>
   );
 }
 

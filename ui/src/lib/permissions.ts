@@ -33,11 +33,19 @@ const paths: Record<string, string> = {
   Application: "applications",
   Component: "components",
   Secret: "secrets",
+  Project: "projects",
+  Environment: "environments",
+  Deployment: "deployments",
+  ProviderInstance: "provider-instances",
 };
 
 export function action(kind: string, verb: "read" | "write" | "delete"): string {
   return `serendip/${paths[kind] ?? kind.toLowerCase()}/${verb}`;
 }
+
+export const readRuntime = "serendip/components/runtime/read";
+export const readLogs = "serendip/components/logs/read";
+export const readPlatform = "serendip/platform/read";
 
 export const assignRoles = "serendip/authorization/roleAssignments/write";
 export const removeRoles = "serendip/authorization/roleAssignments/delete";

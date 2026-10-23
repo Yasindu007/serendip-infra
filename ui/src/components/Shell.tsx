@@ -7,6 +7,8 @@ const nav: Array<{ label: string; to?: string }> = [
   { label: "Applications", to: "/applications" },
   { label: "Secrets", to: "/secrets" },
   { label: "Approvals", to: "/approvals" },
+  { label: "Platform", to: "/platform" },
+  { label: "Packages", to: "/packages" },
   // Shown so the shape of the product is honest, never as a working link
   // (constitution 6, spec 016 "labelled, not mocked").
   { label: "Volumes" },

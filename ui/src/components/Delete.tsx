@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { apiDelete, apiFetch, ApiError, isShown, type NetworkError } from "../api/client";
 import type { ApprovalRef, GraphRef, Metadata } from "../api/types";
 import { ApiEquivalent } from "./ApiEquivalent";
@@ -15,6 +15,8 @@ const kindPaths: Record<string, string> = {
   Component: "components",
   Secret: "secrets",
   Volume: "volumes",
+  Deployment: "deployments",
+  ProviderInstance: "provider-instances",
 };
 
 export const resourcePath = (kind: string, id: string) => `/v1/${kindPaths[kind] ?? kind.toLowerCase()}/${encodeURIComponent(id)}`;
@@ -95,11 +97,17 @@ function useRemoved(target: ApprovalRef, cascade: boolean): { refs?: ApprovalRef
 export function DeleteConfirm({
   target,
   cascade,
+  noun = target.kind.toLowerCase(),
+  note,
   onDeleted,
   onCancel,
 }: {
   target: ApprovalRef;
   cascade: boolean;
+  /** What to call it, when its kind isn't a plain word ("package"). */
+  noun?: string;
+  /** What else the delete takes with it, such as stored data. */
+  note?: ReactNode;
   onDeleted: (approvalId: string | undefined) => void;
   onCancel: () => void;
 }) {
@@ -107,7 +115,6 @@ export function DeleteConfirm({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ApiError | NetworkError>();
   const path = resourcePath(target.kind, target.id) + (cascade ? "?cascade=true" : "");
-  const noun = target.kind.toLowerCase();
   const secrets = (removed.refs ?? []).filter((r) => r.kind === "Secret").length;
 
   async function remove() {
@@ -145,6 +152,7 @@ export function DeleteConfirm({
           The approval shows when that's done.
         </p>
       )}
+      {note && <p className="field-hint">{note}</p>}
       {failure && <DeleteFailure error={failure} />}
       <div className="form-actions">
         <button type="button" className="button button--primary" onClick={remove} disabled={busy || !removed.refs}>

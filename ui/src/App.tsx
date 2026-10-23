@@ -13,6 +13,9 @@ import { parseScopeParam } from "./lib/permissions";
 import { AccessPage } from "./screens/AccessPage";
 import { ApprovalDetail, ApprovalList } from "./screens/Approvals";
 import { SecretDetail, SecretList } from "./screens/Secrets";
+import { DeploymentConfigure } from "./screens/Deploy";
+import { ApplicationTopology } from "./screens/Topology";
+import { PackagesPage, PlatformPage } from "./screens/Platform";
 import { Overview } from "./screens/Overview";
 import { SignIn } from "./screens/SignIn";
 
@@ -91,10 +94,14 @@ function Routes({ path, query }: { path: string; query: URLSearchParams }) {
   if (path === "/applications/new") return <NewApplication />;
   if ((p = match("/applications/:app/components/new", path))) return <ComponentForm appId={p.app!} />;
   if ((p = match("/applications/:app/components/:id/edit", path))) return <ComponentForm appId={p.app!} id={p.id!} />;
-  if ((p = match("/applications/:app/components/:id", path))) return <ComponentDetail appId={p.app!} id={p.id!} />;
+  if ((p = match("/applications/:app/components/:comp/deployments/:id/configure", path))) return <DeploymentConfigure appId={p.app!} compId={p.comp!} id={p.id!} />;
+  if ((p = match("/applications/:app/components/:id", path))) return <ComponentDetail appId={p.app!} id={p.id!} tab={query.get("tab") ?? "overview"} />;
+  if ((p = match("/applications/:id/topology", path))) return <ApplicationTopology id={p.id!} />;
   if ((p = match("/applications/:id", path))) return <ApplicationDetail id={p.id!} />;
   if (path === "/secrets") return <SecretList ownerId={query.get("owner") ?? undefined} />;
   if ((p = match("/secrets/:id", path))) return <SecretDetail id={p.id!} />;
+  if (path === "/platform") return <PlatformPage />;
+  if (path === "/packages") return <PackagesPage />;
   if (path === "/approvals") return <ApprovalList />;
   if ((p = match("/approvals/:id", path))) return <ApprovalDetail id={p.id!} />;
   return <NotFound />;

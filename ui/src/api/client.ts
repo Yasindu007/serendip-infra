@@ -41,10 +41,14 @@ export async function apiFetch<T>(method: "GET" | "POST" | "PUT" | "DELETE", pat
 }
 
 /** Sends one request; a non-2xx answer becomes an ApiError. */
-async function request(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
-  const timeout = AbortSignal.timeout(TIMEOUT_MS);
+async function request(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, signal?: AbortSignal, stream = false): Promise<Response> {
+  // A stream's body may last minutes: its timeout covers only the wait
+  // for the answer's headers.
+  const timer = new AbortController();
+  const id = stream ? setTimeout(() => timer.abort(), TIMEOUT_MS) : undefined;
+  const timeout = stream ? timer.signal : AbortSignal.timeout(TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  const headers: Record<string, string> = { Accept: "application/json", "X-Serendip-Csrf": "1" };
+  const headers: Record<string, string> = { Accept: stream ? "application/x-ndjson" : "application/json", "X-Serendip-Csrf": "1" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
   let res: Response;
@@ -59,10 +63,12 @@ async function request(method: "GET" | "POST" | "PUT" | "DELETE", path: string, 
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch (err) {
+    clearTimeout(id);
     if (signal?.aborted) throw err; // the caller cancelled: not an error to show
     if (timeout.aborted) throw new NetworkError("Serendip didn't answer within 15 seconds.");
     throw new NetworkError("Can't reach Serendip.");
   }
+  clearTimeout(id);
 
   if (res.ok) return res;
 
@@ -101,6 +107,40 @@ export async function apiPage<T>(path: string, signal?: AbortSignal): Promise<{ 
 /** A list endpoint answers a JSON array, or null when empty. */
 export async function apiList<T>(path: string, signal?: AbortSignal): Promise<T[]> {
   return (await apiFetch<T[] | null>("GET", path, undefined, signal)) ?? [];
+}
+
+/**
+ * Reads an NDJSON stream (GET .../logs?follow=true), calling onItem for
+ * each object until the server ends it with {"end": reason}, which is
+ * returned. Undefined means the connection closed without saying why, so
+ * lines may be missing. Cancel with signal.
+ */
+export async function apiStream<T>(path: string, onItem: (item: T) => void, signal: AbortSignal): Promise<string | undefined> {
+  const res = await request("GET", path, undefined, signal, true);
+  if (!res.body) return undefined;
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return undefined;
+      buf += value;
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const text = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (text === "") continue;
+        const item = JSON.parse(text) as T & { end?: unknown };
+        if (typeof item.end === "string") return item.end;
+        onItem(item);
+      }
+    }
+  } catch (err) {
+    if (signal.aborted) throw err;
+    throw new NetworkError("The log stream was cut off.");
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /** Ends the console session and returns where the browser should go next. */
