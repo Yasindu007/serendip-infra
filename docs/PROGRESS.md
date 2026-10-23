@@ -18,7 +18,7 @@ Last updated: 2026-10-23
 
 **Spec 020 (OpenChoreo's portal features in Serendip's console): IN
 PROGRESS.** The plan was approved 2026-10-22. T001–T016 are done and
-committed, one commit each (`fd01e8c` … `97599d8`, not pushed). Every
+committed, one commit each (`fd01e8c` … `a62170a`, not pushed). Every
 task's "Done as" note in `specs/020-openchoreo-console-features/tasks.md`
 records what was built and decided.
 
