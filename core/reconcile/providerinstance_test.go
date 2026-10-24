@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/core/graph"
+	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
@@ -47,8 +48,57 @@ func newPackages(t *testing.T) (*testPackage, reconcile.Catalogue) {
 	t.Helper()
 	pkg := &testPackage{}
 	return pkg, reconcile.Catalogue{
-		"test-builder": {Provider: "test-builder", Capability: "build", Installer: pkg},
+		"test-builder": {Provider: "test-builder", Capability: "build", Installer: pkg, Requirements: measured},
 		"later":        {Provider: "later", Capability: "observability"},
+	}
+}
+
+// measured is a stated cost, which a package needs to be installable.
+var measured = &provider.Requirements{IdleMemoryMiB: 50, PeakMemoryMiB: 300, PeakCPUMillicores: 1500,
+	MeasuredOn: "test", Results: "testdata"}
+
+// A package is installable only with an installer and its measured cost
+// (plan 022 decision 4): Validate refuses the rest, and ReportStart says
+// why.
+func TestCatalogueValidate_RequiresMeasuredCost(t *testing.T) {
+	pkg := &testPackage{}
+	spec := func(p string) resource.ProviderInstanceSpec {
+		return resource.ProviderInstanceSpec{CapabilityID: "build", ProviderID: p}
+	}
+	cat := reconcile.Catalogue{
+		"measured":   {Provider: "measured", Capability: "build", Installer: pkg, Requirements: measured},
+		"unmeasured": {Provider: "unmeasured", Capability: "build", Installer: pkg},
+		"half":       {Provider: "half", Capability: "build", Installer: pkg, Requirements: &provider.Requirements{PeakMemoryMiB: 100}},
+		"absent":     {Provider: "absent", Capability: "build", Requirements: measured},
+	}
+	for _, tc := range []struct {
+		provider string
+		valid    bool
+		says     string
+	}{
+		{"measured", true, ""},
+		{"unmeasured", false, "until its resource cost is measured"},
+		{"half", false, "where they were measured"},
+		{"absent", false, "isn't available in this build"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			err := cat.Validate(spec(tc.provider))
+			if (err == nil) != tc.valid || (err != nil && (!errors.Is(err, resource.ErrValidation) || !strings.Contains(err.Error(), tc.says))) {
+				t.Errorf("Validate() = %v, want valid %v saying %q", err, tc.valid, tc.says)
+			}
+		})
+	}
+
+	ctx := context.Background()
+	s := newAppStores(t)
+	insts := sqlite.NewStore[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](s.db, resource.KindProviderInstance)
+	log := readinessLog{}
+	only := reconcile.Catalogue{"unmeasured": cat["unmeasured"]}
+	if err := reconcile.NewProviderInstanceReconciler(insts, only, log.report).ReportStart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if log["build"] != reconcile.ReasonUnavailable {
+		t.Errorf("an unmeasured package at start = %q, want %s", log["build"], reconcile.ReasonUnavailable)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/api"
+	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 )
@@ -19,10 +20,15 @@ func (nopInstaller) Install(context.Context, resource.ProviderInstance) (reconci
 }
 func (nopInstaller) Uninstall(context.Context, string) error { return nil }
 
+// measured is a stated cost, which a package needs to be installable
+// (plan 022 decision 4).
+var measured = &provider.Requirements{IdleMemoryMiB: 50, PeakMemoryMiB: 300, PeakCPUMillicores: 1500,
+	MeasuredOn: "test", Results: "testdata"}
+
 func testCatalogue() reconcile.Catalogue {
 	return reconcile.Catalogue{
-		"test-builder":  {Provider: "test-builder", Capability: "build", Description: "builds", Installer: nopInstaller{}},
-		"other-builder": {Provider: "other-builder", Capability: "build", Installer: nopInstaller{}},
+		"test-builder":  {Provider: "test-builder", Capability: "build", Description: "builds", Installer: nopInstaller{}, Requirements: measured},
+		"other-builder": {Provider: "other-builder", Capability: "build", Installer: nopInstaller{}, Requirements: measured},
 		"later":         {Provider: "later", Capability: "observability"},
 	}
 }

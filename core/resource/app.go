@@ -18,16 +18,19 @@ type ApplicationStatus struct {
 
 type Application = Resource[ApplicationSpec, ApplicationStatus]
 
-// ComponentSpec describes one already-built container image as a
-// deployable workload. Building images from source is out of scope here;
-// Image must already be pullable. A Component's runs-on and depends-on
+// ComponentSpec describes one container image as a deployable workload.
+// It has exactly one of Image, already pullable, and Source, which is
+// built into an image (spec 022; ValidateComponentSource). A Component's
+// runs-on and depends-on
 // relationships (resource-model.md "Relationships") are declared through
 // Metadata.Relationships on the envelope, not through Spec fields
 // (specs/001-resource-model/plan.md).
 type ComponentSpec struct {
-	Image string            `json:"image"`
-	Ports []ComponentPort   `json:"ports,omitempty"`
-	Env   map[string]string `json:"env,omitempty"`
+	Image string `json:"image"`
+	// Source is where the image is built from, when there's no Image.
+	Source *ComponentSource  `json:"source,omitempty"`
+	Ports  []ComponentPort   `json:"ports,omitempty"`
+	Env    map[string]string `json:"env,omitempty"`
 	// Dependencies are the other Components this one calls (spec 020).
 	// Each becomes a depends-on edge, and the platform puts the target's
 	// address in an environment variable.

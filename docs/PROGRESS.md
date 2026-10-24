@@ -16,8 +16,8 @@ Last updated: 2026-10-24
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001 is
-done.**
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001 and
+T002 are done.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
   findings":
@@ -38,9 +38,33 @@ done.**
   - **Uninstall leaves the Argo CRDs** (RP-039).
   - **Idle cost is ~46 MB,** not 200–400 MiB.
   - **A no-change Helm run takes 19–24 s,** so the fingerprint matters.
-- **Next step:** T002, ADR 0020 and the core types.
-- **Committed:** the plan and T001 (`docs(spec): spec 022 plan and T001 spike`), on local `main`, not
-  pushed.
+- **T002 is done** (2026-10-24):
+  - **ADR 0020** (`docs/decisions/0020-builds-from-source.md`).
+  - **`core/provider.Requirements`.** `Package.Requirements`, `Removal`
+    and `Installable()` were added, and `Catalogue.Validate` refuses an
+    unmeasured package. `ReportStart` reports it `Unavailable`, with
+    "not installable until its resource cost is measured".
+  - **`resource.Build`** (owned by exactly one Component; a full commit
+    ID), and `ComponentSpec.Source` with `ValidateComponentSource`. That
+    validation is strict, because the values reach a build script.
+  - **The status fields:** `ProviderInstanceStatus.Applied` and
+    `PackageState.Applied`. They're only fields so far; T004 writes and
+    reads them.
+  - **`reconcile.BuildProvider`** and `BuildObservation`. The
+    observation has a `Gone` flag, for a run that expired.
+  - **The test catalogues** in `api/` and `core/reconcile` now carry a
+    measured `Requirements`.
+  - **contract-guardian passed it.** Its three small validation fixes are
+    in, and RP-040 was added (symlinks inside a repository; recheck in
+    T005).
+  - **Still open, for T007:** `validateComponentSpec`
+    (`core/reconcile/application.go`) still requires `image`. T007 must
+    resolve a source Component's image, or apply exactly-one-of, before
+    that check runs.
+- **Next step:** T003 (store uniqueness) and T004 (cheap resync), which
+  can run in parallel.
+- **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`), and
+  T002 (`feat(core): spec 022 T002 ADR 0020 and build core types`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;

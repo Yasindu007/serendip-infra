@@ -67,6 +67,10 @@ type ProviderInstanceSpec struct {
 
 type ProviderInstanceStatus struct {
 	Status
+	// Applied fingerprints what the package's last full install applied,
+	// so a resync with nothing changed can skip it (specs/022-builds plan
+	// decision 8). Written with the Ready condition.
+	Applied string `json:"applied,omitempty"`
 }
 
 type ProviderInstance = Resource[ProviderInstanceSpec, ProviderInstanceStatus]

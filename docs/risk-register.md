@@ -803,3 +803,22 @@ purpose), **Closed** (fixed).
   download, only runs when something changed.
 - **Revisit:** if the chart starts owning its CRDs, or if offline installs
   become a goal (`crds.full=false` ships minimal CRDs inside the chart).
+
+## RP-040 — A repository's own contents can't be checked before its build
+
+- **Kind:** security. **Status:** Open, 2026-10-24. **Found:** spec 022
+  T002 review.
+- **What:** `ValidateComponentSource` keeps a Component's `repository`,
+  `branch`, `path` and `dockerfile` shell-inert. `path` and `dockerfile`
+  can't start with `-` or `/`, and have no `.` or `..` segment. But a
+  symlink inside the cloned repository can still point outside the build
+  context, and nothing can see that before the clone.
+  - **What could happen:** a build reads a file outside its context, from
+    the workspace or the privileged build container (RP-038).
+- **What holds it today:**
+  - `podman build` resolves `COPY` and `ADD` sources within the context;
+  - the workspace volume holds only that run's checkout;
+  - triggering a build needs `serendip/builds/write`.
+- **Revisit:** in spec 022 T005, when the workflow's scripts are written.
+  Those scripts pass values after `--` and quote them. Recheck if build
+  methods other than a Dockerfile arrive.

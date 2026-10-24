@@ -401,3 +401,24 @@ func TestDeploymentEdges(t *testing.T) {
 		t.Errorf("BlastRadius(component) = %v, want the Deployment in it", got)
 	}
 }
+
+// A Build (spec 022) is owned by its Component: roles on the Component's
+// Application or Project reach it (Ancestors), and a cascade delete of the
+// Component removes it (Descendants).
+func TestBuildOwnedByComponent(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	proj, app, comp := ref(resource.KindProject, "p"), ref(resource.KindApplication, "a"), ref(resource.KindComponent, "web")
+	build := ref(resource.KindBuild, "b1")
+	for _, e := range [][2]graph.ResourceRef{{app, proj}, {comp, app}, {build, comp}} {
+		if err := graph.SyncEdges(ctx, db, e[0], []resource.OwnerRef{{Kind: e[1].Kind, ID: e[1].ID}}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := graph.Ancestors(ctx, db, build); err != nil || !slices.Equal(got, []graph.ResourceRef{comp, app, proj}) {
+		t.Errorf("Ancestors(build) = %v, %v; want the Component, Application and Project", got, err)
+	}
+	if got, err := graph.Descendants(ctx, db, comp); err != nil || !slices.Equal(got, []graph.ResourceRef{build}) {
+		t.Errorf("Descendants(component) = %v, %v; want the Build", got, err)
+	}
+}

@@ -576,7 +576,7 @@ func TestSpec020Criterion7_UnavailableHonestly(t *testing.T) {
 	registry := provider.NewRegistry()
 	builder := &gatedInstaller{}
 	cat := reconcile.Catalogue{
-		"test-builder": {Provider: "test-builder", Capability: "build", Installer: builder},
+		"test-builder": {Provider: "test-builder", Capability: "build", Installer: builder, Requirements: measured},
 		"observer":     {Provider: "observer", Capability: "observability"}, // not in this build
 	}
 	w := newWorld020(t, registry, api.WithPackages(cat))

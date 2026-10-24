@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/graph"
+	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 )
@@ -34,16 +35,20 @@ const (
 )
 
 // PackageState is what an install observed. Message is shown to people,
-// so it's the installer's own wording, never raw error text.
+// so it's the installer's own wording, never raw error text. Applied
+// fingerprints what a full install applied (specs/022-builds plan
+// decision 8); it's kept in the instance's status.applied.
 type PackageState struct {
 	Ready   bool
 	Message string
+	Applied string
 }
 
 // PackageInstaller installs and removes one package. Install is
 // idempotent: it brings the package towards installed and reports how
-// far it is. Uninstall removes what instanceID installed, and is
-// idempotent too.
+// far it is. It may skip a full install when inst.Status.Applied matches
+// what it would apply, and its quick checks pass. Uninstall removes what
+// instanceID installed, and is idempotent too.
 type PackageInstaller interface {
 	Install(ctx context.Context, inst resource.ProviderInstance) (PackageState, error)
 	Uninstall(ctx context.Context, instanceID string) error
@@ -57,6 +62,28 @@ type Package struct {
 	Description string `json:"description"`
 	// Installer is nil while the package isn't available in this build.
 	Installer PackageInstaller `json:"-"`
+	// Requirements is the package's measured cost, nil until it's
+	// measured. A package can't be installed without it (plan 022
+	// decision 4): its cost is stated before anyone installs it.
+	Requirements *provider.Requirements `json:"requirements"`
+	// Removal says plainly what removing the package loses, shown before
+	// the request to remove it.
+	Removal string `json:"removal,omitempty"`
+}
+
+// Installable reports why the package can't be installed in this build,
+// or nil if it can.
+func (p Package) Installable() error {
+	switch {
+	case p.Installer == nil:
+		return fmt.Errorf("package %s isn't available in this build yet", p.Provider)
+	case p.Requirements == nil:
+		return fmt.Errorf("package %s can't be installed until its resource cost is measured", p.Provider)
+	}
+	if err := p.Requirements.Validate(); err != nil {
+		return fmt.Errorf("package %s can't be installed: %v", p.Provider, err)
+	}
+	return nil
 }
 
 // Catalogue is the packages this build knows, by provider name.
@@ -77,7 +104,9 @@ func (c Catalogue) sorted() []Package {
 }
 
 // Validate checks a ProviderInstance names a package of this catalogue
-// for its capability. Packages are platform-wide, so no Environment.
+// for its capability, and that the package is installable: it has an
+// installer and its measured Requirements. Packages are platform-wide,
+// so no Environment.
 func (c Catalogue) Validate(spec resource.ProviderInstanceSpec) error {
 	p, ok := c[spec.ProviderID]
 	switch {
@@ -87,8 +116,9 @@ func (c Catalogue) Validate(spec resource.ProviderInstanceSpec) error {
 		return fmt.Errorf("%w: capabilityId: package %s provides %s", resource.ErrValidation, p.Provider, p.Capability)
 	case spec.EnvironmentID != "":
 		return fmt.Errorf("%w: environmentId: packages are installed platform-wide", resource.ErrValidation)
-	case p.Installer == nil:
-		return fmt.Errorf("%w: providerId: package %s isn't available in this build yet", resource.ErrValidation, p.Provider)
+	}
+	if err := p.Installable(); err != nil {
+		return fmt.Errorf("%w: providerId: %v", resource.ErrValidation, err)
 	}
 	return nil
 }
@@ -144,6 +174,8 @@ func (r *ProviderInstanceReconciler) ReportStart(ctx context.Context) error {
 			r.report(p.Capability, false, ReasonInstalling, "starting")
 		case p.Installer == nil:
 			r.report(p.Capability, false, ReasonUnavailable, "not available in this build yet")
+		case p.Installable() != nil:
+			r.report(p.Capability, false, ReasonUnavailable, "not installable until its resource cost is measured")
 		default:
 			r.report(p.Capability, false, ReasonNotInstalled, "install the "+p.Provider+" package to use it")
 		}

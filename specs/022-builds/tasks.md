@@ -40,7 +40,7 @@ Dependency sketch:
 - **Verify:** each item has observed evidence in `plan.md`; `kubectl get`
   shows no scratch objects left.
 
-## T002 — ADR 0020 and the core types
+## T002 — ADR 0020 and the core types ✅ 2026-10-24
 
 - **Do:**
   - ADR 0020 (plan decision 13).
