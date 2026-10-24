@@ -12,9 +12,50 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-10-23
+Last updated: 2026-10-24
 
 ## Current phase
+
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001 is
+done.**
+- **Plan approved** 2026-10-24.
+- **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
+  findings":
+  - **Also written:** `providers/build/openchoreo/VERSIONS.md`, and
+    `specs/022-builds/spike/` (the working `serendip-dockerfile` workflow,
+    and recorded `info/refs` bodies for T006's tests).
+  - **Risks:** RP-038 and RP-039 were added.
+  - **The spike's objects were removed** from `serendip-t018`, which is
+    still running.
+- **What the spike changed:**
+  - **Runs are standalone,** in `serendip-builds`, with no OpenChoreo
+    labels, because labelled runs need `allowedWorkflows`.
+  - **Outputs** are read from the Argo Workflow's nodes.
+  - **The build runs `privileged` without `hostUsers: false`,** which
+    fails on kind (RP-038).
+  - **The Git Secret is always `<run>-git`.** It's created before the
+    run, in `workflows-serendip-builds`.
+  - **Uninstall leaves the Argo CRDs** (RP-039).
+  - **Idle cost is ~46 MB,** not 200–400 MiB.
+  - **A no-change Helm run takes 19–24 s,** so the fingerprint matters.
+- **Next step:** T002, ADR 0020 and the core types.
+- **Committed:** the plan and T001 (`docs(spec): spec 022 plan and T001 spike`), on local `main`, not
+  pushed.
+- **Key decisions** (plan.md):
+  - Serendip's own `serendip-dockerfile` workflow, without upstream's
+    `generate-workload` or ExternalSecrets;
+  - a `registry:2`, pulled through `localhost`;
+  - no ESO: a per-run Secret copy;
+  - no install without measured `Requirements` (RP-034 and RP-037);
+  - a `Build` kind;
+  - auto-build by polling over smart HTTP;
+  - a fingerprint for a cheap resync;
+  - a `unique_key` column (RP-033);
+  - ADR 0020.
+- **One change from the spec:** turning auto-build on or off is
+  `components/write`.
+
+Previous phase:
 
 **Spec 020 (OpenChoreo's portal features in Serendip's console):
 COMPLETE** (T001–T017, 2026-10-23).

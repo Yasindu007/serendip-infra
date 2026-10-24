@@ -50,6 +50,8 @@ purpose), **Closed** (fixed).
 | RP-027 | Tokens aren't bound to the Serendip server they were issued for | Security (medium) | Mitigated | Spec 021 T012 security review |
 | RP-028 | Migration 0008 re-parents Applications and changes what Environment-scope assignments cover, without audit rows | Audit | Decided | Spec 020 T003 |
 | RP-029 | Release listing scans every release, and a component-type change re-releases every Component | Performance | Accepted | Spec 020 T005 review |
+| RP-038 | Build steps run privileged, without user namespaces | Security | Open | Spec 022 T001 |
+| RP-039 | The workflow plane's Argo CRDs outlive its removal, and every Helm run downloads them | Footprint, network | Decided | Spec 022 T001 |
 
 ---
 
@@ -762,3 +764,42 @@ purpose), **Closed** (fixed).
 - **Revisit:** when the provider registry gains a requirements field.
   Spec 022's packages need it anyway, to state a package's cost before
   installing it (RP-034). Fill it from the benchmark results then.
+
+## RP-038 — Build steps run privileged, without user namespaces
+
+- **Kind:** security. **Status:** Open, 2026-10-24. **Found:** spec 022
+  T001 spike.
+- **What:** `podman` needs a privileged container. Upstream's templates
+  pair that with `hostUsers: false`, so root in the build is unprivileged
+  on the host. On kind that fails for every pod: kind's own OCI hook
+  (`/kind/bin/mount-product-files.sh`) can't run inside a user namespace.
+  So Serendip's build step runs `privileged` without it.
+  - **What could happen:** a malicious Dockerfile or build dependency could
+    escape to the node as root.
+- **What holds it today:**
+  - only Serendip's own `serendip-dockerfile` template runs; no
+    person-supplied workflows;
+  - builds run in their own namespace (`workflows-serendip-builds`);
+  - triggering a build needs `serendip/builds/write`.
+- **Revisit:** on the first K3s run (spec 022 T013). If user namespaces
+  work there, set `hostUsers: false` wherever it works. Detail:
+  `specs/022-builds/plan.md`, "Spike findings" item 3.
+
+## RP-039 — The workflow plane's Argo CRDs outlive its removal, and every Helm run downloads them
+
+- **Kind:** footprint, network. **Status:** Decided, 2026-10-24.
+  **Found:** spec 022 T001 spike.
+- **What:** the workflow-plane chart's Argo subchart installs its eight
+  `argoproj.io` CRDs through a pre-install/pre-upgrade hook Job
+  (`crds.full=true`), not as Helm-owned objects.
+  - **They survive `helm uninstall`.** Removing the builds package
+    leaves the definitions behind. Nothing runs from them.
+  - **Every install and upgrade runs the Job,** which downloads the full
+    CRDs from GitHub. That's part of the 19–24 s a no-change `upgrade
+    --install` costs, and makes each such run depend on github.com.
+- **Why decided:** deleting `argoproj.io` CRDs could break a person's own
+  Argo installation. Leaving definitions matches the Gateway API stance.
+  The resync fingerprint (spec 022 decision 8) means Helm, and so the
+  download, only runs when something changed.
+- **Revisit:** if the chart starts owning its CRDs, or if offline installs
+  become a goal (`crds.full=false` ships minimal CRDs inside the chart).

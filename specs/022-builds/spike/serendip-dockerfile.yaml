@@ -1,0 +1,135 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterWorkflow
+metadata:
+  name: serendip-dockerfile
+spec:
+  workflowPlaneRef: {kind: ClusterWorkflowPlane, name: default}
+  ttlAfterCompletion: "1h"
+  parameters:
+    openAPIV3Schema:
+      type: object
+      required: [repository, image]
+      properties:
+        repository:
+          type: object
+          required: [url]
+          properties:
+            url: {type: string}
+            branch: {type: string, default: main}
+            commit: {type: string, default: ""}
+            path: {type: string, default: "."}
+        dockerfile: {type: string, default: Dockerfile}
+        image:
+          type: object
+          required: [repository]
+          properties:
+            pushRegistry: {type: string, default: "registry.serendip-builds.svc.cluster.local:5000"}
+            pullRegistry: {type: string, default: "localhost:5000"}
+            repository: {type: string}
+  runTemplate:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Workflow
+    metadata:
+      name: ${metadata.workflowRunName}
+      namespace: ${metadata.namespace}
+    spec:
+      serviceAccountName: workflow-sa
+      entrypoint: build
+      arguments:
+        parameters:
+        - {name: repo, value: "${parameters.repository.url}"}
+        - {name: branch, value: "${parameters.repository.branch}"}
+        - {name: commit, value: "${parameters.repository.commit}"}
+        - {name: path, value: "${parameters.repository.path}"}
+        - {name: dockerfile, value: "${parameters.dockerfile}"}
+        - {name: git-secret, value: "${metadata.workflowRunName}-git"}
+        - {name: push-registry, value: "${parameters.image.pushRegistry}"}
+        - {name: pull-registry, value: "${parameters.image.pullRegistry}"}
+        - {name: image-repo, value: "${parameters.image.repository}"}
+      volumeClaimTemplates:
+      - metadata: {name: workspace}
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 2Gi}}
+      templates:
+      - name: build
+        steps:
+        - - {name: checkout, template: checkout}
+        - - name: build-push
+            template: build-push
+            arguments:
+              parameters:
+              - {name: commit, value: "{{steps.checkout.outputs.parameters.commit}}"}
+      - name: checkout
+        container:
+          image: alpine/git:v2.52.0
+          command: [sh, -ec]
+          args:
+          - |
+            if [ -f /etc/git-secret/password ]; then
+              printf '#!/bin/sh\ncase "$1" in Username*) cat /etc/git-secret/username 2>/dev/null || echo git;; *) cat /etc/git-secret/password;; esac\n' > /tmp/askpass
+              chmod +x /tmp/askpass
+              export GIT_ASKPASS=/tmp/askpass
+            fi
+            export GIT_TERMINAL_PROMPT=0
+            if [ -n "$COMMIT" ]; then
+              git init -q /mnt/vol/src && cd /mnt/vol/src
+              git remote add origin "$REPO"
+              git fetch -q --depth 1 origin "$COMMIT"
+              git checkout -q FETCH_HEAD
+            else
+              git clone -q --single-branch --branch "$BRANCH" --depth 1 -- "$REPO" /mnt/vol/src
+              cd /mnt/vol/src
+            fi
+            git rev-parse HEAD | tr -d '\n' > /tmp/commit
+            echo "checked out $(cat /tmp/commit)"
+          env:
+          - {name: REPO, value: "{{workflow.parameters.repo}}"}
+          - {name: BRANCH, value: "{{workflow.parameters.branch}}"}
+          - {name: COMMIT, value: "{{workflow.parameters.commit}}"}
+          volumeMounts:
+          - {name: workspace, mountPath: /mnt/vol}
+          - {name: git-secret, mountPath: /etc/git-secret, readOnly: true}
+        volumes:
+        - name: git-secret
+          secret: {secretName: "{{workflow.parameters.git-secret}}", optional: true}
+        outputs:
+          parameters:
+          - name: commit
+            valueFrom: {path: /tmp/commit}
+      - name: build-push
+        inputs:
+          parameters:
+          - name: commit
+        container:
+          image: ghcr.io/openchoreo/podman-runner:v1.2
+          command: [sh, -ec]
+          args:
+          - |
+            mkdir -p /etc/containers
+            printf '[storage]\ndriver = "overlay"\nrunroot = "/storage/run"\ngraphroot = "/storage/graph"\n' > /etc/containers/storage.conf
+            TAG=$(echo "$COMMIT" | cut -c1-12)
+            SRC="$PUSH/$REPO_NAME:$TAG"
+            cd "/mnt/vol/src/$APP_PATH"
+            podman build -t "$SRC" -f "$DOCKERFILE" .
+            podman push --tls-verify=false "$SRC"
+            echo -n "$PULL/$REPO_NAME:$TAG" > /tmp/image
+            echo "pushed $SRC"
+          env:
+          - {name: COMMIT, value: "{{inputs.parameters.commit}}"}
+          - {name: APP_PATH, value: "{{workflow.parameters.path}}"}
+          - {name: DOCKERFILE, value: "{{workflow.parameters.dockerfile}}"}
+          - {name: PUSH, value: "{{workflow.parameters.push-registry}}"}
+          - {name: PULL, value: "{{workflow.parameters.pull-registry}}"}
+          - {name: REPO_NAME, value: "{{workflow.parameters.image-repo}}"}
+          securityContext: {privileged: true}
+          volumeMounts:
+          - {name: workspace, mountPath: /mnt/vol}
+          - {name: storage, mountPath: /storage}
+        volumes:
+        - name: storage
+          emptyDir: {sizeLimit: 10Gi}
+        outputs:
+          parameters:
+          - name: image
+            valueFrom: {path: /tmp/image}
