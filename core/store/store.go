@@ -20,6 +20,11 @@ var ErrConflict = errors.New("store: resource version conflict")
 // "Relationships"). Retry with cascade=true to delete them too.
 var ErrHasChildren = errors.New("store: resource has children; delete rejected without cascade")
 
+// ErrDuplicate is returned by Create when a resource of the same kind
+// already holds the new one's unique key (specs/022-builds plan decision
+// 9): the store's guarantee, behind any check a caller made first.
+var ErrDuplicate = errors.New("store: a resource with the same unique key already exists")
+
 // ListOptions filters Store.List. Label matching is exact-match only in
 // spec 001 -- full Kubernetes-style set-based selectors (in/notin/exists)
 // are deferred until a real consumer needs them

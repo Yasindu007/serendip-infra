@@ -51,7 +51,8 @@ func platformWide(m resource.Metadata) error {
 // packageValidator checks a ProviderInstance names a package this server
 // offers, and that its capability has no other instance: one package per
 // optional capability. Two simultaneous installs could both pass the
-// check (RP-033); installing is an Owner's rare, deliberate act.
+// check; the store's unique key then refuses the second with 409
+// (RP-033). The check stays for its clearer message.
 func packageValidator(c reconcile.Catalogue, s store.Store[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus]) func(ctx context.Context, id string, spec resource.ProviderInstanceSpec) error {
 	return func(ctx context.Context, id string, spec resource.ProviderInstanceSpec) error {
 		if err := c.Validate(spec); err != nil {
@@ -74,7 +75,7 @@ func packageValidator(c reconcile.Catalogue, s store.Store[resource.ProviderInst
 		}
 		for _, other := range all {
 			if other.Metadata.ID != id && other.Spec.CapabilityID == spec.CapabilityID {
-				return fmt.Errorf("%w: capabilityId: %s already has a package (ProviderInstance %s); remove it first", resource.ErrValidation, spec.CapabilityID, other.Metadata.ID)
+				return fmt.Errorf("%w: capabilityId: %s already has a package (ProviderInstance %s); remove it first", store.ErrDuplicate, spec.CapabilityID, other.Metadata.ID)
 			}
 		}
 		return nil

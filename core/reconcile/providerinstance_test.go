@@ -287,3 +287,65 @@ func TestUninstallCleanup(t *testing.T) {
 		}
 	}
 }
+
+// fingerprintPackage installs like the real ones (plan 022 decision 8): a
+// full install when the instance's status.applied differs from what it
+// would apply, otherwise only quick checks.
+type fingerprintPackage struct {
+	desired      string
+	full, checks int
+}
+
+func (p *fingerprintPackage) Install(_ context.Context, inst resource.ProviderInstance) (reconcile.PackageState, error) {
+	if inst.Status.Applied == p.desired {
+		p.checks++
+	} else {
+		p.full++
+	}
+	return reconcile.PackageState{Ready: true, Message: "installed", Applied: p.desired}, nil
+}
+
+func (p *fingerprintPackage) Uninstall(context.Context, string) error { return nil }
+
+// A cheap resync: with the fingerprint unchanged, resyncs of a Ready
+// package make no full install and no store write; a changed one makes
+// exactly one full install, recorded.
+func TestProviderInstanceReconciler_CheapResync(t *testing.T) {
+	ctx := context.Background()
+	s := newAppStores(t)
+	insts := sqlite.NewStore[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](s.db, resource.KindProviderInstance)
+	pkg := &fingerprintPackage{desired: "chart=1.3.1;values=abc"}
+	cat := reconcile.Catalogue{"test-builder": {Provider: "test-builder", Capability: "build", Installer: pkg, Requirements: measured}}
+	r := reconcile.NewProviderInstanceReconciler(insts, cat, readinessLog{}.report)
+	inst, err := insts.Create(ctx, resource.ProviderInstance{Metadata: resource.Metadata{Name: "builds"},
+		Spec: resource.ProviderInstanceSpec{CapabilityID: "build", ProviderID: "test-builder"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := graph.ResourceRef{Kind: resource.KindProviderInstance, ID: inst.Metadata.ID}
+
+	checkRequeue(t, r.Reconcile(ctx, ref), false)
+	got, _ := insts.Get(ctx, inst.Metadata.ID)
+	if pkg.full != 1 || got.Status.Applied != pkg.desired {
+		t.Fatalf("first install: %d full installs, applied %q", pkg.full, got.Status.Applied)
+	}
+	version := got.Metadata.ResourceVersion
+
+	for range 10 {
+		checkRequeue(t, r.Reconcile(ctx, ref), false)
+	}
+	got, _ = insts.Get(ctx, inst.Metadata.ID)
+	if pkg.full != 1 || pkg.checks != 10 || got.Metadata.ResourceVersion != version {
+		t.Errorf("10 resyncs: %d full installs, %d checks, version %d -> %d; want 1, 10 and no write",
+			pkg.full, pkg.checks, version, got.Metadata.ResourceVersion)
+	}
+
+	pkg.desired = "chart=1.3.2;values=abc"
+	checkRequeue(t, r.Reconcile(ctx, ref), false)
+	checkRequeue(t, r.Reconcile(ctx, ref), false)
+	got, _ = insts.Get(ctx, inst.Metadata.ID)
+	if pkg.full != 2 || got.Status.Applied != pkg.desired || got.Metadata.ResourceVersion != version+1 {
+		t.Errorf("changed fingerprint: %d full installs, applied %q, version %d; want 2, the new one, %d",
+			pkg.full, got.Status.Applied, got.Metadata.ResourceVersion, version+1)
+	}
+}

@@ -329,7 +329,10 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 	capStore := sqlite.NewStore[resource.CapabilitySpec, resource.CapabilityStatus](db, resource.KindCapability).SetBus(bus)
 	NewResourceHandler[resource.CapabilitySpec, resource.CapabilityStatus](capStore, "capabilities").Register(apiMux)
 	mountResource[resource.ProviderSpec, resource.ProviderStatus](apiMux, db, bus, resource.KindProvider, "providers")
-	instStore := sqlite.NewStore[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](db, resource.KindProviderInstance).SetBus(bus)
+	// The key backs packageValidator's one-per-capability check, which two
+	// simultaneous installs could both pass (RP-033).
+	instStore := sqlite.NewStore[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](db, resource.KindProviderInstance).
+		SetBus(bus).SetUniqueKey(resource.ProviderInstanceKey)
 	instances := NewResourceHandler[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](instStore, "provider-instances").
 		WithMetadataCheck(platformWide)
 	if opts.packages != nil {

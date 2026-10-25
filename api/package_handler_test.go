@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/serendip-infra/serendip-infra/api"
@@ -77,7 +78,7 @@ func TestPackages(t *testing.T) {
 	}
 	var inst resource.ProviderInstance
 	json.Unmarshal(got.Body.Bytes(), &inst)
-	if got := d.do("tok-owner", http.MethodPost, "/v1/provider-instances", install("other-builder", "build")); got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), "already has a package") {
+	if got := d.do("tok-owner", http.MethodPost, "/v1/provider-instances", install("other-builder", "build")); got.Code != http.StatusConflict || !strings.Contains(got.Body.String(), "already has a package") {
 		t.Errorf("a second build package: %d %s", got.Code, got.Body)
 	}
 	// Updating the one there is fine.
@@ -100,5 +101,31 @@ func TestPackages(t *testing.T) {
 	got = d.do("tok-owner", http.MethodDelete, "/v1/provider-instances/"+inst.Metadata.ID, nil)
 	if got.Code != http.StatusNoContent || got.Header().Get("Serendip-Approval-Id") == "" {
 		t.Errorf("the Owner removes: %d %s", got.Code, got.Body)
+	}
+}
+
+// Installs racing for one capability: exactly one is created, and every
+// other gets 409, whether the API's check or the store's unique key
+// refused it (RP-033).
+func TestPackages_RacingInstalls(t *testing.T) {
+	d := newDeployWorld(t, api.WithPackages(testCatalogue()))
+	const n = 20
+	codes := make([]int, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p := []string{"test-builder", "other-builder"}[i%2]
+			codes[i] = d.do("tok-owner", http.MethodPost, "/v1/provider-instances", install(p, "build")).Code
+		}()
+	}
+	wg.Wait()
+	count := map[int]int{}
+	for _, c := range codes {
+		count[c]++
+	}
+	if count[http.StatusCreated] != 1 || count[http.StatusConflict] != n-1 {
+		t.Errorf("status counts = %v, want one 201 and %d 409s", count, n-1)
 	}
 }

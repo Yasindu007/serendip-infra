@@ -254,26 +254,41 @@ func (r *ProviderInstanceReconciler) Reconcile(ctx context.Context, ref graph.Re
 		}
 		return err // retried with back-off
 	}
+	// What a full install applied is kept even while the package
+	// settles, so the next poll checks it rather than applying it again.
+	applied := inst.Status.Applied
+	if state.Applied != "" {
+		applied = state.Applied
+	}
 	if !state.Ready {
 		r.report(capability, false, ReasonInstalling, state.Message)
-		if err := r.setReady(ctx, inst, resource.ConditionFalse, ReasonInstalling, state.Message); err != nil {
+		if err := r.setStatus(ctx, inst, applied, resource.ConditionFalse, ReasonInstalling, state.Message); err != nil {
 			return err
 		}
 		return RequeueAfter{Delay: installPoll}
 	}
 	r.report(capability, true, ReasonInstalled, state.Message)
-	return r.setReady(ctx, inst, resource.ConditionTrue, ReasonInstalled, state.Message)
+	return r.setStatus(ctx, inst, applied, resource.ConditionTrue, ReasonInstalled, state.Message)
 }
 
-// setReady writes the Ready condition only when it changes. An install
-// can take a while; if the instance was edited meanwhile, the write
-// conflicts, and the edit's own reconcile writes the condition instead.
+// setReady writes the Ready condition, keeping what was applied.
 func (r *ProviderInstanceReconciler) setReady(ctx context.Context, inst resource.ProviderInstance, status resource.ConditionStatus, reason, message string) error {
-	for _, c := range inst.Status.Conditions {
-		if c.Type == "Ready" && c.Status == status && c.Reason == reason && c.Message == message {
-			return nil
+	return r.setStatus(ctx, inst, inst.Status.Applied, status, reason, message)
+}
+
+// setStatus writes the Ready condition and what the last full install
+// applied, only when either changes. An install can take a while; if the
+// instance was edited meanwhile, the write conflicts, and the edit's own
+// reconcile writes the condition instead.
+func (r *ProviderInstanceReconciler) setStatus(ctx context.Context, inst resource.ProviderInstance, applied string, status resource.ConditionStatus, reason, message string) error {
+	if inst.Status.Applied == applied {
+		for _, c := range inst.Status.Conditions {
+			if c.Type == "Ready" && c.Status == status && c.Reason == reason && c.Message == message {
+				return nil
+			}
 		}
 	}
+	inst.Status.Applied = applied
 	ready := resource.Condition{Type: "Ready", Status: status, Reason: reason, Message: message, LastTransitionTime: time.Now()}
 	inst.Status.Conditions = upsertCondition(inst.Status.Conditions, keepTransitionTime(inst.Status.Conditions, ready))
 	_, err := r.store.Update(ctx, inst)

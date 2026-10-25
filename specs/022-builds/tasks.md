@@ -59,7 +59,7 @@ Dependency sketch:
   .claude/scripts/check-imports.sh` passes; a table test shows
   `Validate` refusing a package with an installer but no `Requirements`.
 
-## T003 [P] — Store-level uniqueness (RP-033)
+## T003 [P] — Store-level uniqueness (RP-033) ✅ 2026-10-25
 
 - **Do:**
   - **Migration 0009:** the `unique_key` column and index; the oldest
@@ -78,7 +78,7 @@ Dependency sketch:
   - `POST /v1/provider-instances` racing returns one 201 and the rest
     409.
 
-## T004 [P] — A cheap resync for installed packages
+## T004 [P] — A cheap resync for installed packages ✅ 2026-10-25
 
 - **Do:** `ProviderInstanceReconciler` passes the instance (with
   `status.applied`) to `Install`, and writes `PackageState.Applied` with

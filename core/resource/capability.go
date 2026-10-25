@@ -65,6 +65,17 @@ type ProviderInstanceSpec struct {
 	Config        map[string]string `json:"config,omitempty"`
 }
 
+// ProviderInstanceKey is what makes a ProviderInstance unique: one per
+// capability per Environment (one per capability for packages, which have
+// none). The store enforces it on Create (specs/022-builds plan decision
+// 9); "" means no key. Migration 0009 computes the same key.
+func ProviderInstanceKey(s ProviderInstanceSpec) string {
+	if s.CapabilityID == "" {
+		return ""
+	}
+	return s.CapabilityID + "/" + s.EnvironmentID
+}
+
 type ProviderInstanceStatus struct {
 	Status
 	// Applied fingerprints what the package's last full install applied,

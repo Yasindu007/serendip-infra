@@ -648,8 +648,8 @@ purpose), **Closed** (fixed).
 
 ## RP-033 — Two simultaneous package installs could both pass the one-per-capability check
 
-- **Kind:** correctness. **Status:** Accepted, 2026-10-23. **Found:**
-  spec 020 T010.
+- **Kind:** correctness. **Status:** Fixed, 2026-10-25 (spec 022 T003).
+  Accepted 2026-10-23. **Found:** spec 020 T010.
 - **What:** the API checks a capability has no package before storing a
   new ProviderInstance. Two requests at the same moment could both pass,
   leaving two packages for one capability. Their installs would compete.
@@ -660,6 +660,20 @@ purpose), **Closed** (fixed).
     an Approval.
 - **Revisit:** with the first real package (spec 022). A store-level
   unique constraint on capability would close it.
+- **Fixed** by spec 022 T003:
+  - **Migration 0009** adds `resources.unique_key`, with
+    `UNIQUE (kind, unique_key)`.
+  - **The ProviderInstance store keys each new row** with
+    `capabilityId/environmentId` (`resource.ProviderInstanceKey`).
+  - **A racing install gets 409.** In a test, 20 racing installs left one
+    row; without the key, 2–3 got through.
+  - **Existing duplicates:** only the oldest is keyed, and each other one
+    gets a migration note. The reconciler still marks it `Duplicate`.
+  - **Update keeps a keyed row's key in step with its spec.** A change
+    onto a taken key gets `ErrDuplicate`. A store without a key function
+    leaves keys alone.
+  - **What's left:** an unkeyed duplicate stays unkeyed until it's
+    removed. So, like before, it could still be edited to collide.
 
 ## RP-034 — The console can't state a package's measured cost yet; follows reconnect; the Deploy tab lists every Deployment
 

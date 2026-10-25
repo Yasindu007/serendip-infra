@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/audit"
@@ -14,6 +15,8 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/id"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // timeLayout writes timestamps at a fixed width (always nine fractional
@@ -43,9 +46,10 @@ const (
 // deliberately outside the transaction (an event about a mutation nobody
 // can prove committed yet is worse than a slightly-delayed one).
 type Store[S, St any] struct {
-	db   *sql.DB
-	kind resource.Kind
-	bus  event.Bus // nil is valid: Publish becomes a no-op
+	db        *sql.DB
+	kind      resource.Kind
+	bus       event.Bus      // nil is valid: Publish becomes a no-op
+	uniqueKey func(S) string // nil is valid: rows have no key
 }
 
 // NewStore returns a Store scoped to one resource kind, e.g.
@@ -60,6 +64,29 @@ func NewStore[S, St any](db *sql.DB, kind resource.Kind) *Store[S, St] {
 func (s *Store[S, St]) SetBus(bus event.Bus) *Store[S, St] {
 	s.bus = bus
 	return s
+}
+
+// SetUniqueKey makes Create give each new row key(spec) as its unique
+// key, so a second row of this kind with the same key fails with
+// store.ErrDuplicate ("" means no key). Update keeps a keyed row's key
+// in step with its spec, refusing a change onto a key that's taken; a
+// store of the same kind without a key function leaves keys as they
+// are, so every store of a keyed kind can write it safely. A row
+// left unkeyed (a duplicate from before migration 0009) stays unkeyed,
+// so its own status writes still work until it's removed. Returns s for
+// chaining.
+func (s *Store[S, St]) SetUniqueKey(key func(S) string) *Store[S, St] {
+	s.uniqueKey = key
+	return s
+}
+
+// keyOf is spec's unique key, NULL without one.
+func (s *Store[S, St]) keyOf(spec S) sql.NullString {
+	if s.uniqueKey == nil {
+		return sql.NullString{}
+	}
+	k := s.uniqueKey(spec)
+	return sql.NullString{String: k, Valid: k != ""}
 }
 
 var _ store.Store[resource.OrganizationSpec, resource.OrganizationStatus] = (*Store[resource.OrganizationSpec, resource.OrganizationStatus])(nil)
@@ -156,15 +183,19 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
+	key := s.keyOf(r.Spec)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO resources
 			(id, kind, name, labels, owner_refs, relationships, spec, status,
-			 resource_version, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 resource_version, created_at, updated_at, unique_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Metadata.ID, string(s.kind), r.Metadata.Name,
 		cols.labels, cols.ownerRefs, cols.relationships, cols.spec, cols.status,
 		r.Metadata.ResourceVersion,
-		now.Format(timeLayout), now.Format(timeLayout)); err != nil {
+		now.Format(timeLayout), now.Format(timeLayout), key); err != nil {
+		if duplicateKey(err) {
+			return resource.Resource[S, St]{}, store.ErrDuplicate
+		}
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: %w", s.kind, r.Metadata.ID, err)
 	}
 
@@ -244,12 +275,16 @@ func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (
 		UPDATE resources
 		SET name = ?, labels = ?, owner_refs = ?, relationships = ?,
 		    spec = ?, status = ?, resource_version = resource_version + 1,
-		    updated_at = ?
+		    updated_at = ?,
+		    unique_key = CASE WHEN unique_key IS NULL OR NOT ? THEN unique_key ELSE ? END
 		WHERE id = ? AND kind = ? AND resource_version = ?`,
 		r.Metadata.Name, cols.labels, cols.ownerRefs, cols.relationships, cols.spec, cols.status,
-		now.Format(timeLayout),
+		now.Format(timeLayout), s.uniqueKey != nil, s.keyOf(r.Spec),
 		r.Metadata.ID, string(s.kind), r.Metadata.ResourceVersion)
 	if err != nil {
+		if duplicateKey(err) {
+			return resource.Resource[S, St]{}, store.ErrDuplicate
+		}
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: update %s %s: %w", s.kind, r.Metadata.ID, err)
 	}
 	affected, err := result.RowsAffected()
@@ -712,4 +747,12 @@ func scanResource[S, St any](row rowScanner, kind resource.Kind) (resource.Resou
 		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: parse updated_at: %w", err)
 	}
 	return out, nil
+}
+
+// duplicateKey reports whether err is the unique-key index refusing a row
+// (not some other constraint, such as a reused ID).
+func duplicateKey(err error) bool {
+	var e *sqlite.Error
+	return errors.As(err, &e) && e.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE &&
+		strings.Contains(e.Error(), "unique_key")
 }

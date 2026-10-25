@@ -12,12 +12,12 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-10-24
+Last updated: 2026-10-25
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001 and
-T002 are done.**
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T004
+are done.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
   findings":
@@ -61,10 +61,36 @@ T002 are done.**
     (`core/reconcile/application.go`) still requires `image`. T007 must
     resolve a source Component's image, or apply exactly-one-of, before
     that check runs.
-- **Next step:** T003 (store uniqueness) and T004 (cheap resync), which
-  can run in parallel.
-- **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`), and
-  T002 (`feat(core): spec 022 T002 ADR 0020 and build core types`).
+- **T003 is done** (2026-10-25), fixing RP-033:
+  - **Migration 0009** adds `resources.unique_key`, with
+    `UNIQUE (kind, unique_key)`. Of existing duplicates, only the oldest
+    is keyed, and each other one gets a migration note.
+  - **`store.ErrDuplicate`.** `sqlite.Store.SetUniqueKey(func(S) string)`
+    applies the key on Create. Update keeps a keyed row's key in step,
+    from a review point. A store without a key function, such as
+    `serendipd`'s reconciler store, leaves keys alone, and unkeyed
+    duplicates stay unkeyed.
+  - **The key** is `resource.ProviderInstanceKey`
+    (`capabilityId/environmentId`), wired in `api/server.go`.
+  - **The API answers 409** for `ErrDuplicate`. `packageValidator`'s own
+    duplicate check now wraps `ErrDuplicate` too, so it's 409, not 400.
+    Racing installs get one 201 and the rest 409. Without the key, 2–3
+    got through.
+- **T004 is done** (2026-10-25):
+  - **The reconciler persists `PackageState.Applied`** into
+    `status.applied`, with the Ready condition (`setStatus`), writing
+    only when either changes.
+  - **It keeps the value while the package is still `Installing`,** so
+    the next poll checks rather than re-applying.
+  - **Tested:** 10 resyncs with nothing changed make no full install and
+    no store write.
+- **Next step:** T005, the workflow-plane installer in
+  `providers/build/openchoreo`. `serendipd` and the keep-awake job aren't
+  running: both were stopped for low memory on 2026-10-25. The
+  `serendip-t018` cluster wasn't checked.
+- **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
+  T002 (`feat(core): spec 022 T002 ADR 0020 and build core types`), and
+  T003 and T004 (`feat(core): spec 022 T003 store uniqueness and T004 cheap resync`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;
