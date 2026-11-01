@@ -12,11 +12,11 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-10-25
+Last updated: 2026-11-01
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T004
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T005
 are done.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
@@ -84,13 +84,40 @@ are done.**
     the next poll checks rather than re-applying.
   - **Tested:** 10 resyncs with nothing changed make no full install and
     no store write.
-- **Next step:** T005, the workflow-plane installer in
-  `providers/build/openchoreo`. `serendipd` and the keep-awake job aren't
-  running: both were stopped for low memory on 2026-10-25. The
-  `serendip-t018` cluster wasn't checked.
+- **T005 is done** (2026-11-01): `providers/build/openchoreo`
+  (`installer.go`, `registry.go`, `workflow.go`, `requirements.go`, with
+  tests).
+  - **Install:** first the registry's port check, then the CA copy, Helm
+    (chart 1.3.1), `ClusterWorkflowPlane/default`, the registry (PVC,
+    Deployment, Service; `hostNetwork` on 5000) and the
+    `serendip-dockerfile` `ClusterWorkflow`.
+  - **The fingerprint** (`Fingerprint()`) covers the Helm args and every
+    hand-built object. When it matches, Install makes about 5 GETs:
+    - a missing object is repaired at once;
+    - Helm runs only for the chart's Deployments or the agent;
+    - a settling fault (a rollout, or the agent's connection) is waited
+      out for 3 min, doubling per repair up to 30 min.
+  - **Uninstall** follows decision 12's order. It's idempotent, and returns
+    `ErrRunsRemaining` while runs finalize.
+  - **The build script** refuses a `path` or `dockerfile` that a symlink
+    points outside the checkout, checked in the real `podman-runner`
+    image (RP-040 updated). **RP-041** was added: the registry is
+    unauthenticated on the node's network.
+  - **A core fix, from contract-guardian:** `UninstallCleanup` no longer
+    uninstalls a package another ProviderInstance still provides
+    (removing a duplicate used to tear down the real one).
+  - The chart's names were taken from the pulled chart (`VERSIONS.md`).
+    Nothing ran on the cluster: T005 is verified against fakes, and
+    T014 runs it live.
+- **Next step:** T006, the `BuildProvider` (`builds.go`) and
+  `providers/internal/gitremote`. Use the exported constants from
+  `installer.go`/`workflow.go`: `BuildLabel` on every run and `<run>-git`
+  copy, `RunNamespace`, and the step and output names. `serendip-t018` is
+  up (Docker running, 2026-11-01). `serendipd` isn't running.
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
   T002 (`feat(core): spec 022 T002 ADR 0020 and build core types`), and
-  T003 and T004 (`feat(core): spec 022 T003 store uniqueness and T004 cheap resync`).
+  T003 and T004 (`feat(core): spec 022 T003 store uniqueness and T004 cheap resync`),
+  and T005 (`feat(providers): spec 022 T005 workflow-plane installer`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;

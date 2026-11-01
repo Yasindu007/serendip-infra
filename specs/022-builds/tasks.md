@@ -89,7 +89,7 @@ Dependency sketch:
   unchanged fingerprint make no full install and no store write. A
   changed fingerprint makes one.
 
-## T005 — The workflow-plane installer
+## T005 — The workflow-plane installer ✅ 2026-11-01
 
 - **Do:** in `providers/build/openchoreo`:
   - the Helm install and CA copy;

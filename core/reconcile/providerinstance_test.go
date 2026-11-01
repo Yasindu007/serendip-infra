@@ -178,7 +178,8 @@ func TestProviderInstanceReconciler_InstallsToReady(t *testing.T) {
 		t.Errorf("duplicate: %+v, installs %d, readiness %v", c, pkg.installs, log)
 	}
 
-	// Its removal leaves the capability as the first instance has it.
+	// Its removal leaves the capability as the first instance has it, and
+	// doesn't uninstall the package the first instance still provides.
 	clean := reconcile.UninstallCleanup(insts, catalogue, log.report)
 	spec, _ := json.Marshal(dup.Spec)
 	approved := store.WithApproval(ctx, store.ApprovalIntent{Approval: resource.Approval{
@@ -188,8 +189,12 @@ func TestProviderInstanceReconciler_InstallsToReady(t *testing.T) {
 	if err := insts.Delete(approved, dup.Metadata.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := clean(ctx, resource.ApprovalRef{ID: dup.Metadata.ID, LastSpec: spec}); err != nil || log["build"] != "ready "+reconcile.ReasonInstalled {
-		t.Errorf("removing the duplicate: %v, readiness %v", err, log)
+	if err := clean(ctx, resource.ApprovalRef{ID: dup.Metadata.ID, LastSpec: spec}); err != nil || log["build"] != "ready "+reconcile.ReasonInstalled || len(pkg.uninstalled) != 0 {
+		t.Errorf("removing the duplicate: %v, readiness %v, uninstalled %v", err, log, pkg.uninstalled)
+	}
+	// So does a damaged last spec.
+	if err := clean(ctx, resource.ApprovalRef{ID: dup.Metadata.ID, LastSpec: []byte("{oops")}); err != nil || len(pkg.uninstalled) != 0 {
+		t.Errorf("damaged last spec of a duplicate: %v, uninstalled %v", err, pkg.uninstalled)
 	}
 }
 

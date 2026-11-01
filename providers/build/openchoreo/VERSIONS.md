@@ -42,6 +42,14 @@ Notes (spec 022 T001, verified on 1.3.1, 2026-10-24; details in
 - **Images built from source** are pulled by workloads as
   `localhost:5000/...`. containerd uses plain HTTP for `localhost` with no
   node configuration. That's single-node only.
-- `helm` must be on `$PATH` (ADR 0010).
+- **The chart's names** (from the pulled 1.3.1 chart, T005): Deployments
+  `argo-workflow-controller` (Argo subchart, `fullnameOverride: argo`)
+  and `cluster-agent-workflowplane`, the agent's `cluster-agent-tls`
+  Secret, and `clusterAgent.planeID: default`. The quick checks depend on
+  these names.
+- **The build image's `realpath`** doesn't accept `--`. The build step's
+  symlink guard (RP-040) calls it without that.
+- `helm` must be on `$PATH` (ADR 0010), at 3.13 or later: Uninstall uses
+  `helm uninstall --ignore-not-found`. Verified with 3.16.
 
 Re-check all of these on every OpenChoreo upgrade.

@@ -299,34 +299,37 @@ func (r *ProviderInstanceReconciler) setStatus(ctx context.Context, inst resourc
 }
 
 // UninstallCleanup removes a removed ProviderInstance's package once its
-// Approval is executed, and reports the capability not installed, unless
-// another instance now provides it (re-created straight away, or a
-// duplicate), whose own reconcile reports it. A damaged LastSpec can't
-// strand it: Uninstall is per instance and idempotent, so every package
-// is asked to remove what this instance might have installed.
+// Approval is executed, and reports the capability not installed. When
+// another instance still provides the capability (re-created straight
+// away, or this one was a duplicate), the package stays: a package is
+// platform-wide, so uninstalling it would take it from the instance that
+// remains, whose own reconcile reports it. A damaged LastSpec can't
+// strand it: Uninstall is idempotent, so every package nothing else
+// provides is asked to remove what this instance might have installed.
 func UninstallCleanup(s store.Store[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus], c Catalogue, report ReadinessFunc) CleanupFunc {
+	uninstall := func(ctx context.Context, p Package, id string) error {
+		other, err := oldestFor(ctx, s, p.Capability, id)
+		if err != nil {
+			return err
+		}
+		if other.Metadata.ID != "" {
+			return nil
+		}
+		if err := p.Installer.Uninstall(ctx, id); err != nil {
+			return err
+		}
+		report(p.Capability, false, ReasonNotInstalled, "install the "+p.Provider+" package to use it")
+		return nil
+	}
 	return func(ctx context.Context, ref resource.ApprovalRef) error {
 		var spec resource.ProviderInstanceSpec
 		if len(ref.LastSpec) == 0 || json.Unmarshal(ref.LastSpec, &spec) != nil {
+			// Which capability it provided is unknown.
 			for _, p := range c.sorted() {
 				if p.Installer != nil {
-					if err := p.Installer.Uninstall(ctx, ref.ID); err != nil {
+					if err := uninstall(ctx, p, ref.ID); err != nil {
 						return err
 					}
-				}
-			}
-			// Which capability it provided is unknown, so each one nothing
-			// provides any more is reported not installed.
-			for _, p := range c.sorted() {
-				if p.Installer == nil {
-					continue
-				}
-				other, err := oldestFor(ctx, s, p.Capability, ref.ID)
-				if err != nil {
-					return err
-				}
-				if other.Metadata.ID == "" {
-					report(p.Capability, false, ReasonNotInstalled, "install the "+p.Provider+" package to use it")
 				}
 			}
 			return nil
@@ -335,16 +338,6 @@ func UninstallCleanup(s store.Store[resource.ProviderInstanceSpec, resource.Prov
 		if !ok || p.Installer == nil {
 			return nil // nothing this build installed
 		}
-		if err := p.Installer.Uninstall(ctx, ref.ID); err != nil {
-			return err
-		}
-		other, err := oldestFor(ctx, s, p.Capability, ref.ID)
-		if err != nil {
-			return err
-		}
-		if other.Metadata.ID == "" {
-			report(p.Capability, false, ReasonNotInstalled, "install the "+p.Provider+" package to use it")
-		}
-		return nil
+		return uninstall(ctx, p, ref.ID)
 	}
 }

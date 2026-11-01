@@ -833,6 +833,31 @@ purpose), **Closed** (fixed).
   - `podman build` resolves `COPY` and `ADD` sources within the context;
   - the workspace volume holds only that run's checkout;
   - triggering a build needs `serendip/builds/write`.
-- **Revisit:** in spec 022 T005, when the workflow's scripts are written.
-  Those scripts pass values after `--` and quote them. Recheck if build
-  methods other than a Dockerfile arrive.
+- **Spec 022 T005 (2026-11-01):** the build step now refuses a `path`
+  whose real directory, or a `dockerfile` whose real file, is outside the
+  checkout (`pwd -P` and `realpath`, checked in the `podman-runner:v1.2`
+  image against symlinks to `/` and `/etc/passwd`). The scripts quote
+  every value; what keeps a value from being read as an option is the
+  validation (an HTTPS or SSH URL, a full commit ID, and no leading `-`).
+  Symlinks *inside* the context are still `podman`'s to resolve.
+- **Revisit:** if build methods other than a Dockerfile arrive.
+
+## RP-041 — The build registry listens on the node's network without authentication
+
+- **Kind:** security. **Status:** Open, 2026-11-01. **Found:** spec 022
+  T005.
+- **What:** the builds package's `registry:2` runs with `hostNetwork` on
+  port 5000, so workloads can pull `localhost:5000/...` with no node
+  configuration (T001 item 2). It listens on every node address, with no
+  authentication and plain HTTP. Builds push to it through its Service,
+  which reaches the node's address, so it can't listen on `localhost`
+  alone.
+  - **What could happen:** anyone who can reach the node on port 5000 (on
+    a laptop, the local network) can pull images built from source, or
+    push one under a name a workload will pull next.
+- **What holds it today:** nothing in Serendip. A host firewall closing
+  port 5000 to everything but the node itself closes it.
+- **Revisit:** in spec 022 T015's security review. Candidates: a
+  NetworkPolicy can't cover `hostNetwork` pods, so registry `htpasswd`
+  auth with a pull Secret, or the containerd mirror (multi-node) with the
+  registry back on the pod network.
