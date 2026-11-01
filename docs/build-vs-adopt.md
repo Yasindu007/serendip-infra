@@ -12,7 +12,7 @@ console, CLI and MCP) and integrates everything else.
 - **Accepted risks and costs** of these choices live in
   `docs/risk-register.md`.
 
-Last updated: 2026-10-21.
+Last updated: 2026-11-01.
 
 ## Built (Serendip's own code)
 
@@ -36,6 +36,7 @@ Last updated: 2026-10-21.
 | Releases and bindings | Serendip writes every release and binding with the platform's auto-deploy off: one writer per binding, and Serendip's overrides never compete with it | Spec 020, ADR 0019 |
 | Log following | NDJSON over `fetch`, with caps, idle and maximum timers; the console reconnects | Spec 020 plan decision 8 |
 | JSON Schema validation | `core/jsonschema`: the platform's schemas use 7 keywords. It's about 300 lines of stdlib, fails closed on anything else, and refuses unknown settings the platform would silently drop | Spec 020 T008 |
+| A branch's head commit | `providers/internal/gitremote`: one `GET info/refs` over Git's smart HTTP, parsed as pkt-lines (protocol v0). It's about 200 lines of stdlib, HTTPS only, and it downloads no objects | Spec 022 plan decision 7, T006 |
 
 ## Adopted (other projects, integrated)
 
@@ -63,6 +64,7 @@ Last updated: 2026-10-21.
 | OpenChoreo's API (`openchoreo-api`) as Serendip's path | The Kubernetes API, directly | A new admin credential, a second authorization layer, and extra hops; it's closed to all pods (RP-018) | Spec 020 plan decision 3, ADR 0019 |
 | OpenChoreo's `occ` CLI and MCP | Serendip's CLI and MCP | They bypass Serendip's RBAC, approvals and audit; an admin-only escape hatch is deferred | Spec 021 |
 | `client-go` | Our small REST client | Weight (constitution 4) | Spec 006 |
+| `go-git`, or shelling out to `git ls-remote`, for auto-build's head check | `gitremote` | A large dependency, or a host binary, for one read of a ref list | Spec 022 T006 |
 | Service proxy, or an in-cluster helper, for the identity provider's management API | In-process port-forward | The proxy strips `Authorization`; a helper is another image to maintain | ADR 0015 |
 | SPDY-over-WebSocket port-forward (KEP-4006) | Legacy WebSocket mode | Needs a SPDY implementation (RP-004 watches this) | ADR 0015 |
 | A 428 "approval required" on every DELETE | Policy-approved Approvals | An approval for everything is a hassle; roles decide | Spec 019 |

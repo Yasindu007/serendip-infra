@@ -14,7 +14,7 @@ names files T005 and T006 create.
 | Checkout step | `alpine/git:v2.52.0` | `workflow.go` |
 | Build-and-push step | `ghcr.io/openchoreo/podman-runner:v1.2` | `workflow.go` |
 | OpenChoreo API group/version | `openchoreo.dev/v1alpha1` (`ClusterWorkflowPlane`, `ClusterWorkflow`, `WorkflowRun`) | `installer.go`, `builds.go` |
-| Argo API group/version | `argoproj.io/v1alpha1` (`Workflow`, read for run outputs) | `builds.go` |
+| Argo API group/version | `argoproj.io/v1alpha1` (`Workflow`, read for run phase, steps and outputs) | `builds.go` |
 | Verification cluster | `kindest/node:v1.34.0`, containerd 2.1.3 | n/a |
 
 Notes (spec 022 T001, verified on 1.3.1, 2026-10-24; details in
@@ -49,6 +49,25 @@ Notes (spec 022 T001, verified on 1.3.1, 2026-10-24; details in
   these names.
 - **The build image's `realpath`** doesn't accept `--`. The build step's
   symlink guard (RP-040) calls it without that.
+- **Run status** (T006, from the 1.3.1 and Argo 4.0.8 sources):
+  - **Conditions.** `WorkflowRun.status.conditions` are `WorkflowRunning`,
+    `WorkflowSucceeded`, `WorkflowFailed` and `WorkflowCompleted`.
+    `WorkflowFailed`'s message is always "Workflow execution failed", so
+    the real cause is the failed task's `message`.
+  - **A run that can't start** stays `WorkflowCompleted=False`, with a
+    reason such as `WorkflowPlaneNotFound`.
+  - **Tasks.** `tasks[]` keeps only the Argo nodes of type `Pod`, named
+    by `displayName`, and lags the Workflow.
+  - **Times.** The run's `startedAt` and `completedAt` are when its
+    controller noticed. `builds.go` prefers the Workflow's own times and
+    phase.
+  - **Pod names.** Argo names step pods
+    `<workflow>-<templateName>-<fnv32a>` (POD_NAMES v2, the default).
+    `builds.go` matches steps by that name.
+- **Emissary lines in `main`** are logfmt with `argo=true` (seen in T001
+  on 4.0.8). `buildlogs.go` drops lines with both `level=` and
+  `argo=true`. **Recheck the format on a live run (T014):** Argo 4 moved
+  to its own logging package.
 - `helm` must be on `$PATH` (ADR 0010), at 3.13 or later: Uninstall uses
   `helm uninstall --ignore-not-found`. Verified with 3.16.
 

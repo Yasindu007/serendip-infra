@@ -110,7 +110,7 @@ Dependency sketch:
   - `go build ./core/... ./api/...` passes with the package deleted
     (constitution 2).
 
-## T006 — The `BuildProvider` and `gitremote`
+## T006 — The `BuildProvider` and `gitremote` ✅ 2026-11-01
 
 - **Do:**
   - **`StartBuild`** (the `WorkflowRun`, plus a credential Secret when one
@@ -127,6 +127,64 @@ Dependency sketch:
     required, a missing branch);
   - an `ssh://` URL refused with a clear error;
   - the status-to-phase table covering every T001 status sample.
+- **Done as:**
+  - **Files:**
+    - `builds.go`: Start, Observe, Cancel, Remove and HeadCommit;
+    - `buildlogs.go`: logs and events;
+    - `providers/internal/gitremote/`, with T001's `info/refs` bodies
+      copied into `testdata/`.
+  - **Names:**
+    - **Runs** are `build-<16 hex of sha256(Build ID)>`. An ID can be 128
+      characters, with `:`.
+    - **The full ID** is in the `serendip.dev/build-id` annotation, and
+      `BuildLabel` carries the run name.
+    - **Images** go to `serendip/cmp-<hash>`, the same hash the
+      application provider names the Component with.
+  - **Start** creates and never updates. An existing run returns at once,
+    leaving its credential copy alone. The copy (`username` and
+    `password`; `token` is accepted, with the user name defaulting to
+    `git`) is applied before the run.
+  - **Cancel** deletes the run and the copy, the same as Remove. So after
+    a cancel, `ObserveBuild` reads `Gone`, never `Cancelled`. **T007 sets
+    `Cancelled` from the Build's own `spec.cancel`.**
+  - **Observe:**
+    - the phase is the run's conditions, or the Argo Workflow's phase
+      when that's further on, because the run lags;
+    - steps, commit and image come from the Workflow's `Pod` nodes, and
+      the run's tasks before it exists;
+    - the failure message is the failed step's own, because OpenChoreo's
+      is a fixed sentence;
+    - a run that can't start (`WorkflowPlaneNotFound`, and the like)
+      reads Queued with that reason;
+    - Succeeded without an image reads Failed.
+  - **Logs** are read step by step in order, with Argo's own `argo=true`
+    lines dropped. With follow, a stream:
+    - waits for each step's pod, and for its container to start;
+    - ends when the run does.
+
+    A gone run's logs are an error that says "expired". There's no
+    sentinel error, because `api/` can't import a provider. **T008 checks
+    `ObserveBuild`'s `Gone` first.**
+  - **gitremote:**
+    - HTTPS only, and it never follows a redirect off HTTPS;
+    - an 8 MiB cap, with its own error when it's hit;
+    - an advertisement without its final flush is truncated, not "no
+      branch";
+    - `ErrSSH`, `ErrAuth`, `ErrNotFound` and `ErrNoBranch`;
+    - a bad URL is never repeated in the error, since it may hold a
+      credential.
+  - **Reviews:**
+    - **contract-guardian** passed. Its blocker, the URL in an error, is
+      fixed.
+    - **go-reviewer:** its fixes are in: the open-timeout cause, a follow
+      stuck on a container that never starts, the re-list race, the
+      gitremote edge cases, and style.
+    - **RP-042** was added (a follower's polling).
+  - **Still open, for T007:** when a start fails after its credential
+    copy is made, the reconciler retries the start, or calls
+    `RemoveBuild`, so the copy doesn't stay behind. Otherwise a copy lives
+    as long as its run, up to an hour after it ends, which is the plan's
+    accepted risk.
 
 ## T007 — The Build reconciler, image resolution and auto-build
 

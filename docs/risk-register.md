@@ -861,3 +861,22 @@ purpose), **Closed** (fixed).
   NetworkPolicy can't cover `hostNetwork` pods, so registry `htpasswd`
   auth with a pull Secret, or the containerd mirror (multi-node) with the
   registry back on the pod network.
+
+## RP-042 — A followed build log polls the cluster while it waits for a step
+
+- **Kind:** performance. **Status:** Accepted, 2026-11-01. **Found:** spec
+  022 T006 (go-reviewer).
+- **What:** `BuildLogs` with follow streams the steps one after another.
+  - **While a step's pod doesn't exist yet,** or its container hasn't
+    started, it polls every 2 s.
+  - **Each poll costs up to three API reads:** a pod list, the
+    `WorkflowRun` and the Argo Workflow.
+  - **The cost is per follower.** Each open console tab or `--follow`
+    adds its own polling.
+  - **While a step is running,** it's one ordinary streamed request.
+- **Why accepted:** the wait is short. It's the gap between steps, or an
+  image pull. And followers are few on one machine. A watch would cost a
+  held connection per follower anyway.
+- **Revisit:** in T013's footprint run, if a followed build shows on the
+  API server or `serendipd`. Candidates: back off from 2 s to 10 s, or
+  share one poll between followers of the same Build.

@@ -16,7 +16,7 @@ Last updated: 2026-11-01
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T005
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T006
 are done.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
@@ -109,15 +109,44 @@ are done.**
   - The chart's names were taken from the pulled chart (`VERSIONS.md`).
     Nothing ran on the cluster: T005 is verified against fakes, and
     T014 runs it live.
-- **Next step:** T006, the `BuildProvider` (`builds.go`) and
-  `providers/internal/gitremote`. Use the exported constants from
-  `installer.go`/`workflow.go`: `BuildLabel` on every run and `<run>-git`
-  copy, `RunNamespace`, and the step and output names. `serendip-t018` is
-  up (Docker running, 2026-11-01). `serendipd` isn't running.
+- **T006 is done** (2026-11-01): `builds.go` and `buildlogs.go` (the
+  `Builds` BuildProvider, `NewBuilds(client)`) and
+  `providers/internal/gitremote`. The details are in tasks.md's "Done as".
+  - **Runs** are named `build-<16 hex of sha256(ID)>`, and images go to
+    `serendip/cmp-<hash>`.
+  - **Phase:** the run's conditions, or the Argo Workflow's phase when
+    that's further on. Steps, commit and image come from the Workflow's
+    nodes.
+  - **Logs** are read step by step, and a follow ends with the run.
+  - **gitremote** is HTTPS only, refuses redirects off HTTPS, and caps
+    the answer at 8 MiB.
+  - **Reviews:** contract-guardian passed, and its blocker is fixed;
+    go-reviewer's fixes are in. **RP-042** was added (a follower's
+    polling).
+  - **Upstream facts** (status shapes, pod names, Argo's own log lines)
+    are in `VERSIONS.md`. The `argo=true` filter is rechecked live in
+    T014.
+- **Next step:** T007, the Build reconciler, image resolution and
+  auto-build. It must:
+  - **set `Cancelled` from `spec.cancel` itself.** CancelBuild deletes
+    the run, so ObserveBuild then reads `Gone`;
+  - **ensure `RunNamespace`** only through StartBuild (it does that when
+    there's a credential);
+  - **retry or `RemoveBuild` after a failed start,** so a credential copy
+    isn't left behind;
+  - **say "logs expired" in T008 by checking `ObserveBuild().Gone`,**
+    since BuildLogs' expired error has no sentinel;
+  - **map gitremote's errors** to the plan's "can't be noticed" messages:
+    `ErrSSH`, `ErrAuth`, `ErrNotFound`, `ErrNoBranch`, and a plain
+    error for an unreachable repository.
+
+  Also still open: T002's note that `validateComponentSpec` requires
+  `image`. `serendip-t018` is up, and `serendipd` isn't running.
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
   T002 (`feat(core): spec 022 T002 ADR 0020 and build core types`), and
   T003 and T004 (`feat(core): spec 022 T003 store uniqueness and T004 cheap resync`),
-  and T005 (`feat(providers): spec 022 T005 workflow-plane installer`).
+  T005 (`feat(providers): spec 022 T005 workflow-plane installer`), and
+  T006 (`feat(providers): spec 022 T006 build provider and gitremote`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;

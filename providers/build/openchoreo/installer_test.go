@@ -120,7 +120,7 @@ func (f *fakeAPI) handler(t *testing.T) http.HandlerFunc {
 					listed = true
 				}
 			}
-			if !listed && path != "/api/v1/pods" && path != workflowRunsPath {
+			if !listed && !strings.HasSuffix(path, "/pods") && path != workflowRunsPath {
 				http.NotFound(w, r)
 				return
 			}
@@ -138,6 +138,19 @@ func (f *fakeAPI) handler(t *testing.T) http.HandlerFunc {
 				delete(f.objects, path)
 			}
 			w.WriteHeader(http.StatusOK)
+		case http.MethodPost: // a create into the collection
+			var in kubernetes.Object
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Errorf("decode create %s: %v", path, err)
+			}
+			item := path + "/" + in.Metadata.Name
+			if _, ok := f.objects[item]; ok {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			f.objects[item] = in
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(in)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, path)
 			w.WriteHeader(http.StatusMethodNotAllowed)
