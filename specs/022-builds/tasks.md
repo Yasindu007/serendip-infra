@@ -344,10 +344,12 @@ Dependency sketch:
     and cancel's exhausted retries as 503, not 409. Accepted, not fixed:
     - **Other source fields stay editable without the value permission**
       (branch, path, Dockerfile, auto-build), since they don't send the
-      credential to another host.
-    - **A run that expires between `ObserveBuild` and `BuildLogs`**
-      answers 502, not 410: a window of one request, an hour after the
-      build ends.
+      credential to another host, and the build step never sees it.
+      **RP-044** records that condition.
+  - **Fixed afterwards:** a run that expires between `ObserveBuild` and
+    the logs or events read answered 502. A failed read now looks again,
+    and answers 410 when the run is gone (`readFailed`). That's why
+    `readRecentLogs` and `followLogs` take a failure callback.
   - **For T009:** pass `api.WithBuilds(<the lazy build handle>)`. Readiness
     comes from the registry's `build` capability, which the
     ProviderInstance reconciler already reports.

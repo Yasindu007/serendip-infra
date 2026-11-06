@@ -234,10 +234,27 @@ func (h *BuildHandler) run(w http.ResponseWriter, r *http.Request) (resource.Bui
 		return resource.Build{}, false
 	}
 	if obs.Gone {
-		WriteProblem(w, http.StatusGone, "logs expired", "build "+b.Metadata.Name+"'s logs and events expired: they're kept for an hour after a build ends", reqID)
+		writeExpired(w, r, b)
 		return resource.Build{}, false
 	}
 	return b, true
+}
+
+func writeExpired(w http.ResponseWriter, r *http.Request, b resource.Build) {
+	WriteProblem(w, http.StatusGone, "logs expired", "build "+b.Metadata.Name+"'s logs and events expired: they're kept for an hour after a build ends", audit.RequestIDFrom(r.Context()))
+}
+
+// readFailed answers a failed read of b's logs or events. The run may
+// have expired since run() looked, so it's looked at again: gone is 410,
+// as it would have been a moment earlier, not a 502.
+func (h *BuildHandler) readFailed(b resource.Build) func(http.ResponseWriter, *http.Request, error) {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		if obs, oerr := h.provider.ObserveBuild(r.Context(), b); oerr == nil && obs.Gone {
+			writeExpired(w, r, b)
+			return
+		}
+		buildReadFailed(w, r, err)
+	}
 }
 
 // buildReadFailed is platformFailed in the builds package's words.
@@ -269,7 +286,7 @@ func (h *BuildHandler) Events(w http.ResponseWriter, r *http.Request) {
 	}
 	events, err := h.provider.BuildEvents(r.Context(), b, since)
 	if err != nil {
-		buildReadFailed(w, r, err)
+		h.readFailed(b)(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": nonNil(events)})
@@ -290,10 +307,10 @@ func (h *BuildHandler) Logs(w http.ResponseWriter, r *http.Request) {
 	}
 	open := func(ctx context.Context) (reconcile.LogStream, error) { return h.provider.BuildLogs(ctx, b, opts) }
 	if opts.Follow {
-		followLogs(w, r, h.streams, h.idle, h.max, open)
+		followLogs(w, r, h.streams, h.idle, h.max, open, h.readFailed(b))
 		return
 	}
-	readRecentLogs(w, r, h.recent, open)
+	readRecentLogs(w, r, h.recent, open, h.readFailed(b))
 }
 
 // secretValueRead is what naming a credential Secret on a Component needs:

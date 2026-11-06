@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,26 @@ import (
 type fakeBuilds struct {
 	mu   sync.Mutex
 	gone map[string]bool
+	// expireOnRead makes the next logs or events read find the run just
+	// removed, as the platform's clean-up would between two calls.
+	expireOnRead bool
+	// failRead fails the next read with the run still there.
+	failRead bool
+}
+
+// read fails the read and expires the run when expireOnRead is set.
+func (f *fakeBuilds) read(b resource.Build) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failRead {
+		f.failRead = false
+		return errors.New("connection refused")
+	}
+	if !f.expireOnRead {
+		return nil
+	}
+	f.expireOnRead, f.gone[b.Metadata.ID] = false, true
+	return errors.New("workflowruns.openchoreo.dev \"build-1\" not found")
 }
 
 func (f *fakeBuilds) StartBuild(context.Context, resource.Application, resource.Component, resource.Build, map[string]any) error {
@@ -36,10 +57,16 @@ func (f *fakeBuilds) ObserveBuild(_ context.Context, b resource.Build) (reconcil
 }
 func (f *fakeBuilds) CancelBuild(context.Context, resource.Build) error { return nil }
 func (f *fakeBuilds) RemoveBuild(context.Context, resource.Build) error { return nil }
-func (f *fakeBuilds) BuildLogs(_ context.Context, _ resource.Build, opts reconcile.LogOptions) (reconcile.LogStream, error) {
+func (f *fakeBuilds) BuildLogs(_ context.Context, b resource.Build, opts reconcile.LogOptions) (reconcile.LogStream, error) {
+	if err := f.read(b); err != nil {
+		return nil, err
+	}
 	return &sliceStream{lines: []reconcile.LogLine{{Time: time.Now(), Instance: "build", Line: "STEP 1/3: FROM alpine"}}}, nil
 }
-func (f *fakeBuilds) BuildEvents(context.Context, resource.Build, time.Time) ([]reconcile.RuntimeEvent, error) {
+func (f *fakeBuilds) BuildEvents(_ context.Context, b resource.Build, _ time.Time) ([]reconcile.RuntimeEvent, error) {
+	if err := f.read(b); err != nil {
+		return nil, err
+	}
 	return []reconcile.RuntimeEvent{{Type: "Normal", Reason: "Pulled", ObjectKind: "Pod", ObjectName: "build-1"}}, nil
 }
 func (f *fakeBuilds) HeadCommit(context.Context, resource.ComponentSource, map[string]any) (string, error) {
@@ -230,6 +257,33 @@ func TestBuildLogsExpired(t *testing.T) {
 	if res.StatusCode != http.StatusOK || !strings.Contains(string(streamed), "FROM alpine") || !strings.HasSuffix(string(streamed), `{"end":"ended"}`+"\n") {
 		t.Errorf("followed build logs: %d %q", res.StatusCode, streamed)
 	}
+
+	// The run expires between the check and the read: still 410, not 502,
+	// for logs, followed logs and events.
+	for _, path := range []string{logs, logs + "?follow=true", "/v1/builds/" + b.Metadata.ID + "/events"} {
+		w.builds.mu.Lock()
+		w.builds.expireOnRead, w.builds.gone[b.Metadata.ID] = true, false
+		w.builds.mu.Unlock()
+		if path == logs+"?follow=true" {
+			req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+			req.Header.Set("Authorization", "Bearer tok-logreader")
+			res, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.Body.Close()
+			if res.StatusCode != http.StatusGone {
+				t.Errorf("follow, expiring mid-request: %d", res.StatusCode)
+			}
+			continue
+		}
+		w.call(t, "tok-logreader", http.MethodGet, path, nil, http.StatusGone)
+	}
+	// A read failing for another reason is still 502.
+	w.builds.mu.Lock()
+	w.builds.gone[b.Metadata.ID], w.builds.failRead = false, true
+	w.builds.mu.Unlock()
+	w.call(t, "tok-logreader", http.MethodGet, logs, nil, http.StatusBadGateway)
 
 	w.builds.mu.Lock()
 	w.builds.gone[b.Metadata.ID] = true

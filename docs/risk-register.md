@@ -52,6 +52,7 @@ purpose), **Closed** (fixed).
 | RP-029 | Release listing scans every release, and a component-type change re-releases every Component | Performance | Accepted | Spec 020 T005 review |
 | RP-038 | Build steps run privileged, without user namespaces | Security | Open | Spec 022 T001 |
 | RP-039 | The workflow plane's Argo CRDs outlive its removal, and every Helm run downloads them | Footprint, network | Decided | Spec 022 T001 |
+| RP-044 | A credential's use is checked only when the Secret or the repository changes, which holds only while the build step can't see the credential | Security | Accepted | Spec 022 T008 review |
 
 ---
 
@@ -901,3 +902,41 @@ purpose), **Closed** (fixed).
   as resync lag. Candidates: a shorter head-read timeout than the
   reconcile's, or one background poller that enqueues the Component when
   the head moves.
+
+## RP-044 — A credential's use is checked only when the Secret or repository changes
+
+- **Kind:** security. **Status:** Accepted, 2026-11-06. **Found:** spec
+  022 T008 (go-reviewer).
+- **What:** naming a Component's `source.credentialSecret` needs
+  `serendip/secrets/value/read` at that Secret (`api/build_handler.go`,
+  `sourceChecker`).
+  - **When it's checked:** when the credential is newly named, or the
+    repository changes. Those are the two ways to send the credential to
+    a host the caller chooses.
+  - **When it isn't:** someone with Component write, but not the value,
+    may still change the branch, path, Dockerfile or auto-build of a
+    Component that already has a credential. That picks which of the
+    repository's code a build runs, with that credential cloning it.
+- **Why accepted:** the credential never reaches the code the build runs.
+  - **The Git Secret is mounted only in the checkout step**
+    (`providers/build/openchoreo/workflow.go`). Git reads it through a
+    `GIT_ASKPASS` script in that container's own `/tmp`, so it isn't
+    written into `.git/config`.
+  - **The build step**, which runs the Dockerfile, mounts only the
+    workspace (the checked-out source) and its own storage.
+  - **So a Dockerfile can't print the credential** into the build logs.
+  - **The checks wouldn't stop the code anyway.** Anyone who can push to
+    the configured branch already changes what's built, without a
+    Serendip edit.
+  - **Escaping the privileged build pod** is RP-038's risk, for any build
+    of code the caller controls.
+- **The condition this rests on:** the credential stays out of the build
+  step, and out of the workspace (`/mnt/vol`) the two steps share. Today
+  the checkout writes only the source there. The remote in `.git/config`
+  is the plain URL. **Revisit at once** if the build step ever mounts the
+  Git Secret, gets the credential in its environment, or shares a
+  container or `/tmp` with the checkout. The same goes if the checkout
+  writes a credential helper, a `.netrc`, or a URL with the credential in
+  it into the workspace. Also revisit if a build method other than
+  the Dockerfile workflow is added. Then the check must cover every
+  source field.

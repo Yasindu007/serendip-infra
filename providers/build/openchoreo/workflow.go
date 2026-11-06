@@ -37,6 +37,12 @@ const (
 // checkoutScript clones the branch's head, or fetches one commit, using
 // the mounted <run>-git Secret's username and password through
 // GIT_ASKPASS when it exists.
+//
+// Only this step may see the credential, and nothing of it may reach the
+// workspace the build step shares (the askpass script stays in this
+// container's /tmp; the remote in .git/config is the plain URL): the API
+// lets someone without the Secret's value change which code the build step
+// runs (RP-044).
 const checkoutScript = `if [ -f /etc/git-secret/password ]; then
   printf '#!/bin/sh\ncase "$1" in Username*) cat /etc/git-secret/username 2>/dev/null || echo git;; *) cat /etc/git-secret/password;; esac\n' > /tmp/askpass
   chmod +x /tmp/askpass

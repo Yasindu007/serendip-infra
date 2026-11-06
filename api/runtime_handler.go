@@ -231,16 +231,16 @@ func (h *RuntimeHandler) Logs(w http.ResponseWriter, r *http.Request) {
 	}
 	open := func(ctx context.Context) (reconcile.LogStream, error) { return h.runtime.Logs(ctx, d, env, opts) }
 	if opts.Follow {
-		followLogs(w, r, &h.streams, h.idle, h.max, open)
+		followLogs(w, r, &h.streams, h.idle, h.max, open, platformFailed)
 		return
 	}
-	readRecentLogs(w, r, &h.recent, open)
+	readRecentLogs(w, r, &h.recent, open, platformFailed)
 }
 
 // readRecentLogs answers {"lines": [...], "truncated": bool} from the
 // stream open gives, counted against limit. Deployment and build logs
-// share it, and their caps.
-func readRecentLogs(w http.ResponseWriter, r *http.Request, limit *streamLimiter, open func(context.Context) (reconcile.LogStream, error)) {
+// share it, and their caps; failed answers a failed read.
+func readRecentLogs(w http.ResponseWriter, r *http.Request, limit *streamLimiter, open func(context.Context) (reconcile.LogStream, error), failed func(http.ResponseWriter, *http.Request, error)) {
 	reqID := audit.RequestIDFrom(r.Context())
 	caller, ok := callerFrom(r.Context())
 	if !ok {
@@ -258,13 +258,13 @@ func readRecentLogs(w http.ResponseWriter, r *http.Request, limit *streamLimiter
 	defer cancel()
 	stream, err := open(ctx)
 	if err != nil {
-		platformFailed(w, r, err)
+		failed(w, r, err)
 		return
 	}
 	defer stream.Close()
 	lines, truncated, err := recentLines(stream)
 	if err != nil {
-		platformFailed(w, r, err)
+		failed(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "truncated": truncated})
@@ -304,8 +304,9 @@ func recentLines(stream reconcile.LogStream) ([]reconcile.LogLine, bool, error) 
 }
 
 // followLogs streams the lines of the stream open gives as NDJSON, counted
-// against limit, ending after idle without a line or max in all.
-func followLogs(w http.ResponseWriter, r *http.Request, limit *streamLimiter, idleAfter, maxDuration time.Duration, open func(context.Context) (reconcile.LogStream, error)) {
+// against limit, ending after idle without a line or max in all; failed
+// answers a stream that can't be opened.
+func followLogs(w http.ResponseWriter, r *http.Request, limit *streamLimiter, idleAfter, maxDuration time.Duration, open func(context.Context) (reconcile.LogStream, error), failed func(http.ResponseWriter, *http.Request, error)) {
 	reqID := audit.RequestIDFrom(r.Context())
 	caller, ok := callerFrom(r.Context())
 	if !ok {
@@ -333,7 +334,7 @@ func followLogs(w http.ResponseWriter, r *http.Request, limit *streamLimiter, id
 	defer cancel()
 	stream, err := open(ctx)
 	if err != nil {
-		platformFailed(w, r, err)
+		failed(w, r, err)
 		return
 	}
 	defer stream.Close()

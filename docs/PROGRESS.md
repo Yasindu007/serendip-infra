@@ -161,6 +161,9 @@ are done.**
   - **The catalogue** has six `builds_*` operations, and
     `docs/cli-and-mcp.md` is updated.
   - **go-reviewer:** its fixes are in.
+  - **A run that expires mid-request** now answers 410, not 502.
+  - **RP-044:** the credential check rests on the build step never seeing
+    the credential.
 - **Next step:** T009, `serendipd` wiring:
   - `WithBuilds` (the lazy build handle);
   - `NewBuildReconciler` with `engine.Enqueue`;
@@ -174,7 +177,8 @@ are done.**
   T005 (`feat(providers): spec 022 T005 workflow-plane installer`),
   T006 (`feat(providers): spec 022 T006 build provider and gitremote`), and
   T007 (`feat(core): spec 022 T007 build reconciler and auto-build`), and
-  T008 (`feat(api): spec 022 T008 builds API`).
+  T008 (`feat(api): spec 022 T008 builds API`, then
+  `fix(api): spec 022 T008 expired build reads and RP-044`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;
