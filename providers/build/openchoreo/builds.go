@@ -193,7 +193,24 @@ func (p *Builds) HeadCommit(ctx context.Context, src resource.ComponentSource, c
 	if err != nil {
 		return "", err
 	}
-	return gitremote.HeadCommit(ctx, p.http, src.Repository, src.Branch, auth)
+	head, err := gitremote.HeadCommit(ctx, p.http, src.Repository, src.Branch, auth)
+	return head, headError(err)
+}
+
+// headError wraps gitremote's errors in the core ones auto-build tells
+// apart, keeping the original's text.
+func headError(err error) error {
+	for _, m := range []struct{ from, to error }{
+		{gitremote.ErrSSH, reconcile.ErrSourceSSH},
+		{gitremote.ErrAuth, reconcile.ErrSourceAuth},
+		{gitremote.ErrNotFound, reconcile.ErrSourceNotFound},
+		{gitremote.ErrNoBranch, reconcile.ErrSourceNoBranch},
+	} {
+		if errors.Is(err, m.from) {
+			return fmt.Errorf("%w: %w", m.to, err)
+		}
+	}
+	return err
 }
 
 // runStatus is the part of a WorkflowRun's status that's read.

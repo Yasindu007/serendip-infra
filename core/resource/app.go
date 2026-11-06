@@ -118,6 +118,10 @@ type ComponentPort struct {
 type ComponentStatus struct {
 	Status
 	Endpoints []ComponentEndpointStatus `json:"endpoints,omitempty"`
+	// Image is the built image a source Component runs: its newest
+	// successful build of its current source (spec 022). Empty for an
+	// image Component, and until the first build succeeds.
+	Image string `json:"image,omitempty"`
 }
 
 // ComponentEndpointStatus is where one exposed port can be reached from

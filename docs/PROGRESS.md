@@ -12,11 +12,11 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-11-01
+Last updated: 2026-11-06
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T006
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T007
 are done.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
@@ -126,27 +126,36 @@ are done.**
   - **Upstream facts** (status shapes, pod names, Argo's own log lines)
     are in `VERSIONS.md`. The `argo=true` filter is rechecked live in
     T014.
-- **Next step:** T007, the Build reconciler, image resolution and
-  auto-build. It must:
-  - **set `Cancelled` from `spec.cancel` itself.** CancelBuild deletes
-    the run, so ObserveBuild then reads `Gone`;
-  - **ensure `RunNamespace`** only through StartBuild (it does that when
-    there's a credential);
-  - **retry or `RemoveBuild` after a failed start,** so a credential copy
-    isn't left behind;
-  - **say "logs expired" in T008 by checking `ObserveBuild().Gone`,**
-    since BuildLogs' expired error has no sentinel;
-  - **map gitremote's errors** to the plan's "can't be noticed" messages:
-    `ErrSSH`, `ErrAuth`, `ErrNotFound`, `ErrNoBranch`, and a plain
-    error for an unreachable repository.
+- **T007 is done** (2026-11-06): `BuildReconciler`, image resolution and
+  auto-build (`core/reconcile/build.go`, `componentbuild.go`). The
+  details are in tasks.md's "Done as".
+  - **A source Component** runs its newest successful build of its
+    current source. That's `status.image`, which the Deployment reconciler
+    also uses. Until there is one, it reads `WaitingForBuild`.
+  - **The first build** is automatic, on create or a source change, as
+    `system:auto-build`.
+  - **Cancel and start:** cancel always calls `CancelBuild`. A failed
+    start removes the credential copy and retries.
+  - **Auto-build** reads the head every 5 minutes, with an `AutoBuild`
+    condition. HeadCommit's errors are now core sentinels (`ErrSource*`).
+    T002's `image`-required note is closed.
+  - **RP-043** was added: the head read runs on the reconcile loop.
+  - **Reviews:** contract-guardian and go-reviewer; their fixes are in.
+- **Next step:** T008, the API. It must:
+  - **say "logs expired"** by checking `ObserveBuild().Gone`, since
+    BuildLogs' expired error has no sentinel;
+  - **check the caller may read `source.credentialSecret`**, since the
+    reconciler reads it as the system;
+  - **check the build capability is ready** for `source` (422 naming the
+    package).
 
-  Also still open: T002's note that `validateComponentSpec` requires
-  `image`. `serendip-t018` is up, and `serendipd` isn't running.
+  `serendip-t018` is up, and `serendipd` isn't running.
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
   T002 (`feat(core): spec 022 T002 ADR 0020 and build core types`), and
   T003 and T004 (`feat(core): spec 022 T003 store uniqueness and T004 cheap resync`),
   T005 (`feat(providers): spec 022 T005 workflow-plane installer`), and
-  T006 (`feat(providers): spec 022 T006 build provider and gitremote`).
+  T006 (`feat(providers): spec 022 T006 build provider and gitremote`), and
+  T007 (`feat(core): spec 022 T007 build reconciler and auto-build`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;

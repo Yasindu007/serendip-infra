@@ -159,6 +159,16 @@ type ComponentReconciler struct {
 	components store.Store[resource.ComponentSpec, resource.ComponentStatus]
 	apps       store.Store[resource.ApplicationSpec, resource.ApplicationStatus]
 	provider   ApplicationPlatformProvider
+
+	// Building from source (WithBuilds); nil builds means a source
+	// Component is Unsupported.
+	builds        store.Store[resource.BuildSpec, resource.BuildStatus]
+	buildProvider BuildProvider
+	creds         CredentialReader
+	// lastPoll is when auto-build last read each Component's branch head.
+	// It's in memory: after a restart each is read once more, early.
+	lastPoll map[string]time.Time
+	now      func() time.Time
 }
 
 func NewComponentReconciler(
@@ -166,7 +176,7 @@ func NewComponentReconciler(
 	apps store.Store[resource.ApplicationSpec, resource.ApplicationStatus],
 	provider ApplicationPlatformProvider,
 ) *ComponentReconciler {
-	return &ComponentReconciler{components: components, apps: apps, provider: provider}
+	return &ComponentReconciler{components: components, apps: apps, provider: provider, lastPoll: map[string]time.Time{}, now: time.Now}
 }
 
 var _ Reconciler = (*ComponentReconciler)(nil)
@@ -174,52 +184,70 @@ var _ Reconciler = (*ComponentReconciler)(nil)
 func (r *ComponentReconciler) Reconcile(ctx context.Context, ref graph.ResourceRef) error {
 	comp, err := r.components.Get(ctx, ref.ID)
 	if errors.Is(err, store.ErrNotFound) {
+		delete(r.lastPoll, ref.ID)
 		return r.provider.DeleteComponent(ctx, resource.Component{Metadata: resource.Metadata{ID: ref.ID}})
 	}
 	if err != nil {
 		return err
 	}
 
-	obs, err := r.observe(ctx, comp)
+	obs, src, err := r.observe(ctx, comp)
 	if err != nil {
 		return err
 	}
-	return requeueWhen(r.setState(ctx, comp, obs), componentConverging(obs))
+	return requeueWhen(r.setState(ctx, comp, obs, src), componentConverging(obs))
 }
 
 // observe works out comp's state: a provider observation, or a not-deployed
-// outcome reached before asking the provider. An error means the store
-// couldn't be read.
-func (r *ComponentReconciler) observe(ctx context.Context, comp resource.Component) (ComponentObservation, error) {
+// outcome reached before asking the provider, and for a source Component
+// what its builds say. An error means the store couldn't be read or
+// written.
+func (r *ComponentReconciler) observe(ctx context.Context, comp resource.Component) (ComponentObservation, sourceState, error) {
 	if err := validateComponentSpec(comp.Spec); err != nil {
-		return notDeployed(comp, ReasonInvalidSpec, err.Error()), nil
+		return notDeployed(comp, ReasonInvalidSpec, err.Error()), sourceState{}, nil
 	}
 	appID, err := owningApplicationID(comp)
 	if err != nil {
-		return notDeployed(comp, ReasonInvalidSpec, err.Error()), nil
+		return notDeployed(comp, ReasonInvalidSpec, err.Error()), sourceState{}, nil
+	}
+
+	// Builds don't need the Application, so they go on while it isn't
+	// Ready.
+	var src sourceState
+	if comp.Spec.Source != nil {
+		if r.builds == nil {
+			return notDeployed(comp, ReasonUnsupported, "building from source needs the builds package"), src, nil
+		}
+		if src, err = r.source(ctx, comp); err != nil {
+			return ComponentObservation{}, sourceState{}, err
+		}
+	}
+	run, ok := runnable(comp, src.image)
+	if !ok {
+		return notDeployed(comp, ReasonWaitingForBuild, src.waiting), src, nil
 	}
 
 	app, err := r.apps.Get(ctx, appID)
 	if errors.Is(err, store.ErrNotFound) {
 		return notDeployed(comp, ReasonWaitingForApplication,
-			fmt.Sprintf("owning Application %s not found", appID)), nil
+			fmt.Sprintf("owning Application %s not found", appID)), src, nil
 	}
 	if err != nil {
-		return ComponentObservation{}, err
+		return ComponentObservation{}, sourceState{}, err
 	}
 	if c := findCondition(app.Status.Conditions, conditionReady); c == nil || c.Status != resource.ConditionTrue {
 		return notDeployed(comp, ReasonWaitingForApplication,
-			fmt.Sprintf("owning Application %s is not Ready yet", appID)), nil
+			fmt.Sprintf("owning Application %s is not Ready yet", appID)), src, nil
 	}
 
-	obs, err := r.provider.EnsureComponent(ctx, app, comp)
+	obs, err := r.provider.EnsureComponent(ctx, app, run)
 	if errors.Is(err, ErrProviderNotReady) {
-		return notDeployed(comp, ReasonProviderNotReady, providerNotReadyMessage(applicationPlatformCapability)), nil
+		return notDeployed(comp, ReasonProviderNotReady, providerNotReadyMessage(applicationPlatformCapability)), src, nil
 	}
 	if err != nil {
-		return notDeployed(comp, ReasonEnsureFailed, err.Error()), nil
+		return notDeployed(comp, ReasonEnsureFailed, err.Error()), src, nil
 	}
-	return obs, nil
+	return obs, src, nil
 }
 
 // notDeployed is a Ready=False outcome reached without the provider's
@@ -256,7 +284,7 @@ func componentConverging(obs ComponentObservation) bool {
 // reconciler, extended to the new fields. Message churn alone is not a
 // change. Reachable is removed, and endpoints cleared, when nothing is
 // exposed; endpoints are published only while Reachable is true.
-func (r *ComponentReconciler) setState(ctx context.Context, comp resource.Component, obs ComponentObservation) error {
+func (r *ComponentReconciler) setState(ctx context.Context, comp resource.Component, obs ComponentObservation, src sourceState) error {
 	now := time.Now()
 	ready := resource.Condition{Type: conditionReady, Status: readyStatus(obs.Ready), Reason: obs.Reason, Message: obs.Message, LastTransitionTime: now}
 
@@ -277,7 +305,9 @@ func (r *ComponentReconciler) setState(ctx context.Context, comp resource.Compon
 
 	if conditionUnchanged(comp.Status.Conditions, ready) &&
 		reachableUnchanged(comp.Status.Conditions, reach) &&
-		endpointsEqual(comp.Status.Endpoints, endpoints) {
+		endpointsEqual(comp.Status.Endpoints, endpoints) &&
+		autoBuildUnchanged(comp.Status.Conditions, src.autoBuild) &&
+		comp.Status.Image == src.image {
 		return nil
 	}
 
@@ -287,9 +317,25 @@ func (r *ComponentReconciler) setState(ctx context.Context, comp resource.Compon
 	} else {
 		comp.Status.Conditions = removeCondition(comp.Status.Conditions, conditionReachable)
 	}
+	if src.autoBuild != nil {
+		comp.Status.Conditions = upsertCondition(comp.Status.Conditions, *src.autoBuild)
+	} else {
+		comp.Status.Conditions = removeCondition(comp.Status.Conditions, conditionAutoBuild)
+	}
 	comp.Status.Endpoints = endpoints
+	comp.Status.Image = src.image
 	_, err := r.components.Update(ctx, comp)
 	return err
+}
+
+// autoBuildUnchanged compares the AutoBuild condition, message included:
+// its messages are Serendip's own, and each says something different.
+func autoBuildUnchanged(conditions []resource.Condition, want *resource.Condition) bool {
+	existing := findCondition(conditions, conditionAutoBuild)
+	if want == nil || existing == nil {
+		return want == nil && existing == nil
+	}
+	return existing.Status == want.Status && existing.Reason == want.Reason && existing.Message == want.Message
 }
 
 // keepTransitionTime preserves c's previous LastTransitionTime when its
@@ -312,6 +358,7 @@ var ownWords = map[string]bool{
 	ReasonWaitingForApplication: true,
 	ReasonInvalidSpec:           true,
 	ReasonUnsupported:           true,
+	ReasonWaitingForBuild:       true,
 }
 
 func conditionUnchanged(conditions []resource.Condition, want resource.Condition) bool {
@@ -363,8 +410,8 @@ var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 // validateComponentSpec rejects specs no provider could run, so they
 // surface as InvalidSpec rather than as a provider-side failure.
 func validateComponentSpec(spec resource.ComponentSpec) error {
-	if spec.Image == "" {
-		return errors.New("spec.image is required")
+	if err := resource.ValidateComponentSource(spec); err != nil {
+		return err
 	}
 	seen := make(map[string]bool, len(spec.Ports))
 	for i, p := range spec.Ports {

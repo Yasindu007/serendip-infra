@@ -50,6 +50,14 @@ type BuildStatus struct {
 	StartedAt  time.Time   `json:"startedAt,omitzero"`
 	FinishedAt time.Time   `json:"finishedAt,omitzero"`
 	Steps      []BuildStep `json:"steps,omitempty"`
+	// Source is what the build builds: the Component's source as it was
+	// when the build reconciler first saw the Build, so editing the
+	// Component later doesn't change a build already asked for. AutoBuild
+	// is never set on it.
+	Source *ComponentSource `json:"source,omitempty"`
+	// Started is set once the build's run was started on the platform;
+	// before that, a Build is only waiting its turn.
+	Started bool `json:"started,omitempty"`
 }
 
 // BuildStep is one step of a build, in the order they run.
@@ -120,6 +128,14 @@ func (s ComponentSource) WithDefaults() ComponentSource {
 		s.Dockerfile = "Dockerfile"
 	}
 	return s
+}
+
+// SameBuild reports whether s and o build the same thing: the same
+// repository, branch, path and Dockerfile. The credential and auto-build
+// don't change what's built.
+func (s ComponentSource) SameBuild(o ComponentSource) bool {
+	s, o = s.WithDefaults(), o.WithDefaults()
+	return s.Repository == o.Repository && s.Branch == o.Branch && s.Path == o.Path && s.Dockerfile == o.Dockerfile
 }
 
 // SSH reports whether the repository is reached over SSH, which can't be

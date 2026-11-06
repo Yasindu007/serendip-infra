@@ -880,3 +880,24 @@ purpose), **Closed** (fixed).
 - **Revisit:** in T013's footprint run, if a followed build shows on the
   API server or `serendipd`. Candidates: back off from 2 s to 10 s, or
   share one poll between followers of the same Build.
+
+## RP-043 — Auto-build's head read runs on the reconcile loop
+
+- **Kind:** performance. **Status:** Accepted, 2026-11-06. **Found:** spec
+  022 T007.
+- **What:** the Component reconciler reads a branch's head inline: one
+  HTTPS `GET` of `info/refs` per auto-build Component, at most every
+  5 minutes.
+  - **The engine is one goroutine,** so a slow repository holds up every
+    other reconcile for as long as the read takes. That's at most the
+    10 s reconcile timeout (the provider's own cap is 30 s).
+  - **When it was last read is kept in memory.** After a restart, each
+    auto-build Component is read once on its first pass, early.
+- **Why accepted:** a reachable host answers in well under a second
+  (T001 item 7: one 2.5 KB response), and a laptop has a handful of
+  auto-build Components. Moving the read off the loop would add a worker
+  and a hand-off for a cost nobody has measured yet.
+- **Revisit:** in T013's poller measurement, or when a slow host shows up
+  as resync lag. Candidates: a shorter head-read timeout than the
+  reconcile's, or one background poller that enqueues the Component when
+  the head moves.

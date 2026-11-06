@@ -101,6 +101,17 @@ func (e *Engine) Register(kind resource.Kind, r Reconciler, list func(ctx contex
 	e.regs[kind] = registration{reconciler: r, list: list}
 }
 
+// Enqueue asks for ref to be reconciled soon, the way a store event does.
+// It never blocks: with the queue full the request is dropped, and resync
+// covers it. A Reconciler may call it for another resource whose state its
+// own change affects (a finished Build's Component).
+func (e *Engine) Enqueue(ref graph.ResourceRef) {
+	select {
+	case e.workCh <- workItem{ref: ref, trigger: triggerEvent}:
+	default:
+	}
+}
+
 // Ready returns a channel closed once Run has subscribed to the event
 // bus -- an event published before that point would be missed (nothing
 // is listening yet). Mainly useful for synchronizing tests; production

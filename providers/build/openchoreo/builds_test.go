@@ -16,6 +16,7 @@ import (
 
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
+	"github.com/serendip-infra/serendip-infra/providers/internal/gitremote"
 	"github.com/serendip-infra/serendip-infra/providers/kubernetes"
 )
 
@@ -641,11 +642,11 @@ func TestHeadCommit_UsesTheCredential(t *testing.T) {
 	if err != nil || got != "b4fe321b6c900c7193ccf3bb3c09e129163fd026" {
 		t.Fatalf("HeadCommit() = %q, %v", got, err)
 	}
-	if _, err := e.b.HeadCommit(context.Background(), src, nil); err == nil || !strings.Contains(err.Error(), "credential") {
+	if _, err := e.b.HeadCommit(context.Background(), src, nil); !errors.Is(err, reconcile.ErrSourceAuth) || !strings.Contains(err.Error(), "credential") {
 		t.Errorf("without a credential: %v", err)
 	}
 	ssh := resource.ComponentSource{Repository: "git@github.com:org/r.git"}
-	if _, err := e.b.HeadCommit(context.Background(), ssh, nil); err == nil || !strings.Contains(err.Error(), "SSH") {
+	if _, err := e.b.HeadCommit(context.Background(), ssh, nil); !errors.Is(err, reconcile.ErrSourceSSH) || !strings.Contains(err.Error(), "SSH") {
 		t.Errorf("SSH: %v", err)
 	}
 }
@@ -672,5 +673,28 @@ func TestBuildLogs_FollowEndsWhenAStepNeverStarts(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("follow kept waiting on a step of a finished run")
+	}
+}
+
+func TestHeadError_MapsToCoreErrors(t *testing.T) {
+	for _, tt := range []struct {
+		in, want error
+	}{
+		{gitremote.ErrSSH, reconcile.ErrSourceSSH},
+		{gitremote.ErrAuth, reconcile.ErrSourceAuth},
+		{gitremote.ErrNotFound, reconcile.ErrSourceNotFound},
+		{gitremote.ErrNoBranch, reconcile.ErrSourceNoBranch},
+	} {
+		got := headError(fmt.Errorf("gitremote: %w", tt.in))
+		if !errors.Is(got, tt.want) || !errors.Is(got, tt.in) {
+			t.Errorf("headError(%v) = %v; want it to wrap %v and the original", tt.in, got, tt.want)
+		}
+	}
+	if headError(nil) != nil {
+		t.Error("headError(nil) isn't nil")
+	}
+	plain := errors.New("dial tcp: timeout")
+	if got := headError(plain); got != plain {
+		t.Errorf("headError(plain) = %v; want it unchanged", got)
 	}
 }

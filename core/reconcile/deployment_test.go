@@ -22,6 +22,7 @@ type fakeDeployments struct {
 	obs        reconcile.DeploymentObservation
 	err        error
 	deployed   []string // Deployment IDs, in call order
+	ran        []resource.ComponentSpec
 	undeployed []resource.Deployment
 	pipelines  []resource.Project
 	envsGone   []string
@@ -47,10 +48,11 @@ func (f *fakeDeployments) Releases(context.Context, resource.Component) ([]recon
 func (f *fakeDeployments) CreateRelease(context.Context, resource.Component) (reconcile.Release, error) {
 	return reconcile.Release{}, nil
 }
-func (f *fakeDeployments) Deploy(_ context.Context, _ resource.Application, _ resource.Component, _ resource.Environment, d resource.Deployment) (reconcile.DeploymentObservation, error) {
+func (f *fakeDeployments) Deploy(_ context.Context, _ resource.Application, comp resource.Component, _ resource.Environment, d resource.Deployment) (reconcile.DeploymentObservation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deployed = append(f.deployed, d.Metadata.ID)
+	f.ran = append(f.ran, comp.Spec)
 	return f.obs, f.err
 }
 func (f *fakeDeployments) Undeploy(_ context.Context, d resource.Deployment) error {

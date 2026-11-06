@@ -104,7 +104,14 @@ func (r *DeploymentReconciler) observe(ctx context.Context, d resource.Deploymen
 		return DeploymentObservation{Reason: ReasonUnsupported,
 			Message: "the Component's Application and the Environment must belong to the same Project"}, nil
 	}
-	obs, err := r.provider.Deploy(ctx, app, comp, env, d)
+	// A source Component is released with the image its own reconciler
+	// resolved from its builds; it's Ready only once it has one.
+	run, ok := runnable(comp, comp.Status.Image)
+	if !ok {
+		return DeploymentObservation{Reason: ReasonWaitingForComponent,
+			Message: fmt.Sprintf("waiting for Component %s: it has no built image yet", comp.Metadata.ID)}, nil
+	}
+	obs, err := r.provider.Deploy(ctx, app, run, env, d)
 	if errors.Is(err, ErrProviderNotReady) {
 		return DeploymentObservation{Reason: ReasonProviderNotReady, Message: providerNotReadyMessage(applicationPlatformCapability)}, nil
 	}

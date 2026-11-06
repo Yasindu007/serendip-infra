@@ -186,7 +186,7 @@ Dependency sketch:
     as long as its run, up to an hour after it ends, which is the plan's
     accepted risk.
 
-## T007 — The Build reconciler, image resolution and auto-build
+## T007 — The Build reconciler, image resolution and auto-build ✅ 2026-11-06
 
 - **Do:**
   - **`BuildReconciler`:**
@@ -211,6 +211,73 @@ Dependency sketch:
   - a new head commit → one Build, and the same head → none;
   - an SSH URL → the message;
   - deleting a Component removes its runs through the clean-up.
+- **Done as:**
+  - **Files:**
+    - `core/reconcile/build.go`: `BuildReconciler`, `BuildCleanup`, the
+      `ErrSource*` errors and `AutoBuildActor`;
+    - `componentbuild.go`: image resolution and auto-build;
+    - `application.go` and `deployment.go`: both hand the provider the
+      built image in place of the source (`runnable`). The Deployment
+      side wasn't in the file list, but without it a release has no
+      image;
+    - `engine.go`: `Engine.Enqueue`;
+    - `build_test.go`.
+  - **New status fields:**
+    - **`BuildStatus.Source`:** the Component's source, recorded when the
+      reconciler first sees the Build. A later edit doesn't change what's
+      built.
+    - **`BuildStatus.Started`.**
+    - **`ComponentStatus.Image`:** the resolved image, which the
+      Deployment reconciler reads.
+  - **The image** is the newest successful build of the *current* source,
+    which `SameBuild` compares: repository, branch, path and Dockerfile.
+    - Changing the credential or auto-build doesn't rebuild.
+    - Changing the source starts a build, and the Component reads
+      `WaitingForBuild` until it succeeds. The old workload keeps running
+      meanwhile, because the provider isn't called.
+    - A failed or cancelled last build is named in that message, and isn't
+      retried by itself.
+  - **Cancel** always calls `CancelBuild`, even when `Started` isn't
+    recorded, because a run may have started in a pass whose write lost
+    to the cancel's edit (go-reviewer). A dropped write requeues, and
+    doesn't re-queue the Component.
+  - **A failed start** removes the run and its credential copy, reads
+    `StartFailed` without the provider's text, and is retried each pass,
+    with no cap. It holds its Component's queue until it starts or is
+    cancelled.
+  - **Auto-build:**
+    - The `AutoBuild` condition is only set while auto-build is on. Its
+      reasons are `Watching`, `SSHUnsupported`, `NeedsCredential`,
+      `RepositoryNotFound`, `NoSuchBranch`, `CredentialUnreadable` and
+      `Unreachable`. `Unreachable` is dated from the first failure.
+    - The head isn't read while a build of the source is unfinished.
+    - A commit already asked for or built *for this source*, whatever the
+      outcome, isn't built again.
+    - When the head was last read is kept in memory. RP-043 covers that,
+      and the read on the single reconcile loop.
+    - The provider's `HeadCommit` now wraps gitremote's errors in the core
+      ones.
+  - **The audit actor:** builds that Serendip starts itself are created
+    as `system:auto-build`, through `audit.WithActor` on that one Create.
+    That's a deliberate exception to core/reconcile/CLAUDE.md's rule that
+    the engine sets the actor (contract-guardian: acceptable).
+  - **Reviews:**
+    - **contract-guardian:** its blocker, duplicate "auto-build" names,
+      doesn't apply. Names aren't unique, since T003's key is only set for
+      ProviderInstances, and a test covers a second first build. Its
+      malformed-head guard and message-contract points are in.
+    - **go-reviewer:** its fixes are in:
+      - the cancel/start race;
+      - no `finished` after a dropped write;
+      - an immediate retry after a failed create;
+      - `builtCommit` scoped to the current source;
+      - a known commit or image kept when a read lacks it;
+      - a separate reason for an unreadable credential;
+      - a `headError` test.
+  - **For T008:** the API must check that whoever sets `credentialSecret`
+    may read that Secret. The reconciler reads it as the system.
+  - **For T009:** wire `WithBuilds`, `NewBuildReconciler` (with
+    `engine.Enqueue`) and `BuildCleanup` for `KindBuild`.
 
 ## T008 — The API
 
