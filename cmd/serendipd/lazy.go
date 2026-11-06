@@ -23,6 +23,9 @@ type lazy[T any] struct {
 
 func (l *lazy[T]) set(v T) { l.p.Store(&v) }
 
+// clear makes get report ErrProviderNotReady again.
+func (l *lazy[T]) clear() { l.p.Store(nil) }
+
 func (l *lazy[T]) get() (T, error) {
 	p := l.p.Load()
 	if p == nil {
@@ -331,4 +334,69 @@ func (l *lazyPlatformView) Platform(ctx context.Context) (reconcile.PlatformView
 		return reconcile.PlatformView{}, err
 	}
 	return p.Platform(ctx)
+}
+
+// lazyBuilds is the build capability (spec 022), set while the builds
+// package reports Ready and cleared when it stops, so builds wait with
+// ErrProviderNotReady rather than reach a plane that isn't there.
+type lazyBuilds struct {
+	lazy[reconcile.BuildProvider]
+}
+
+var _ reconcile.BuildProvider = (*lazyBuilds)(nil)
+
+func (l *lazyBuilds) StartBuild(ctx context.Context, app resource.Application, comp resource.Component, b resource.Build, cred map[string]any) error {
+	p, err := l.get()
+	if err != nil {
+		return err
+	}
+	return p.StartBuild(ctx, app, comp, b, cred)
+}
+
+func (l *lazyBuilds) ObserveBuild(ctx context.Context, b resource.Build) (reconcile.BuildObservation, error) {
+	p, err := l.get()
+	if err != nil {
+		return reconcile.BuildObservation{}, err
+	}
+	return p.ObserveBuild(ctx, b)
+}
+
+func (l *lazyBuilds) CancelBuild(ctx context.Context, b resource.Build) error {
+	p, err := l.get()
+	if err != nil {
+		return err
+	}
+	return p.CancelBuild(ctx, b)
+}
+
+func (l *lazyBuilds) RemoveBuild(ctx context.Context, b resource.Build) error {
+	p, err := l.get()
+	if err != nil {
+		return err
+	}
+	return p.RemoveBuild(ctx, b)
+}
+
+func (l *lazyBuilds) BuildLogs(ctx context.Context, b resource.Build, opts reconcile.LogOptions) (reconcile.LogStream, error) {
+	p, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return p.BuildLogs(ctx, b, opts)
+}
+
+func (l *lazyBuilds) BuildEvents(ctx context.Context, b resource.Build, since time.Time) ([]reconcile.RuntimeEvent, error) {
+	p, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return p.BuildEvents(ctx, b, since)
+}
+
+func (l *lazyBuilds) HeadCommit(ctx context.Context, src resource.ComponentSource, cred map[string]any) (string, error) {
+	p, err := l.get()
+	if err != nil {
+		return "", err
+	}
+	return p.HeadCommit(ctx, src, cred)
 }

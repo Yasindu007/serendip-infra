@@ -16,7 +16,7 @@ Last updated: 2026-11-06
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T008
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T009
 are done.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
@@ -164,11 +164,18 @@ are done.**
   - **A run that expires mid-request** now answers 410, not 502.
   - **RP-044:** the credential check rests on the build step never seeing
     the credential.
-- **Next step:** T009, `serendipd` wiring:
-  - `WithBuilds` (the lazy build handle);
-  - `NewBuildReconciler` with `engine.Enqueue`;
-  - `BuildCleanup` for `KindBuild`;
-  - the catalogue's builds installer.
+- **T009 is done** (2026-11-06, not committed yet): `serendipd` wiring.
+  The details are in tasks.md's "Done as".
+  - **The catalogue's builds entry** has the installer, the (still nil)
+    `Requirements` and the removal sentence; `GET /v1/packages` shows it
+    available but not installable, checked live on `serendip-t018`.
+  - **`lazyBuilds`** is set while the package reports Ready and cleared
+    otherwise, through `registerPackages`' `onReadiness` hook.
+  - **The Build reconciler** and `ComponentReconciler.WithBuilds` use the
+    lazy handle; `api.WithBuilds` too.
+  - **`BuildCleanup`** uses the provider directly, so deleting a built
+    Component works after the package is removed.
+- **Next step:** T010 (CLI, MCP and docs) ∥ T011 (the console).
 
   `serendip-t018` is up, and `serendipd` isn't running.
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),

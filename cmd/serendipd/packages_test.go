@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/event"
 	"github.com/serendip-infra/serendip-infra/core/provider"
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
+	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 )
 
@@ -24,7 +28,7 @@ func TestPackagesReportReadiness(t *testing.T) {
 	}
 	bus := event.NewInProcessBus()
 	registry := provider.NewRegistry()
-	clean := registerPackages(db, bus, reconcile.NewEngine(bus, time.Minute, time.Minute), registry, packageCatalogue())
+	clean := registerPackages(db, bus, reconcile.NewEngine(bus, time.Minute, time.Minute), registry, packageCatalogue(nil), nil)
 	if clean == nil {
 		t.Fatal("no clean-up")
 	}
@@ -35,3 +39,55 @@ func TestPackagesReportReadiness(t *testing.T) {
 		}
 	}
 }
+
+// With its installer, the builds package is still refused until its cost
+// is measured (spec 022 T009), and it says what removing it loses.
+func TestBuildsPackageNotInstallableUntilMeasured(t *testing.T) {
+	c := packageCatalogue(installerStub{})
+	p := c["openchoreo-workflow-plane"]
+	if p.Installer == nil || p.Removal == "" || p.Capability != capBuild {
+		t.Fatalf("builds entry = %+v", p)
+	}
+	err := p.Installable()
+	if err == nil || !strings.Contains(err.Error(), "resource cost is measured") {
+		t.Fatalf("Installable() = %v, want the unmeasured refusal", err)
+	}
+	if err := c.Validate(resource.ProviderInstanceSpec{ProviderID: p.Provider, CapabilityID: capBuild}); err == nil {
+		t.Fatal("Validate accepted an unmeasured package")
+	}
+}
+
+// The build handle answers ErrProviderNotReady until the package is
+// Ready, and again once it stops being Ready.
+func TestBuildHandleFollowsReadiness(t *testing.T) {
+	registry := provider.NewRegistry()
+	builds := &lazyBuilds{}
+	var p reconcile.BuildProvider = &lazyBuilds{} // any provider will do
+	set := buildHandle(registry, builds, p)
+	notReady := func() bool {
+		_, err := builds.HeadCommit(t.Context(), resource.ComponentSource{}, nil)
+		return errors.Is(err, reconcile.ErrProviderNotReady)
+	}
+	if !notReady() {
+		t.Fatal("handle ready before the package")
+	}
+	set(true)
+	if got, err := builds.get(); err != nil || got != p {
+		t.Fatalf("after Ready: %v, %v", got, err)
+	}
+	if impl, ok := registry.Lookup(capBuild); !ok || impl != p {
+		t.Fatalf("registry build = %v, %v", impl, ok)
+	}
+	set(true) // a repeated report changes nothing
+	set(false)
+	if !notReady() {
+		t.Fatal("handle still set after the package stopped being Ready")
+	}
+}
+
+type installerStub struct{}
+
+func (installerStub) Install(context.Context, resource.ProviderInstance) (reconcile.PackageState, error) {
+	return reconcile.PackageState{}, nil
+}
+func (installerStub) Uninstall(context.Context, string) error { return nil }

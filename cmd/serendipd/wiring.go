@@ -20,6 +20,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
 	"github.com/serendip-infra/serendip-infra/providers/application/openchoreo"
+	buildplane "github.com/serendip-infra/serendip-infra/providers/build/openchoreo"
 	"github.com/serendip-infra/serendip-infra/providers/gateway/kgateway"
 	"github.com/serendip-infra/serendip-infra/providers/identity/oidc"
 	"github.com/serendip-infra/serendip-infra/providers/identity/thunderid"
@@ -49,9 +50,11 @@ type kubeWiring struct {
 	schemas *lazySchemas
 	// platformView describes the platform, once it's ready.
 	platformView *lazyPlatformView
-	authn        *lazyAuthenticator
-	login        *lazyLogin
-	directory    *lazyDirectory
+	// builds runs builds while the builds package is Ready (spec 022).
+	builds    *lazyBuilds
+	authn     *lazyAuthenticator
+	login     *lazyLogin
+	directory *lazyDirectory
 	// issuer is the human issuer once identity is set up, or "".
 	issuer func() string
 	plan   setupPlan
@@ -118,6 +121,10 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 	if err != nil {
 		return nil, fmt.Errorf("identity: %w", err)
 	}
+	buildInstaller, err := buildplane.NewInstaller(client, kubeconfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("builds: %w", err)
+	}
 	identityDeployer.SetConsoleRedirects(thunderid.ConsoleRedirects{Callback: console.callback, PostLogout: console.postLogout})
 	// The issuer depends on the gateway's endpoint, known only once the
 	// gateway is up, but a malformed override is a config error: fail now.
@@ -134,6 +141,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 	deployments, runtime, schemas, platformView := &lazyDeployments{}, &lazyRuntime{}, &lazySchemas{}, &lazyPlatformView{}
 	directory := &lazyDirectory{}
 	login := &lazyLogin{}
+	builds := &lazyBuilds{}
 	// verifier is the identity setup's token verifier, shared with the
 	// console's relying party (one key cache).
 	var verifier atomic.Pointer[oidc.Verifier]
@@ -164,7 +172,7 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		login.set(rp)
 		log.Printf("serendipd: console login enabled (callback %s)", console.callback)
 	}
-	secretReconciler := registerKubernetesReconcilers(db, bus, engine, storage, secrets, platform, deployments)
+	secretReconciler := registerKubernetesReconcilers(db, bus, engine, storage, secrets, platform, deployments, builds)
 
 	plan := setupPlan{
 		storage: func(ctx context.Context) error {
@@ -317,9 +325,15 @@ func wireKubernetes(kubeconfigPath string, registry *provider.Registry, db *sql.
 		resource.KindEnvironment: reconcile.EnvironmentCleanup(deployments),
 		resource.KindProject:     reconcile.PipelineCleanup(deployments),
 	}
-	packages := packageCatalogue()
-	cleaners[resource.KindProviderInstance] = registerPackages(db, bus, engine, registry, packages)
-	return &kubeWiring{secretReconciler: secretReconciler, cleaners: cleaners, packages: packages, runtime: runtime, schemas: schemas, platformView: platformView, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject, issuer: issuer}, nil
+	// A Build's run is removed with the provider itself, not the lazy
+	// handle: removal is idempotent, and must still work once the package
+	// is gone, or deleting a built Component would wait for ever.
+	buildProvider := buildplane.NewBuilds(client)
+	cleaners[resource.KindBuild] = reconcile.BuildCleanup(buildProvider)
+	packages := packageCatalogue(buildInstaller)
+	cleaners[resource.KindProviderInstance] = registerPackages(db, bus, engine, registry, packages,
+		onReadiness{capBuild: buildHandle(registry, builds, buildProvider)})
+	return &kubeWiring{secretReconciler: secretReconciler, cleaners: cleaners, packages: packages, builds: builds, runtime: runtime, schemas: schemas, platformView: platformView, authn: authn, login: login, directory: directory, plan: plan, adminSubject: thunderid.AdminSubject, issuer: issuer}, nil
 }
 
 // ensureGatewayReady ensures the shared gateway and treats "not programmed
@@ -356,6 +370,7 @@ func ensurePlatformFoundations(ctx context.Context, client *kubernetes.Client, e
 // SecretReconciler api.SecretHandler needs. Must run before engine.Run.
 func registerKubernetesReconcilers(db *sql.DB, bus event.Bus, engine *reconcile.Engine,
 	storage reconcile.StorageProvider, secrets reconcile.SecretsProvider, platform reconcile.ApplicationPlatformProvider, deployments reconcile.DeploymentProvider,
+	builds reconcile.BuildProvider,
 ) *reconcile.SecretReconciler {
 	volumes := sqlite.NewStore[resource.VolumeSpec, resource.VolumeStatus](db, resource.KindVolume).SetBus(bus)
 	engine.Register(resource.KindVolume, reconcile.NewVolumeReconciler(volumes, storage), lister(volumes, resource.KindVolume))
@@ -367,7 +382,11 @@ func registerKubernetesReconcilers(db *sql.DB, bus event.Bus, engine *reconcile.
 	apps := sqlite.NewStore[resource.ApplicationSpec, resource.ApplicationStatus](db, resource.KindApplication).SetBus(bus)
 	components := sqlite.NewStore[resource.ComponentSpec, resource.ComponentStatus](db, resource.KindComponent).SetBus(bus)
 	engine.Register(resource.KindApplication, reconcile.NewApplicationReconciler(apps, platform), lister(apps, resource.KindApplication))
-	engine.Register(resource.KindComponent, reconcile.NewComponentReconciler(components, apps, platform), lister(components, resource.KindComponent))
+	componentReconciler := reconcile.NewComponentReconciler(components, apps, platform)
+	engine.Register(resource.KindComponent, componentReconciler, lister(components, resource.KindComponent))
+	// Spec 022: source Components' images come from Builds, whose
+	// credentials are read through the Secrets capability.
+	registerBuilds(db, bus, engine, componentReconciler, components, apps, builds, secretReconciler)
 	// Spec 020: Deployments run Components in Environments, and Projects
 	// carry their promotion pipelines.
 	deploymentStore := sqlite.NewStore[resource.DeploymentSpec, resource.DeploymentStatus](db, resource.KindDeployment).SetBus(bus)

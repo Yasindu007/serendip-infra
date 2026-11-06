@@ -354,7 +354,7 @@ Dependency sketch:
     comes from the registry's `build` capability, which the
     ProviderInstance reconciler already reports.
 
-## T009 — serendipd wiring
+## T009 — serendipd wiring ✅ 2026-11-06
 
 - **Do:** the catalogue's builds entry gets the installer and its
   `Requirements`; the lazy `build` handle is registered once Ready; the
@@ -363,6 +363,34 @@ Dependency sketch:
 - **Verify:** `go build ./...` and `go test ./cmd/...` pass. `serendipd`
   starts against `serendip-t018`, and `GET /v1/packages` shows the builds
   package as not installable while `Requirements` is nil.
+- **Done as:**
+  - **Catalogue:** `packageCatalogue(installer)` gives the builds entry
+    `buildplane.NewInstaller` (helm checked at startup, like the other
+    deployers), `buildplane.Requirements` (still nil) and decision 12's
+    removal sentence. Without a cluster there's no catalogue at all, as
+    before.
+  - **The lazy handle:** `lazyBuilds` (`lazy.go`), set by `buildHandle`
+    when the package reports Ready, and cleared when it reports anything
+    else (`lazy.clear`). `registerPackages` takes an `onReadiness` map,
+    called from the readiness report. The provider is registered under
+    `build` on its first Ready.
+  - **Reconcilers:** `registerBuilds`, from
+    `registerKubernetesReconcilers`: `ComponentReconciler.WithBuilds` and
+    `NewBuildReconciler` with `engine.Enqueue`, both against the lazy
+    handle, with the `SecretReconciler` as the credential reader.
+  - **Clean-up:** `BuildCleanup` for `KindBuild` uses `NewBuilds(client)`
+    directly, not the lazy handle. Removal is idempotent and must still
+    work once the package is gone, or deleting a built Component would
+    wait for ever as `ProviderNotReady`.
+  - **API:** `api.WithBuilds(kube.builds)`.
+  - **Verified:** `go build ./...`, `go vet` and `go test ./cmd/...`
+    pass, with new tests for the unmeasured refusal and the handle
+    following readiness. A scratch `serendipd` (`:8088`, fresh DB) against
+    `serendip-t018` answered `GET /v1/packages` with the builds package
+    `available: true`, `installable: false`, "can't be installed until its
+    resource cost is measured", and `/v1/readiness` `build` `Unavailable`.
+    (Secrets setup failed there only because the scratch run had no
+    OpenBao credentials path.)
 
 ## T010 [P] [A] — CLI, MCP and docs
 
