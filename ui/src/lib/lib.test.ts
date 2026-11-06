@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Application, Component, Condition } from "../api/types";
-import { toSpec, validate, fromSpec, type ComponentFormState } from "./componentForm";
+import { emptySource, toSpec, validate, fromSpec, type ComponentFormState } from "./componentForm";
 import { componentStages } from "./stages";
 import { topologySentence } from "./topology";
 
@@ -46,7 +46,7 @@ describe("componentStages", () => {
 });
 
 describe("component form", () => {
-  const base: ComponentFormState = { name: "web", image: "nginx:1.27", ports: [{ key: 1, name: "http", port: "80", expose: true }], env: [] };
+  const base: ComponentFormState = { name: "web", from: "image", image: "nginx:1.27", source: emptySource, ports: [{ key: 1, name: "http", port: "80", expose: true }], env: [] };
 
   it("builds the spec the API expects", () => {
     expect(toSpec({ ...base, env: [{ key: 2, name: "LOG_LEVEL", value: "info" }, { key: 3, name: "", value: "" }] })).toEqual({
@@ -80,6 +80,42 @@ describe("component form", () => {
     [{ env: [{ key: 1, name: "1BAD", value: "x" }] }, "env-0-name"],
   ] as const)("rejects %o (%s)", (patch, field) => {
     expect(validate({ ...base, ...patch } as ComponentFormState, { creating: true })[field]).toBeTruthy();
+  });
+
+  const fromGit = (patch: Partial<ComponentFormState["source"]>): ComponentFormState => ({
+    ...base,
+    from: "source",
+    source: { ...emptySource, repository: "https://github.com/org/app.git", ...patch },
+  });
+
+  it("sends a source with image empty and defaults left to the server", () => {
+    expect(toSpec(fromGit({ credentialSecret: "s1", autoBuild: true }))).toEqual({
+      image: "",
+      source: { repository: "https://github.com/org/app.git", credentialSecret: "s1", autoBuild: true },
+      ports: [{ name: "http", port: 80, expose: true }],
+    });
+    const spec = { image: "", source: { repository: "git@github.com:org/app.git", branch: "dev", path: "web", dockerfile: "Containerfile" } };
+    expect(toSpec(fromSpec("web", spec))).toEqual(spec);
+  });
+
+  it.each([
+    [{ repository: "" }, "repository"],
+    [{ repository: "https://user:pw@github.com/org/app.git" }, "repository"],
+    [{ repository: "https://github.com/org/app.git?x=1" }, "repository"],
+    [{ repository: "http://github.com/org/app.git" }, "repository"],
+    [{ branch: "a..b" }, "branch"],
+    [{ branch: "-x" }, "branch"],
+    [{ path: "../up" }, "path"],
+    [{ path: "/abs" }, "path"],
+    [{ dockerfile: "." }, "dockerfile"],
+    [{ dockerfile: "dir/" }, "dockerfile"],
+  ] as const)("rejects the source %o (%s)", (patch, field) => {
+    expect(validate(fromGit(patch), { creating: true })[field]).toBeTruthy();
+  });
+
+  it("accepts a valid source, without an image", () => {
+    expect(validate(fromGit({ branch: "release/1.2", path: "services/web/", dockerfile: "build/Dockerfile" }), { creating: true })).toEqual({});
+    expect(validate(fromGit({ repository: "ssh://git@host.example:2222/org/app.git" }), { creating: true })).toEqual({});
   });
 
   it("accepts a valid form, and doesn't check the name when editing", () => {

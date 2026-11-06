@@ -37,6 +37,7 @@ const paths: Record<string, string> = {
   Environment: "environments",
   Deployment: "deployments",
   ProviderInstance: "provider-instances",
+  Build: "builds",
 };
 
 export function action(kind: string, verb: "read" | "write" | "delete"): string {

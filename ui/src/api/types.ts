@@ -60,8 +60,24 @@ export interface ComponentDependency {
   env: string;
 }
 
+/** Where a Component's image is built from (spec 022). */
+export interface ComponentSource {
+  repository: string;
+  /** Defaults to main. */
+  branch?: string;
+  /** The build context in the repository; defaults to ".". */
+  path?: string;
+  /** Relative to path; defaults to Dockerfile. */
+  dockerfile?: string;
+  /** The ID of a Secret holding the repository's credential. */
+  credentialSecret?: string;
+  autoBuild?: boolean;
+}
+
 export interface ComponentSpec {
+  /** Empty when the Component is built from source. */
   image: string;
+  source?: ComponentSource;
   ports?: ComponentPort[];
   env?: Record<string, string>;
   dependencies?: ComponentDependency[];
@@ -74,6 +90,8 @@ export interface ComponentEndpoint {
 
 export interface ComponentStatus extends BaseStatus {
   endpoints?: ComponentEndpoint[];
+  /** The built image a source Component runs, once a build has succeeded. */
+  image?: string;
 }
 
 export type Component = Resource<ComponentSpec, ComponentStatus>;
@@ -393,6 +411,48 @@ export interface Package {
   capability: string;
   description: string;
   available: boolean;
+  /** Its measured cost; null until it's measured (spec 022). */
+  requirements?: Requirements | null;
+  /** What removing it loses, said before the request. */
+  removal?: string;
+  installable?: boolean;
+  notInstallable?: string;
 }
+
+/** A package's measured cost on the reference machine (core/provider.Requirements). */
+export interface Requirements {
+  idleMemoryMiB: number;
+  idleCPUMillicores: number;
+  peakMemoryMiB: number;
+  peakCPUMillicores: number;
+  measuredOn: string;
+  results: string;
+  note?: string;
+}
+
+export type BuildPhase = "Queued" | "Running" | "Succeeded" | "Failed" | "Cancelled";
+
+export interface BuildStep {
+  name: string;
+  phase: BuildPhase;
+  startedAt?: string;
+  finishedAt?: string;
+  message?: string;
+}
+
+/** GET /v1/components/{id}/builds and GET /v1/builds/{id} (spec 022). */
+export type Build = Resource<
+  { commit?: string; cancel?: boolean },
+  BaseStatus & {
+    phase?: BuildPhase;
+    commit?: string;
+    image?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    steps?: BuildStep[];
+    source?: ComponentSource;
+    started?: boolean;
+  }
+>;
 
 export type ProviderInstance = Resource<{ capabilityId?: string; providerId?: string; environmentId?: string }, BaseStatus>;

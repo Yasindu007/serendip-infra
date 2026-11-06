@@ -418,7 +418,7 @@ Dependency sketch:
     `packages_list` row matches the new summary. The table is kept by
     hand; `TestReferenceListsEveryOperation` checks it.
 
-## T011 [P] — The console
+## T011 [P] — The console ✅ 2026-11-06
 
 - **Do:**
   - **The Builds tab:** runs, trigger at a commit, cancel, logs with
@@ -433,6 +433,35 @@ Dependency sketch:
 - **Verify:** `npm test` and `npm run build` in `ui/` pass; a test shows
   the cost text and the "not measured" text, and none shows a number for
   an unmeasured package.
+- **Done as:**
+  - **The Builds tab** (`Runtime.tsx` `BuildsTab`), inside the
+    availability gate: runs newest first (state, commit, started, took),
+    the AutoBuild condition's message, "Start build" at the head or a full
+    commit (checked before sending), and the chosen run's steps, cancel
+    (through `ActionConfirm`), logs and events. Logs reuse the Deployment
+    logs' follow and reconnect, now one `Logs` component over a path.
+    Follow is offered only while the run is unfinished. A 410 reads "Logs
+    expired" (or "never ran"), and 409 "hasn't started yet", in words,
+    not as an error. An image Component's tab says it has no builds.
+  - **The Component form** chooses a ready-made image or source. The
+    source fields mirror `ValidateComponentSource`'s grammar
+    (`componentForm.ts`), empty optional fields are left to the server's
+    defaults, and `image` is sent as "". The credential picker lists
+    `GET /v1/secrets` and keeps an already-named Secret it can't list. The
+    form warns, before sending, when the builds package isn't ready and
+    the source is new or changed. Auto-build's hint covers the 5-minute
+    poll, and SSH URLs that can't be watched. The overview shows the
+    source and the running built image.
+  - **The Packages page** shows measured idle and peak ("while a build
+    runs") cost with where it was measured and the fit note, or "Not
+    measured" with no number. Install is offered only when `installable`,
+    otherwise disabled with `notInstallable`'s reason, and the install
+    confirmation restates the cost. The removal note is the API's
+    `removal` sentence.
+  - **Tests:** `platform.test.tsx` ("builds tab", "component source
+    form", "packages page", where the unmeasured package's text has no
+    number in MiB or cores) and `lib.test.ts` (source spec and
+    validation). 133 tests pass; the build is 99.2 KiB gz.
 
 ## T012 [A] — In-process acceptance tests
 

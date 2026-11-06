@@ -323,30 +323,186 @@ describe("unavailable features", () => {
   });
 });
 
+describe("builds tab", () => {
+  const source = { repository: "https://github.com/org/web.git", autoBuild: true };
+  const srcComp = {
+    ...comp,
+    spec: { image: "", source },
+    status: { conditions: [...ready, { type: "AutoBuild", status: "False", reason: "Unreachable", message: "auto-build can't reach the repository; retrying", lastTransitionTime: at }] },
+  };
+  const commit = "a".repeat(40);
+  const running = {
+    metadata: meta("b2", "build-20261023-100500", "Build", [{ kind: "Component", id: "c1" }]),
+    spec: {},
+    status: { phase: "Running", started: true, commit, startedAt: at, steps: [{ name: "checkout", phase: "Succeeded" }, { name: "build", phase: "Running" }] },
+  };
+  const old = {
+    metadata: meta("b1", "build-20261023-090000", "Build", [{ kind: "Component", id: "c1" }]),
+    spec: {},
+    status: { phase: "Succeeded", started: true, commit: "b".repeat(40), startedAt: at, finishedAt: "2026-10-23T10:01:20Z", image: "localhost:5000/serendip/cmp-x@sha256:1" },
+  };
+  const readyBuild = (url: string) => (url === "/v1/readiness" ? json(200, { build: { ready: true, reason: "Ready", since: at } }) : undefined);
+  const routes = (builds: unknown[]) => ({
+    ...base,
+    "/v1/components/c1": srcComp,
+    "/v1/components/c1/builds": builds,
+    "/v1/builds/b2/events": { events: [{ time: at, type: "Normal", reason: "Started", objectKind: "Pod", objectName: "build-x", message: "Started container" }] },
+    "/v1/builds/b2/logs?tailLines=100": { lines: [{ time: at, instance: "build", line: "STEP 1/3: FROM alpine" }], truncated: false },
+  });
+
+  it("lists runs newest first with their state, commit and duration, and the newest's logs and events", async () => {
+    goTo("/applications/app1/components/c1?tab=builds");
+    mockFetch(routes([running, old]), () => owner, readyBuild);
+    render(<App />);
+    expect(await screen.findByText("STEP 1/3: FROM alpine")).toBeTruthy();
+    const rows = screen.getAllByRole("row").filter((r) => r.textContent?.includes("build-2026"));
+    expect(rows[0]!.textContent).toContain("Running");
+    expect(rows[0]!.textContent).toContain(commit.slice(0, 12));
+    expect(rows[1]!.textContent).toContain("Succeeded");
+    expect(rows[1]!.textContent).toContain("1 min 20 s");
+    expect(await screen.findByText("Started container")).toBeTruthy();
+    expect(screen.getByText(/auto-build can't reach the repository/)).toBeTruthy();
+  });
+
+  it("starts a build at a commit with exactly the request it shows, and refuses a short one", async () => {
+    goTo("/applications/app1/components/c1?tab=builds");
+    mockFetch(routes([]), () => owner, (url, init) => (init.method === "POST" ? json(201, { ...running, spec: { commit } }) : readyBuild(url)));
+    render(<App />);
+    const field = await screen.findByLabelText("Commit (optional)");
+    fireEvent.change(field, { target: { value: "abc123" } });
+    expect(screen.getByText(/Enter the full commit ID/)).toBeTruthy();
+    fireEvent.click(await enabled("Start build"));
+    expect(calls.some((c) => c.init.method === "POST")).toBe(false);
+    fireEvent.change(field, { target: { value: commit } });
+    expect(screen.getAllByText(`POST /v1/components/c1/builds`, { exact: false }).length).toBeGreaterThan(0);
+    fireEvent.click(await enabled("Start build"));
+    await waitFor(() => expect(calls.some((c) => c.init.method === "POST")).toBe(true));
+    const sent = calls.find((c) => c.init.method === "POST")!;
+    expect(sent.url).toBe("/v1/components/c1/builds");
+    expect(JSON.parse(sent.init.body as string)).toEqual({ commit });
+  });
+
+  it("cancels a running build", async () => {
+    goTo("/applications/app1/components/c1?tab=builds");
+    mockFetch(routes([running]), () => owner, (url, init) => (init.method === "POST" ? json(200, { ...running, spec: { cancel: true } }) : readyBuild(url)));
+    render(<App />);
+    fireEvent.click(await enabled("Cancel build"));
+    const confirm = await screen.findByRole("group", { name: `Cancel ${running.metadata.name}` });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel build" }));
+    await waitFor(() => expect(calls.some((c) => c.init.method === "POST" && c.url === "/v1/builds/b2/cancel")).toBe(true));
+  });
+
+  it("says logs expired for an old run, rather than an error", async () => {
+    goTo("/applications/app1/components/c1?tab=builds");
+    mockFetch(routes([old]), () => owner, (url) =>
+      url.startsWith("/v1/builds/b1/") ? json(410, { title: "logs expired", detail: "expired", status: 410 }) : readyBuild(url),
+    );
+    render(<App />);
+    expect((await screen.findAllByText(/Logs expired: a build's logs and events are kept for an hour/)).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Follow" })).toBeNull();
+  });
+
+  it("shows runs to a Reader but not their logs", async () => {
+    goTo("/applications/app1/components/c1?tab=builds");
+    mockFetch(routes([running]), () => [{ actions: ["*/read"], notActions: ["serendip/components/logs/read"] }], readyBuild);
+    render(<App />);
+    expect(await screen.findByText(/the Log Reader role/)).toBeTruthy();
+    expect(screen.getAllByText("build-20261023-100500").length).toBeGreaterThan(0);
+    expect(calls.some((c) => c.url.includes("/logs"))).toBe(false);
+  });
+
+  it("says an image component has no builds", async () => {
+    goTo("/applications/app1/components/c1?tab=builds");
+    mockFetch(base, () => owner, readyBuild);
+    render(<App />);
+    expect(await screen.findByText(/runs a ready-made image, so it has no builds/)).toBeTruthy();
+  });
+});
+
+describe("component source form", () => {
+  it("sends a source Component with image empty, and warns while the package isn't ready", async () => {
+    goTo("/applications/app1/components/new");
+    const secret = { metadata: meta("s1", "git-token", "Secret"), spec: { path: "git" }, status: {} };
+    mockFetch({ ...base, "/v1/secrets": [secret] }, () => owner, (url, init) =>
+      init.method === "POST" ? json(201, comp) : url === "/v1/readiness" ? json(200, { build: { ready: false, reason: "NotInstalled", since: at } }) : undefined,
+    );
+    render(<App />);
+    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "web" } });
+    fireEvent.click(screen.getByLabelText("Built from source in Git"));
+    expect(await screen.findByText(/Serendip refuses a new or changed source until it's ready/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Repository"), { target: { value: "https://github.com/org/web.git" } });
+    await screen.findByRole("option", { name: "git-token" });
+    fireEvent.change(screen.getByLabelText("Credential"), { target: { value: "s1" } });
+    fireEvent.click(screen.getByLabelText(/Auto-build/));
+    fireEvent.click(screen.getByRole("button", { name: "Create component" }));
+    await waitFor(() => expect(calls.some((c) => c.init.method === "POST")).toBe(true));
+    const sent = JSON.parse(calls.find((c) => c.init.method === "POST")!.init.body as string);
+    expect(sent.spec.image).toBe("");
+    expect(sent.spec.source).toEqual({ repository: "https://github.com/org/web.git", credentialSecret: "s1", autoBuild: true });
+  });
+});
+
 describe("packages page", () => {
+  const requirements = {
+    idleMemoryMiB: 46,
+    idleCPUMillicores: 20,
+    peakMemoryMiB: 900,
+    peakCPUMillicores: 1800,
+    measuredOn: "simulated T470 (2 cores, 16 GB), 2026-10-30",
+    results: "profiles/edge-1/bench/results/2026-10-30-spec022-simulated-t470",
+    note: "Fits beside edge-1; a build slows everything else for its duration.",
+  };
+  const removal = "Build history stays, but run logs and the stored images built from source are deleted.";
   const pkgs = {
     packages: [
-      { provider: "openchoreo-observability-plane", capability: "observability", description: "Stored logs; heavy on a 16 GB machine", available: false },
-      { provider: "test-pkg", capability: "build", description: "A test package", available: true },
+      { provider: "openchoreo-observability-plane", capability: "observability", description: "Stored logs; heavy on a 16 GB machine", available: false, requirements: null, installable: false, notInstallable: "package openchoreo-observability-plane isn't available in this build yet" },
+      { provider: "test-pkg", capability: "build", description: "A test package", available: true, requirements, removal, installable: true },
     ],
   };
 
-  it("states each package's cost and offers install only where it can work", async () => {
+  it("states the measured cost, and 'not measured' with no number otherwise", async () => {
+    goTo("/packages");
+    mockFetch({ "/v1/session": base["/v1/session"], "/v1/packages": pkgs });
+    render(<App />);
+    const measured = (await screen.findByText("A test package")).closest("section")!;
+    expect(within(measured).getByText("Idle: 46 MiB of memory and 0.02 CPU cores.")).toBeTruthy();
+    expect(within(measured).getByText("While a build runs: up to 900 MiB of memory and 1.8 CPU cores.")).toBeTruthy();
+    expect(within(measured).getByText(/Measured on simulated T470 .*2026-10-30-spec022-simulated-t470/)).toBeTruthy();
+    expect(within(measured).getByText(requirements.note)).toBeTruthy();
+    const unmeasured = screen.getByText("Stored logs; heavy on a 16 GB machine").closest("section")!;
+    expect(within(unmeasured).getByText(/^Not measured\./)).toBeTruthy();
+    // No number for an unmeasured package: no MiB, no cores, no millicores.
+    expect(unmeasured.textContent).not.toMatch(/\d+\s*(MiB|GiB|CPU cores|millicores|m CPU)/);
+    expect(within(unmeasured).queryByText(/^Idle:/)).toBeNull();
+  });
+
+  it("offers install only where it can work, restating the cost before the request", async () => {
     goTo("/packages");
     mockFetch({ "/v1/session": base["/v1/session"], "/v1/packages": pkgs }, () => owner, (_url, init) =>
       init.method === "POST" ? json(201, { metadata: meta("pi1", "test-pkg", "ProviderInstance"), spec: {}, status: {} }) : undefined,
     );
     render(<App />);
     expect(await screen.findByText("Stored logs; heavy on a 16 GB machine")).toBeTruthy();
-    expect(screen.getByText("Not measured yet: it can't be installed in this version.")).toBeTruthy();
     expect(screen.getByText("Not available in this version of Serendip yet.")).toBeTruthy();
     fireEvent.click(await enabled("Install package"));
     const confirm = await screen.findByRole("group", { name: "Install test-pkg" });
+    expect(within(confirm).getByText("Idle: 46 MiB of memory and 0.02 CPU cores.")).toBeTruthy();
     fireEvent.click(within(confirm).getByRole("button", { name: "Install package" }));
     await waitFor(() => expect(calls.some((c) => c.init.method === "POST")).toBe(true));
     const sent = calls.find((c) => c.init.method === "POST")!;
     expect(sent.url).toBe("/v1/provider-instances");
     expect(JSON.parse(sent.init.body as string)).toEqual({ metadata: { name: "test-pkg" }, spec: { capabilityId: "build", providerId: "test-pkg" } });
+  });
+
+  it("refuses install, saying why, for an available package whose cost isn't measured", async () => {
+    goTo("/packages");
+    const unmeasured = {
+      packages: [{ provider: "test-pkg", capability: "build", description: "A test package", available: true, requirements: null, installable: false, notInstallable: "package test-pkg can't be installed until its resource cost is measured" }],
+    };
+    mockFetch({ "/v1/session": base["/v1/session"], "/v1/packages": unmeasured });
+    render(<App />);
+    expect(await screen.findByText("Package test-pkg can't be installed until its resource cost is measured.")).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: "Install package" }).every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
   });
 
   it("doesn't offer installing to someone who may not", async () => {
@@ -366,7 +522,7 @@ describe("packages page", () => {
     render(<App />);
     fireEvent.click(await enabled("Remove package"));
     const confirm = await screen.findByRole("group", { name: "Confirm deleting test-pkg" });
-    expect(within(confirm).getByText(/deletes what it stored/)).toBeTruthy();
+    expect(within(confirm).getByText(removal)).toBeTruthy();
     expect(within(confirm).getByText(/DELETE \/v1\/provider-instances\/pi1/)).toBeTruthy();
   });
 });

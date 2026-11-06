@@ -16,7 +16,7 @@ Last updated: 2026-11-06
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T010
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T011
 are done.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
@@ -183,8 +183,20 @@ are done.**
     measured" with no number, plus each package's measurement source and
     removal sentence. `--json` and MCP give the raw record.
   - **`docs/cli-and-mcp.md`** gains "Packages and builds".
-- **Next step:** T011 (the console): the Builds tab, the Component
-  source form and the Packages page (tasks.md). Then T012.
+- **T011 is done** (2026-11-06): the console. The details are in
+  tasks.md's "Done as".
+  - **The Builds tab:** runs, start at the head or a commit, cancel, and
+    a run's steps, logs (follow and reconnect, shared with Deployments)
+    and events; "Logs expired" for a 410.
+  - **The Component form:** image or source, the source fields validated
+    as the server does, a credential Secret picker, auto-build, and a
+    warning while the builds package isn't ready.
+  - **The Packages page:** measured cost, or "Not measured" with no
+    number; install only when `installable`; the API's removal sentence.
+  - Checked by tests and the build only, not in a browser against
+    `serendipd`: T014 runs it live.
+- **Next step:** T012 (in-process acceptance tests,
+  `api/spec022_acceptance_test.go`).
 
   `serendip-t018` is up, and `serendipd` isn't running.
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
@@ -196,7 +208,8 @@ are done.**
   T008 (`feat(api): spec 022 T008 builds API`, then
   `fix(api): spec 022 T008 expired build reads and RP-044`), and
   T009 (`feat(cmd): spec 022 T009 serendipd builds wiring`), and
-  T010 (`feat(cmd): spec 022 T010 builds CLI, MCP and docs`).
+  T010 (`feat(cmd): spec 022 T010 builds CLI, MCP and docs`), and
+  T011 (`feat(ui): spec 022 T011 builds console`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;

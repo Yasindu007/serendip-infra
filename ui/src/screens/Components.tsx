@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { apiFetch, apiList, ApiError, isShown, NetworkError } from "../api/client";
-import type { Application, Component, DependenciesView } from "../api/types";
+import type { Application, Component, DependenciesView, Secret } from "../api/types";
 import { Tabs } from "../components/Tabs";
 import { DeployTab } from "./Deploy";
 import { BuildsTab, ObservabilityTab, RuntimeTab } from "./Runtime";
 import { ApiEquivalent, type ApiRequest } from "../components/ApiEquivalent";
 import { ConditionsTable, KeyValueList, SafeLink } from "../components/Data";
 import { DeleteConfirm } from "../components/Delete";
-import { TextField } from "../components/Field";
+import { SelectField, TextField } from "../components/Field";
 import { Guarded } from "../components/Guarded";
 import { Icon } from "../components/Icon";
 import { ReconciliationPath } from "../components/ReconciliationPath";
@@ -15,10 +15,12 @@ import { RequestError } from "../components/RequestError";
 import { PageHeader } from "../components/Shell";
 import { EmptyState, LoadingState, Notice } from "../components/States";
 import { ReadyStatus } from "../components/Status";
+import { useOptional } from "../hooks/useOptional";
 import { usePermissions } from "../hooks/usePermissions";
 import { usePoll, useNow } from "../hooks/usePoll";
 import { accessPath, action } from "../lib/permissions";
-import { fromSpec, toSpec, validate, type ComponentFormState, type FormErrors } from "../lib/componentForm";
+import { availability } from "../lib/health";
+import { emptySource, fromSpec, isSSH, toSpec, validate, type ComponentFormState, type FormErrors, type SourceFields } from "../lib/componentForm";
 import { Link, navigate } from "../lib/router";
 import { componentStages, exposedPorts } from "../lib/stages";
 import { FormFailure } from "../components/RequestError";
@@ -105,7 +107,7 @@ export function ComponentDetail({ appId, id, tab = "overview" }: { appId: string
 
       {tab === "deploy" && app.data && <DeployTab app={app.data} comp={c} />}
       {tab === "runtime" && app.data && <RuntimeTab app={app.data} comp={c} />}
-      {tab === "builds" && <BuildsTab />}
+      {tab === "builds" && <BuildsTab comp={c} />}
       {tab === "observability" && <ObservabilityTab />}
       {(tab === "deploy" || tab === "runtime") && !app.data && (app.error ? <RequestError error={app.error} what="application" /> : <LoadingState what="the application" />)}
       {!tabs.slice(1).some((t) => t.id === tab) && (
@@ -124,12 +126,7 @@ export function ComponentDetail({ appId, id, tab = "overview" }: { appId: string
               </h2>
               <KeyValueList
                 items={[
-                  [
-                    "Image",
-                    <span className="mono" translate="no">
-                      {c.spec.image}
-                    </span>,
-                  ],
+                  ...sourceItems(c),
                   ...ports.map((p): [string, React.ReactNode] => [`Port ${p.name}`, `${p.port}, ${p.expose ? "exposed" : "inside the cluster only"}`]),
                   ["Environment", env.length === 0 ? "None" : `${env.length} variable${env.length === 1 ? "" : "s"}`],
                   ...(c.status.endpoints ?? []).map((e): [string, React.ReactNode] => [`Endpoint ${e.name}`, <SafeLink href={e.url} />]),
@@ -162,6 +159,26 @@ export function ComponentDetail({ appId, id, tab = "overview" }: { appId: string
       )}
     </>
   );
+}
+
+/** Where the image comes from: the image itself, or the source and what it last built. */
+function sourceItems(c: Component): Array<[string, React.ReactNode]> {
+  const src = c.spec.source;
+  const mono = (v: string) => (
+    <span className="mono" translate="no">
+      {v}
+    </span>
+  );
+  if (!src) return [["Image", mono(c.spec.image)]];
+  return [
+    ["Built from", mono(src.repository)],
+    ["Branch", mono(src.branch || "main")],
+    ["Path", mono(src.path || ".")],
+    ["Dockerfile", mono(src.dockerfile || "Dockerfile")],
+    ["Credential", src.credentialSecret ? <>Secret {mono(src.credentialSecret)}</> : "None (a public repository)"],
+    ["Auto-build", src.autoBuild ? "On" : "Off"],
+    ["Running image", c.status.image ? mono(c.status.image) : "None yet: no build of this source has succeeded"],
+  ];
 }
 
 /** What a Component calls, and what in its Application calls it: declared, not observed. */
@@ -214,7 +231,7 @@ const nextKey = () => rowKey++;
 
 export function ComponentForm({ appId, id }: { appId: string; id?: string }) {
   const creating = id === undefined;
-  const [state, setState] = useState<ComponentFormState>({ name: "", image: "", ports: [{ key: nextKey(), name: "http", port: "80", expose: true }], env: [] });
+  const [state, setState] = useState<ComponentFormState>({ name: "", from: "image", image: "", source: emptySource, ports: [{ key: nextKey(), name: "http", port: "80", expose: true }], env: [] });
   const [existing, setExisting] = useState<Component>();
   const [loadError, setLoadError] = useState<ApiError | NetworkError>();
   const [submitted, setSubmitted] = useState(false);
@@ -295,16 +312,33 @@ export function ComponentForm({ appId, id }: { appId: string; id?: string }) {
             required
           />
         )}
-        <TextField
-          id="comp-image"
-          label="Image"
-          hint="An image that's already built and pullable, for example nginx:1.27."
-          mono
-          value={state.image}
-          onChange={(e) => update({ image: e.target.value })}
-          {...(errors.image ? { error: errors.image } : {})}
-          required
-        />
+        <fieldset>
+          <legend>Image</legend>
+          <div className="rows">
+            <label className="checkbox">
+              <input type="radio" name="comp-from" checked={state.from === "image"} onChange={() => update({ from: "image" })} />
+              A ready-made image
+            </label>
+            <label className="checkbox">
+              <input type="radio" name="comp-from" checked={state.from === "source"} onChange={() => update({ from: "source" })} />
+              Built from source in Git
+            </label>
+            {state.from === "image" ? (
+              <TextField
+                id="comp-image"
+                label="Image"
+                hint="An image that's already built and pullable, for example nginx:1.27."
+                mono
+                value={state.image}
+                onChange={(e) => update({ image: e.target.value })}
+                {...(errors.image ? { error: errors.image } : {})}
+                required
+              />
+            ) : (
+              <SourceForm source={state.source} errors={errors} unchanged={!creating && sameSource(existing, state.source)} onChange={(patch) => update({ source: { ...state.source, ...patch } })} />
+            )}
+          </div>
+        </fieldset>
 
         <fieldset>
           <legend>Ports</legend>
@@ -383,6 +417,96 @@ export function ComponentForm({ appId, id }: { appId: string; id?: string }) {
         </div>
         <ApiEquivalent request={request} />
       </form>
+    </>
+  );
+}
+
+/** Whether the form's source is the one stored: the server doesn't recheck it then. */
+function sameSource(c: Component | undefined, f: SourceFields): boolean {
+  const s = c?.spec.source;
+  if (!s) return false;
+  return (
+    s.repository === f.repository.trim() &&
+    (s.branch ?? "") === f.branch.trim() &&
+    (s.path ?? "") === f.path.trim() &&
+    (s.dockerfile ?? "") === f.dockerfile.trim() &&
+    (s.credentialSecret ?? "") === f.credentialSecret &&
+    Boolean(s.autoBuild) === f.autoBuild
+  );
+}
+
+/**
+ * SourceForm: the Git repository a Component is built from (spec 022), a
+ * credential Secret for a private one, and auto-build. A new or changed
+ * source needs the builds package ready; the server refuses it otherwise,
+ * so the form says so first.
+ */
+function SourceForm({ source, errors, unchanged, onChange }: { source: SourceFields; errors: FormErrors; unchanged: boolean; onChange: (patch: Partial<SourceFields>) => void }) {
+  const opt = useOptional("build");
+  const state = availability(opt.readiness);
+  const secrets = usePoll((s) => apiList<Secret>("/v1/secrets", s), 60_000, "source-secrets");
+  const known = secrets.data ?? [];
+  // A Secret named already but not listed (not readable, or deleted) stays
+  // selectable, so saving the form doesn't silently drop it.
+  const options = [
+    { value: "", label: "None: a public repository" },
+    ...known.map((x) => ({ value: x.metadata.id, label: x.metadata.name })),
+    ...(source.credentialSecret && !known.some((x) => x.metadata.id === source.credentialSecret) ? [{ value: source.credentialSecret, label: `Secret ${source.credentialSecret}` }] : []),
+  ];
+  return (
+    <>
+      {opt.loaded && state !== "ready" && !unchanged && (
+        <Notice>
+          Building from source needs the {opt.packageName} package, which {state === "installing" ? "is still installing" : state === "notReady" ? "isn't ready" : "isn't installed"}. Serendip refuses a new or changed source until it's ready. <Link to="/packages">See packages</Link>
+        </Notice>
+      )}
+      <TextField
+        id="src-repository"
+        label="Repository"
+        hint="The Git repository's https:// or SSH URL, for example https://github.com/org/app.git."
+        mono
+        value={source.repository}
+        onChange={(e) => onChange({ repository: e.target.value })}
+        {...(errors.repository ? { error: errors.repository } : {})}
+        required
+      />
+      <TextField id="src-branch" label="Branch (optional)" hint="Defaults to main." mono value={source.branch} onChange={(e) => onChange({ branch: e.target.value })} {...(errors.branch ? { error: errors.branch } : {})} />
+      <TextField
+        id="src-path"
+        label="Path (optional)"
+        hint="The folder to build, inside the repository. Defaults to its root."
+        mono
+        value={source.path}
+        onChange={(e) => onChange({ path: e.target.value })}
+        {...(errors.path ? { error: errors.path } : {})}
+      />
+      <TextField
+        id="src-dockerfile"
+        label="Dockerfile (optional)"
+        hint="Relative to the path. Defaults to Dockerfile."
+        mono
+        value={source.dockerfile}
+        onChange={(e) => onChange({ dockerfile: e.target.value })}
+        {...(errors.dockerfile ? { error: errors.dockerfile } : {})}
+      />
+      <SelectField
+        id="src-credential"
+        label="Credential"
+        hint="For a private repository: a Secret holding the user name and password or token. It's read only for the build and never shown back. Naming one needs permission to read its value."
+        value={source.credentialSecret}
+        onChange={(e) => onChange({ credentialSecret: e.target.value })}
+        options={options}
+      />
+      {secrets.error && <p className="field-hint">The list of Secrets couldn't be read, so only "None" and the Secret already named are offered.</p>}
+      <label className="checkbox">
+        <input type="checkbox" checked={source.autoBuild} onChange={(e) => onChange({ autoBuild: e.target.checked })} />
+        Auto-build: build each new commit on the branch
+      </label>
+      <p className="field-hint">
+        {source.autoBuild && isSSH(source.repository)
+          ? "Auto-build can't see new commits on an SSH URL: use the https:// URL, or trigger builds yourself."
+          : "Serendip checks the branch for new commits every 5 minutes; no webhook is needed. If it can't reach the repository, the component says so."}
+      </p>
     </>
   );
 }

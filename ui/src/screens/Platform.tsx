@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { apiFetch, apiList } from "../api/client";
-import type { Environment, JSONSchema, Package, PlatformComponent, PlatformView, Project, ProviderInstance, Readiness } from "../api/types";
+import type { Environment, JSONSchema, Package, PlatformComponent, PlatformView, Project, ProviderInstance, Readiness, Requirements } from "../api/types";
 import { ActionConfirm } from "../components/ActionConfirm";
 import { ApiEquivalent } from "../components/ApiEquivalent";
 import { KeyValueList } from "../components/Data";
@@ -173,6 +173,30 @@ export function PlatformPage() {
   );
 }
 
+/** Millicores as cores: "0.25 CPU cores". */
+const cores = (m: number) => `${Number((m / 1000).toFixed(2))} CPU cores`;
+
+/**
+ * The package's measured cost in words (spec 022 plan decision 4). Only
+ * measured numbers are ever shown: without a measurement it reads "not
+ * measured", with no number at all.
+ */
+export function costWords(pkg: Package): { idle: string; peak?: string; source?: string } {
+  const r: Requirements | null | undefined = pkg.requirements;
+  if (!r) return { idle: "Not measured. Serendip states no number for a package until its cost has been measured on the reference machine." };
+  const busy = pkg.capability === "build" ? "While a build runs" : "At its peak";
+  return {
+    idle: `Idle: ${r.idleMemoryMiB} MiB of memory and ${cores(r.idleCPUMillicores)}.`,
+    peak: `${busy}: up to ${r.peakMemoryMiB} MiB of memory and ${cores(r.peakCPUMillicores)}.`,
+    source: `Measured on ${r.measuredOn} (${r.results}).`,
+  };
+}
+
+/** An API message as a sentence: capitalised, with a full stop. */
+const sentence = (m: string) => `${m.charAt(0).toUpperCase()}${m.slice(1)}${/[.!?]$/.test(m) ? "" : "."}`;
+
+const genericRemoval = "Removing it uninstalls it and deletes what it stored. Features that need it are greyed out again.";
+
 type Open = { kind: "install"; pkg: Package } | { kind: "remove"; pkg: Package; instance: ProviderInstance };
 
 /**
@@ -214,6 +238,9 @@ export function PackagesPage() {
           const state = availability(readiness.data?.[pkg.capability]);
           const { kind, word } = availabilityWords[state];
           const body = { metadata: { name: pkg.provider }, spec: { capabilityId: pkg.capability, providerId: pkg.provider } };
+          const cost = costWords(pkg);
+          // Servers before spec 022 don't send installable: available alone decided.
+          const installable = pkg.installable ?? pkg.available;
           return (
             <section key={pkg.provider} className={pkg.available ? "section panel" : "section unavailable"} aria-labelledby={`pkg-${pkg.provider}`}>
               <div className="pipeline-head">
@@ -226,7 +253,21 @@ export function PackagesPage() {
               <KeyValueList
                 items={[
                   ["Provides", pkg.capability],
-                  ["Cost", pkg.available ? "Not stated by this server. Check the package's measured memory and CPU before installing it." : "Not measured yet: it can't be installed in this version."],
+                  [
+                    "Cost",
+                    <>
+                      <span>{cost.idle}</span>
+                      {cost.peak && (
+                        <>
+                          <br />
+                          <span>{cost.peak}</span>
+                        </>
+                      )}
+                    </>,
+                  ],
+                  ...(cost.source ? [["Measured", cost.source] as [string, string]] : []),
+                  ...(pkg.requirements?.note ? [["How it fits", pkg.requirements.note] as [string, string]] : []),
+                  ["Removing it", pkg.removal ?? genericRemoval],
                   ...(readiness.data?.[pkg.capability]?.message ? [["Status", readiness.data[pkg.capability]!.message!] as [string, string]] : []),
                 ]}
               />
@@ -241,6 +282,8 @@ export function PackagesPage() {
                   onCancel={() => setOpen(undefined)}
                 >
                   <p>Install {pkg.provider} for the whole platform? It runs, and uses memory and CPU, until it's removed.</p>
+                  <p>{cost.idle}</p>
+                  {cost.peak && <p>{cost.peak}</p>}
                 </ActionConfirm>
               )}
               {open?.pkg.provider === pkg.provider && open.kind === "remove" && (
@@ -248,7 +291,7 @@ export function PackagesPage() {
                   target={{ kind: "ProviderInstance", id: open.instance.metadata.id, name: pkg.provider }}
                   cascade={false}
                   noun="package"
-                  note="Removing it uninstalls it and deletes what it stored, such as stored logs and metrics. Features that need it are greyed out again."
+                  note={pkg.removal ?? genericRemoval}
                   onDeleted={(approval) => (approval ? navigate(`/approvals/${enc(approval)}`) : done())}
                   onCancel={() => setOpen(undefined)}
                 />
@@ -264,6 +307,10 @@ export function PackagesPage() {
                     </Guarded>
                   ) : !pkg.available ? (
                     <Guarded allowed={false} label="Install package" reason="Not available in this version of Serendip yet.">
+                      {null}
+                    </Guarded>
+                  ) : !installable ? (
+                    <Guarded allowed={false} label="Install package" reason={sentence(pkg.notInstallable ?? "It can't be installed until its cost is measured")}>
                       {null}
                     </Guarded>
                   ) : (
