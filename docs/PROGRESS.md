@@ -164,7 +164,7 @@ are done.**
   - **A run that expires mid-request** now answers 410, not 502.
   - **RP-044:** the credential check rests on the build step never seeing
     the credential.
-- **T009 is done** (2026-11-06, not committed yet): `serendipd` wiring.
+- **T009 is done** (2026-11-06, `dc706a2`): `serendipd` wiring.
   The details are in tasks.md's "Done as".
   - **The catalogue's builds entry** has the installer, the (still nil)
     `Requirements` and the removal sentence; `GET /v1/packages` shows it
@@ -175,7 +175,13 @@ are done.**
     lazy handle; `api.WithBuilds` too.
   - **`BuildCleanup`** uses the provider directly, so deleting a built
     Component works after the package is removed.
-- **Next step:** T010 (CLI, MCP and docs) ∥ T011 (the console).
+- **Next step:** T010 (CLI, MCP and docs), then T011 (the console).
+  T010 is unstarted. T008 already added the six `builds_*` catalogue
+  operations (`api/catalog/operations.go`), and `cmd/serendip` already
+  follows a `follow` param marked `CLIOnly` (`follow.go`). So T010 is
+  mostly checking the generated commands and tools, adding
+  `requirements` to `packages list`, and regenerating
+  `docs/cli-and-mcp.md`.
 
   `serendip-t018` is up, and `serendipd` isn't running.
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
@@ -185,7 +191,8 @@ are done.**
   T006 (`feat(providers): spec 022 T006 build provider and gitremote`), and
   T007 (`feat(core): spec 022 T007 build reconciler and auto-build`), and
   T008 (`feat(api): spec 022 T008 builds API`, then
-  `fix(api): spec 022 T008 expired build reads and RP-044`).
+  `fix(api): spec 022 T008 expired build reads and RP-044`), and
+  T009 (`feat(cmd): spec 022 T009 serendipd builds wiring`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;
