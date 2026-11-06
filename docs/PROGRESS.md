@@ -153,7 +153,7 @@ are done.**
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
   T002 (`feat(core): spec 022 T002 ADR 0020 and build core types`), and
   T003 and T004 (`feat(core): spec 022 T003 store uniqueness and T004 cheap resync`),
-  T005 (`feat(providers): spec 022 T005 workflow-plane installer`), and
+  T005 (`feat(providers): spec 022 T005 workflow-plane installer`),
   T006 (`feat(providers): spec 022 T006 build provider and gitremote`), and
   T007 (`feat(core): spec 022 T007 build reconciler and auto-build`).
 - **Key decisions** (plan.md):
