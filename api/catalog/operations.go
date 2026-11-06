@@ -230,7 +230,7 @@ var operations = func() []Operation {
 			Method:  "GET", Path: "/v1/applications/{id}/topology",
 			Params: []Param{id("Application")}, Hints: Hints{ReadOnly: true}},
 		Operation{Name: "packages_list", CLI: []string{"packages", "list"}, MCP: true,
-			Summary: "The optional packages this server offers (builds, observability) and whether each is available. Install one by creating a ProviderInstance naming it",
+			Summary: "The optional packages this server offers (builds, observability): whether each is available and installable, its measured cost idle and in use (requirements; null means not measured), and what removing it loses. Install one by creating a ProviderInstance naming it",
 			Method:  "GET", Path: "/v1/packages", Hints: Hints{ReadOnly: true}},
 		Operation{Name: "platform_get", CLI: []string{"platform"}, MCP: true,
 			Summary: "The application platform, read-only: where workloads run, and the component types and traits installed with what each allows",

@@ -102,7 +102,8 @@ func TestToolsListMirrorsTheCatalogue(t *testing.T) {
 			t.Errorf("%s description = %q", op.Name, tl.Description)
 		}
 	}
-	for _, name := range []string{"applications_delete", "approvals_request", "secrets_read_value", "resources_list"} {
+	for _, name := range []string{"applications_delete", "approvals_request", "secrets_read_value", "resources_list",
+		"packages_list", "builds_trigger", "builds_list", "builds_get", "builds_cancel", "builds_events", "builds_logs"} {
 		if byName[name] == nil {
 			t.Errorf("tool %s missing", name)
 		}

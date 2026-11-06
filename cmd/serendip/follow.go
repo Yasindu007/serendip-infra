@@ -157,6 +157,9 @@ func runFollow(ctx context.Context, c *apiClient, op catalog.Operation, args map
 		}
 		if l.End != "" {
 			why, ok := endReasons[l.End]
+			if l.End == "ended" && op.Name == "builds_logs" {
+				why = "the build ended"
+			}
 			if !ok {
 				why = safe(l.End)
 			}

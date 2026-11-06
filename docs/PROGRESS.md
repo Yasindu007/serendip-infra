@@ -16,7 +16,7 @@ Last updated: 2026-11-06
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T009
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T010
 are done.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
@@ -175,13 +175,16 @@ are done.**
     lazy handle; `api.WithBuilds` too.
   - **`BuildCleanup`** uses the provider directly, so deleting a built
     Component works after the package is removed.
-- **Next step:** T010 (CLI, MCP and docs), then T011 (the console).
-  T010 is unstarted. T008 already added the six `builds_*` catalogue
-  operations (`api/catalog/operations.go`), and `cmd/serendip` already
-  follows a `follow` param marked `CLIOnly` (`follow.go`). So T010 is
-  mostly checking the generated commands and tools, adding
-  `requirements` to `packages list`, and regenerating
-  `docs/cli-and-mcp.md`.
+- **T010 is done** (2026-11-06): CLI, MCP and docs. The details are in
+  tasks.md's "Done as".
+  - **The builds commands and tools** came from T008's catalogue; T010
+    tests them (`TestBuildsCommands`, the MCP tool list, follow CLI-only).
+  - **`serendip packages list`** prints idle and in-use cost, or "not
+    measured" with no number, plus each package's measurement source and
+    removal sentence. `--json` and MCP give the raw record.
+  - **`docs/cli-and-mcp.md`** gains "Packages and builds".
+- **Next step:** T011 (the console): the Builds tab, the Component
+  source form and the Packages page (tasks.md). Then T012.
 
   `serendip-t018` is up, and `serendipd` isn't running.
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
@@ -192,7 +195,8 @@ are done.**
   T007 (`feat(core): spec 022 T007 build reconciler and auto-build`), and
   T008 (`feat(api): spec 022 T008 builds API`, then
   `fix(api): spec 022 T008 expired build reads and RP-044`), and
-  T009 (`feat(cmd): spec 022 T009 serendipd builds wiring`).
+  T009 (`feat(cmd): spec 022 T009 serendipd builds wiring`), and
+  T010 (`feat(cmd): spec 022 T010 builds CLI, MCP and docs`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;

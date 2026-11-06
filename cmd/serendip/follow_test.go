@@ -123,12 +123,14 @@ func TestFollowIsCLIOnly(t *testing.T) {
 	if following(op, map[string]any{"id": "d1"}) || !following(op, map[string]any{"id": "d1", "follow": true}) {
 		t.Error("following() misreads the arguments")
 	}
-	mcpOp := op.ForMCP()
-	if _, ok := mcpOp.InputSchema()["properties"].(map[string]any)["follow"]; ok {
-		t.Error("the MCP tool offers follow")
-	}
-	if _, err := mcpOp.Request(map[string]any{"id": "d1", "follow": true}); err == nil {
-		t.Error("the MCP tool accepted follow")
+	for _, op := range []catalog.Operation{op, mustOp(t, "builds_logs")} {
+		mcpOp := op.ForMCP()
+		if _, ok := mcpOp.InputSchema()["properties"].(map[string]any)["follow"]; ok {
+			t.Errorf("the MCP tool %s offers follow", op.Name)
+		}
+		if _, err := mcpOp.Request(map[string]any{"id": "d1", "follow": true}); err == nil {
+			t.Errorf("the MCP tool %s accepted follow", op.Name)
+		}
 	}
 	args, err := parseArgs(op, []string{"d1", "--follow", "--tailLines", "5"}, strings.NewReader(""))
 	if err != nil || !following(op, args) || args["id"] != "d1" {
@@ -184,5 +186,21 @@ func TestFollowStopsWhenTheOutputFails(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("%v: still following after the output failed", tt.err)
 		}
+	}
+}
+
+// A followed build's logs end with the build (spec 022).
+func TestFollowBuildLogsEndWithTheBuild(t *testing.T) {
+	var path string
+	c := followClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path + "?" + r.URL.RawQuery
+		w.Write([]byte(`{"instance":"build","line":"STEP 1/3"}` + "\n" + `{"end":"ended"}` + "\n"))
+	})
+	var out, errOut bytes.Buffer
+	if code := runOperation(context.Background(), c, mustOp(t, "builds_logs"), map[string]any{"id": "b1", "follow": true}, globals{}, &out, &errOut); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if path != "/v1/builds/b1/logs?follow=true" || out.String() != "- build STEP 1/3\n" || !strings.Contains(errOut.String(), "the build ended") {
+		t.Errorf("path %q, out %q, stderr %q", path, out.String(), errOut.String())
 	}
 }

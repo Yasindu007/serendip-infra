@@ -392,7 +392,7 @@ Dependency sketch:
     (Secrets setup failed there only because the scratch run had no
     OpenBao credentials path.)
 
-## T010 [P] [A] — CLI, MCP and docs
+## T010 [P] [A] — CLI, MCP and docs ✅ 2026-11-06
 
 - **Do:** catalogue-generated commands and tools (`serendip builds
   list|get|trigger|cancel|logs [--follow]`, and the package
@@ -400,6 +400,23 @@ Dependency sketch:
 - **Files:** `cmd/serendip/`, `mcp/`, `docs/cli-and-mcp.md`.
 - **Verify:** `go test ./cmd/serendip/... ./mcp/... ./api/catalog/...`
   passes, including the docs-table check.
+- **Done as:**
+  - **The six `builds_*` commands and tools** were already generated from
+    T008's catalogue entries. `TestBuildsCommands` checks each one's
+    request, and the MCP tool-list test now requires them and
+    `packages_list`. `builds_logs`'s `follow` is CLI-only, like the
+    Deployment logs' (`TestFollowIsCLIOnly`).
+  - **`serendip packages list`** prints a table with idle and in-use
+    cost, or "not measured" with no number, then each package's
+    measurement source, note, why it isn't installable and the removal
+    sentence (`printPackages`). `--json` and MCP give the raw record. The
+    `packages_list` summary now says `requirements` is null when not
+    measured.
+  - **A followed build's logs** end with "the build ended", not "the
+    instances stopped writing".
+  - **`docs/cli-and-mcp.md`** gains "Packages and builds", and the
+    `packages_list` row matches the new summary. The table is kept by
+    hand; `TestReferenceListsEveryOperation` checks it.
 
 ## T011 [P] — The console
 

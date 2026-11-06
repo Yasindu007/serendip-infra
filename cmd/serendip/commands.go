@@ -254,6 +254,8 @@ func printSuccess(op catalog.Operation, resp response, g globals, stdout, stderr
 		} else {
 			stdout.Write(append(body, '\n'))
 		}
+	case op.Name == "packages_list":
+		printPackages(body, stdout)
 	default:
 		printHuman(body, stdout)
 	}
@@ -307,6 +309,81 @@ func printHuman(body []byte, out io.Writer) {
 		return
 	}
 	out.Write(append(body, '\n'))
+}
+
+// packageRow is a package as GET /v1/packages answers it.
+type packageRow struct {
+	Provider       string `json:"provider"`
+	Capability     string `json:"capability"`
+	Available      bool   `json:"available"`
+	Installable    bool   `json:"installable"`
+	NotInstallable string `json:"notInstallable"`
+	Removal        string `json:"removal"`
+	Requirements   *struct {
+		IdleMemoryMiB     int    `json:"idleMemoryMiB"`
+		IdleCPUMillicores int    `json:"idleCPUMillicores"`
+		PeakMemoryMiB     int    `json:"peakMemoryMiB"`
+		PeakCPUMillicores int    `json:"peakCPUMillicores"`
+		MeasuredOn        string `json:"measuredOn"`
+		Results           string `json:"results"`
+		Note              string `json:"note"`
+	} `json:"requirements"`
+}
+
+// printPackages prints the packages with their measured cost, idle and
+// in use, or "not measured", never a number (spec 022 criteria 1 and 2),
+// then where each cost came from and what removing each loses.
+func printPackages(body []byte, out io.Writer) {
+	var v struct {
+		Packages []packageRow `json:"packages"`
+	}
+	if json.Unmarshal(body, &v) != nil {
+		printHuman(body, out)
+		return
+	}
+	if len(v.Packages) == 0 {
+		fmt.Fprintln(out, "(none)")
+		return
+	}
+	yesNo := func(b bool) string {
+		if b {
+			return "yes"
+		}
+		return "no"
+	}
+	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "PACKAGE\tCAPABILITY\tAVAILABLE\tINSTALLABLE\tIDLE\tIN USE")
+	for _, p := range v.Packages {
+		idle, peak := "not measured", "not measured"
+		if r := p.Requirements; r != nil {
+			idle = fmt.Sprintf("%d MiB, %dm CPU", r.IdleMemoryMiB, r.IdleCPUMillicores)
+			peak = fmt.Sprintf("%d MiB, %dm CPU", r.PeakMemoryMiB, r.PeakCPUMillicores)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", safe(p.Provider), safe(p.Capability), yesNo(p.Available), yesNo(p.Installable), idle, peak)
+	}
+	tw.Flush()
+	for _, p := range v.Packages {
+		var notes []string
+		if r := p.Requirements; r != nil {
+			notes = append(notes, fmt.Sprintf("Measured on %s (%s).", safe(r.MeasuredOn), safe(r.Results)))
+			if r.Note != "" {
+				notes = append(notes, safe(r.Note))
+			}
+		}
+		if p.NotInstallable != "" {
+			notes = append(notes, "Not installable: "+safe(p.NotInstallable)+".")
+		}
+		if p.Removal != "" {
+			notes = append(notes, "Removing it: "+safe(p.Removal))
+		}
+		if len(notes) == 0 {
+			continue
+		}
+		fmt.Fprintf(out, "\n%s:\n", safe(p.Provider))
+		for _, n := range notes {
+			fmt.Fprintf(out, "  %s\n", n)
+		}
+	}
 }
 
 // describe picks a list row's ID, name and status from the shapes the API

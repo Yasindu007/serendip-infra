@@ -798,3 +798,66 @@ func TestDiscoverRefusesAnotherResource(t *testing.T) {
 		t.Errorf("discover = %v", err)
 	}
 }
+
+// packages list states each package's measured cost, or "not measured",
+// never a number (spec 022 criterion 1).
+func TestPackagesListShowsCost(t *testing.T) {
+	body := `{"packages":[
+		{"provider":"openchoreo-workflow-plane","capability":"build","available":true,"installable":true,
+		 "removal":"Build history and logs are lost.",
+		 "requirements":{"idleMemoryMiB":46,"idleCPUMillicores":5,"peakMemoryMiB":900,"peakCPUMillicores":1800,
+		  "measuredOn":"edge-1 (simulated T470), 2026-11-07","results":"profiles/edge-1/bench/results/x","note":"Fits beside edge-1."}},
+		{"provider":"openchoreo-observability-plane","capability":"observability","available":false,"installable":false,
+		 "notInstallable":"package openchoreo-observability-plane can't be installed until its resource cost is measured","requirements":null}]}`
+	var out, errOut bytes.Buffer
+	printSuccess(mustOp(t, "packages_list"), response{Status: 200, Header: http.Header{}, Body: []byte(body)}, globals{}, &out, &errOut)
+	got := out.String()
+	for _, want := range []string{"IDLE", "46 MiB, 5m CPU", "900 MiB, 1800m CPU", "edge-1 (simulated T470), 2026-11-07", "profiles/edge-1/bench/results/x",
+		"Fits beside edge-1.", "Removing it: Build history and logs are lost.", "until its resource cost is measured"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output lacks %q:\n%s", want, got)
+		}
+	}
+	var obs string
+	for _, l := range strings.Split(got, "\n") {
+		if strings.HasPrefix(l, "openchoreo-observability-plane ") {
+			obs = l
+		}
+	}
+	if strings.Count(obs, "not measured") != 2 || strings.ContainsAny(strings.TrimPrefix(obs, "openchoreo-observability-plane"), "0123456789") {
+		t.Errorf("unmeasured row = %q", obs)
+	}
+	out.Reset()
+	printSuccess(mustOp(t, "packages_list"), response{Status: 200, Header: http.Header{}, Body: []byte(body)}, globals{json: true}, &out, &errOut)
+	if !strings.Contains(out.String(), `"requirements": null`) {
+		t.Errorf("--json = %s", out.String())
+	}
+}
+
+// The builds commands come from the catalogue and send the builds API's
+// requests (spec 022 T010).
+func TestBuildsCommands(t *testing.T) {
+	w := newWorld(t)
+	sha := strings.Repeat("a", 40)
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"builds", "list", "c1"}, "GET " + w.api.URL + "/v1/components/c1/builds"},
+		{[]string{"builds", "trigger", "c1", "--commit", sha}, "POST " + w.api.URL + "/v1/components/c1/builds\n{\n  \"commit\": \"" + sha + "\"\n}"},
+		{[]string{"builds", "get", "b1"}, "GET " + w.api.URL + "/v1/builds/b1"},
+		{[]string{"builds", "cancel", "b1"}, "POST " + w.api.URL + "/v1/builds/b1/cancel"},
+		{[]string{"builds", "events", "b1"}, "GET " + w.api.URL + "/v1/builds/b1/events"},
+		{[]string{"builds", "logs", "b1", "--tailLines", "20"}, "GET " + w.api.URL + "/v1/builds/b1/logs?tailLines=20"},
+		{[]string{"builds", "logs", "b1", "--follow"}, "GET " + w.api.URL + "/v1/builds/b1/logs?follow=true"},
+	} {
+		r := w.cli(ops, "", append([]string{"--dry-run"}, tt.args...)...)
+		if r.code != exitOK || strings.TrimSpace(r.stdout) != tt.want {
+			t.Errorf("%v: %d %q, want %q (%s)", tt.args, r.code, r.stdout, tt.want, r.stderr)
+		}
+	}
+	// The builds of a Component that doesn't exist: not found.
+	if r := w.cli(ops, "", "builds", "list", "no-such-component"); r.code != exitNotFound {
+		t.Errorf("list: %d %q %s", r.code, r.stdout, r.stderr)
+	}
+}
