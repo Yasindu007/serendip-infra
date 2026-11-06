@@ -105,6 +105,24 @@ var resourcePaths = map[resource.Kind]string{
 	resource.KindDeployment:       "deployments",
 }
 
+// nestedPaths are kinds served only beneath their owner's routes, with no
+// generic create, update or delete routes of their own, but with their own
+// action namespace: serendip/{path}/{verb}. A Build is triggered on its
+// Component and goes with it (specs/022-builds plan decisions 5 and 11).
+var nestedPaths = map[resource.Kind]string{
+	resource.KindBuild: "builds",
+}
+
+// actionPath is kind's action namespace, from resourcePaths or
+// nestedPaths.
+func actionPath(kind resource.Kind) (string, bool) {
+	if p, ok := resourcePaths[kind]; ok {
+		return p, true
+	}
+	p, ok := nestedPaths[kind]
+	return p, ok
+}
+
 func authzAction(what, verb string) policy.Action {
 	return policy.Action{Name: "serendip/authorization/" + what + "/" + verb}
 }
@@ -117,7 +135,8 @@ func approvalsAction(verb string) policy.Action {
 }
 
 func action(kind resource.Kind, verb string) policy.Action {
-	return policy.Action{Name: "serendip/" + resourcePaths[kind] + "/" + verb}
+	p, _ := actionPath(kind)
+	return policy.Action{Name: "serendip/" + p + "/" + verb}
 }
 
 // routeTable is the single source of every /v1 route's requirement. A
@@ -183,6 +202,16 @@ func routeTable() map[string]rule {
 		// Promote reads the source Deployment; the handler checks writing
 		// deployments at the target Environment (spec 020).
 		"POST /v1/deployments/{id}/promote": {action: action(resource.KindDeployment, "read"), target: targetResource, kind: resource.KindDeployment},
+
+		// Builds (spec 022 plan decision 11): runs are decided at the
+		// Build, which inherits from its Component; logs are the logs
+		// action, as build output can carry secrets.
+		"POST /v1/components/{id}/builds": {action: action(resource.KindBuild, "write"), target: targetResource, kind: resource.KindComponent},
+		"GET /v1/components/{id}/builds":  {action: action(resource.KindBuild, "read"), target: targetResource, kind: resource.KindComponent},
+		"GET /v1/builds/{id}":             {action: action(resource.KindBuild, "read"), target: targetResource, kind: resource.KindBuild},
+		"POST /v1/builds/{id}/cancel":     {action: action(resource.KindBuild, "write"), target: targetResource, kind: resource.KindBuild},
+		"GET /v1/builds/{id}/events":      {action: action(resource.KindBuild, "read"), target: targetResource, kind: resource.KindBuild},
+		"GET /v1/builds/{id}/logs":        {action: policy.Action{Name: policy.ActionComponentLogsRead}, target: targetResource, kind: resource.KindBuild},
 
 		"POST /v1/secrets/{id}/value": {action: policy.Action{Name: "serendip/secrets/value/write", Data: true}, target: targetResource, kind: resource.KindSecret},
 		"GET /v1/secrets/{id}/value":  {action: policy.Action{Name: "serendip/secrets/value/read", Data: true}, target: targetResource, kind: resource.KindSecret},
@@ -451,7 +480,7 @@ func (a *authorizer) checks(ctx context.Context, r *http.Request, ru rule) ([]ch
 		return []check{{ru.action, resource.RootScope}}, "", nil
 	case targetGraph:
 		kind := resource.Kind(r.PathValue("kind"))
-		if _, ok := resourcePaths[kind]; !ok {
+		if _, ok := actionPath(kind); !ok {
 			return nil, "", errUnknownKind
 		}
 		return []check{{action(kind, "read"), resource.Scope{Kind: kind, ID: id}}}, id, nil
@@ -683,7 +712,7 @@ func scopeChecks(act policy.Action, scopes []resource.Scope) []check {
 // deleteAction is delete for a kind, or for a kind the API doesn't serve,
 // an action only a "*" role (Owner) holds.
 func deleteAction(kind resource.Kind) policy.Action {
-	if _, ok := resourcePaths[kind]; ok {
+	if _, ok := actionPath(kind); ok {
 		return action(kind, "delete")
 	}
 	return policy.Action{Name: "serendip/" + string(kind) + "/delete"}
@@ -770,7 +799,7 @@ func (a *authorizer) readable(caller policy.Principal) func(ctx context.Context,
 		if kind == resource.KindApproval {
 			return a.approvalReadable(ctx, caller, id)
 		}
-		if _, ok := resourcePaths[kind]; !ok {
+		if _, ok := actionPath(kind); !ok {
 			return false, nil
 		}
 		d, err := a.engine.Decide(ctx, caller, action(kind, "read"), resource.Scope{Kind: kind, ID: id})

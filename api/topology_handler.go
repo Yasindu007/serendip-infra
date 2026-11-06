@@ -30,6 +30,9 @@ type ComponentHandler struct {
 	apps  store.Store[resource.ApplicationSpec, resource.ApplicationStatus]
 	// recordDenied audits the handler's own refusals (auditRefusal).
 	recordDenied dbForAudit
+	// source checks a source Component's build capability and credential
+	// (spec 022).
+	source sourceChecker
 	// mu serialises Component writes, so a port can't be removed while a
 	// dependency on it is being added.
 	mu sync.Mutex
@@ -183,6 +186,10 @@ func (h *ComponentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
+	if ctx, err = h.source.check(ctx, c, nil); err != nil {
+		h.fail(w, r, err)
+		return
+	}
 	c.Metadata.Relationships = resource.ComponentRelationships(c.Metadata.Relationships, c.Spec)
 	created, err := h.comps.Create(ctx, c)
 	if err != nil {
@@ -207,6 +214,10 @@ func (h *ComponentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, err := h.checkDependencies(r.Context(), c, &current)
 	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if ctx, err = h.source.check(ctx, c, &current); err != nil {
 		h.fail(w, r, err)
 		return
 	}

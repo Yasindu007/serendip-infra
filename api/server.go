@@ -242,6 +242,7 @@ type serverOptions struct {
 	schemas   reconcile.ConfigSchemaProvider
 	platform  reconcile.PlatformViewProvider
 	packages  reconcile.Catalogue
+	builds    reconcile.BuildProvider
 	metadata  *ResourceMetadata
 	mcp       bool
 }
@@ -266,6 +267,13 @@ func WithConfigSchemas(s reconcile.ConfigSchemaProvider) ServerOption {
 // records nothing installs.
 func WithPackages(c reconcile.Catalogue) ServerOption {
 	return func(o *serverOptions) { o.packages = c }
+}
+
+// WithBuilds serves build runs' logs and events from the build capability
+// (spec 022). Without it they answer 503; runs are still read from the
+// store, and triggering still needs the capability ready.
+func WithBuilds(b reconcile.BuildProvider) ServerOption {
+	return func(o *serverOptions) { o.builds = b }
 }
 
 // WithPlatformView serves GET /v1/platform from the application platform
@@ -303,11 +311,13 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 	compStore := sqlite.NewStore[resource.ComponentSpec, resource.ComponentStatus](db, resource.KindComponent).SetBus(bus)
 	// Components (spec 020 T009): their own Create and Update keep declared
 	// dependencies coherent; plus dependencies and an Application's topology.
+	buildReady := buildReadiness(providers, opts.packages)
 	(&ComponentHandler{
 		ResourceHandler: NewResourceHandler[resource.ComponentSpec, resource.ComponentStatus](compStore, "components"),
 		comps:           compStore,
 		apps:            appStore,
 		recordDenied:    recordDeniedIn(db),
+		source:          sourceChecker{ready: buildReady, exists: resourceExistsIn(db)},
 	}).Register(apiMux)
 	(&PlatformHandler{platform: opts.platform}).Register(apiMux)
 	// Deployments (spec 020): their own Create, Update and Promote.
@@ -321,7 +331,18 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 		recordDenied: recordDeniedIn(db),
 	}).Register(apiMux)
 	(&SchemaHandler{comps: compStore, schemas: opts.schemas}).Register(apiMux)
-	NewRuntimeHandler(deployStore, envStore, opts.runtime).Register(apiMux)
+	runtime := NewRuntimeHandler(deployStore, envStore, opts.runtime)
+	runtime.Register(apiMux)
+	// Builds (spec 022): triggered and cancelled through the store; logs
+	// share the Deployment logs' caps.
+	(&BuildHandler{
+		builds:   sqlite.NewStore[resource.BuildSpec, resource.BuildStatus](db, resource.KindBuild).SetBus(bus),
+		comps:    compStore,
+		provider: opts.builds,
+		ready:    buildReady,
+		streams:  &runtime.streams, recent: &runtime.recent,
+		idle: streamIdle, max: streamMax,
+	}).Register(apiMux)
 	// Capability's store is shared with RegistryHandler below (T019 gap
 	// fix -- specs/002-http-api/spec.md Scope-IN item 2, "get/set a
 	// capability's default provider", was never wired up) rather than

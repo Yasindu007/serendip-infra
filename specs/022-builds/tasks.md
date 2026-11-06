@@ -279,7 +279,7 @@ Dependency sketch:
   - **For T009:** wire `WithBuilds`, `NewBuildReconciler` (with
     `engine.Enqueue`) and `BuildCleanup` for `KindBuild`.
 
-## T008 — The API
+## T008 — The API ✅ 2026-11-06
 
 - **Do:**
   - **The build routes** (decision 11), with route-table rules and
@@ -294,6 +294,63 @@ Dependency sketch:
   - a Reader gets runs (200) but not logs (403);
   - a Contributor installing a package gets 403;
   - `source` without the package gets 422, naming it.
+- **Done as:**
+  - **Files:** `api/build_handler.go` (new: `BuildHandler`,
+    `buildReadiness`, `sourceChecker`), `authz.go`, `server.go`
+    (`WithBuilds`), `topology_handler.go`, `runtime_handler.go`,
+    `package_handler.go`, `catalog/operations.go`,
+    `docs/cli-and-mcp.md` (its test needs every operation listed), and
+    `build_handler_test.go`. No `core/` or `providers/` change.
+  - **Actions:** `nestedPaths` gives Build its own namespace,
+    `serendip/builds/{read,write,delete}`, without the generic CRUD routes
+    (no `POST /v1/builds`, no `DELETE`). Graph routes and a Component's
+    cascade delete now name `serendip/builds/delete` for its Builds.
+  - **Routes** (decision 11):
+    - **Trigger:** `{commit}`, optional. The name is `build-<12 hex>`,
+      or `build-<UTC time>` for the head. It answers 409 on an image Component and 422 while
+      the capability isn't ready.
+    - **List** is newest first.
+    - **Cancel** sets `spec.cancel`, retrying a version conflict with the
+      reconciler up to 3 times, then 503 with `Retry-After`. Asking twice
+      is 200; a finished build is 409.
+    - Trigger and cancel are audited by the store, with the caller and the
+      policy evidence.
+  - **Logs and events:**
+    - **A build not yet started** is 409, and one that never ran is 410.
+    - **`ObserveBuild().Gone`** gives 410 "logs expired".
+    - **No `WithBuilds`** gives 503; the run records still read.
+    - **Caps:** build logs share the Deployment logs' limiters.
+      `readRecentLogs` and `followLogs` were taken out of
+      `RuntimeHandler`, unchanged.
+  - **`source` checks** (Component create and update), skipped when the
+    source is exactly as stored:
+    - `ValidateComponentSource` gives 400;
+    - the build capability not ready gives 422, naming the catalogue's
+      build package(s) and the readiness reason;
+    - **`credentialSecret`, when newly named or the repository changes:**
+      the caller needs `serendip/secrets/value/read` (a data action) at
+      that Secret, else 403, audited. A missing Secret is 400. The data
+      action, not `secrets/read`, because the build sends the value to
+      the repository's host: otherwise a Contributor could point someone
+      else's credential at a host they control. **Consequence:** Owner
+      and Contributor need a Secrets role (Secrets User or Officer) to
+      name a credential, as for reading a value.
+  - **`GET /v1/packages`** already carried `requirements` (null while
+    unmeasured) and `removal` through `Package`. It gains `installable`
+    and `notInstallable` (the reason).
+  - **Catalogue:** `builds_trigger`, `_list`, `_get`, `_cancel`,
+    `_events` and `_logs` (follow is CLI only).
+  - **go-reviewer:** no blockers. Its fixes are in: distinct build names,
+    and cancel's exhausted retries as 503, not 409. Accepted, not fixed:
+    - **Other source fields stay editable without the value permission**
+      (branch, path, Dockerfile, auto-build), since they don't send the
+      credential to another host.
+    - **A run that expires between `ObserveBuild` and `BuildLogs`**
+      answers 502, not 410: a window of one request, an hour after the
+      build ends.
+  - **For T009:** pass `api.WithBuilds(<the lazy build handle>)`. Readiness
+    comes from the registry's `build` capability, which the
+    ProviderInstance reconciler already reports.
 
 ## T009 — serendipd wiring
 

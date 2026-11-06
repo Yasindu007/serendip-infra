@@ -229,25 +229,34 @@ func (h *RuntimeHandler) Logs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	open := func(ctx context.Context) (reconcile.LogStream, error) { return h.runtime.Logs(ctx, d, env, opts) }
 	if opts.Follow {
-		h.follow(w, r, d, env, opts)
+		followLogs(w, r, &h.streams, h.idle, h.max, open)
 		return
 	}
+	readRecentLogs(w, r, &h.recent, open)
+}
+
+// readRecentLogs answers {"lines": [...], "truncated": bool} from the
+// stream open gives, counted against limit. Deployment and build logs
+// share it, and their caps.
+func readRecentLogs(w http.ResponseWriter, r *http.Request, limit *streamLimiter, open func(context.Context) (reconcile.LogStream, error)) {
+	reqID := audit.RequestIDFrom(r.Context())
 	caller, ok := callerFrom(r.Context())
 	if !ok {
 		WriteProblem(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token", reqID)
 		return
 	}
-	if !h.recent.acquire(caller.ID) {
+	if !limit.acquire(caller.ID) {
 		w.Header().Set("Retry-After", "5")
 		WriteProblem(w, http.StatusTooManyRequests, "too many requests",
-			"too many log reads at once: at most "+strconv.Itoa(h.recent.perCaller)+" per caller and "+strconv.Itoa(h.recent.total)+" in all; retry shortly", reqID)
+			"too many log reads at once: at most "+strconv.Itoa(limit.perCaller)+" per caller and "+strconv.Itoa(limit.total)+" in all; retry shortly", reqID)
 		return
 	}
-	defer h.recent.release(caller.ID)
+	defer limit.release(caller.ID)
 	ctx, cancel := context.WithTimeout(r.Context(), recentTimeout)
 	defer cancel()
-	stream, err := h.runtime.Logs(ctx, d, env, opts)
+	stream, err := open(ctx)
 	if err != nil {
 		platformFailed(w, r, err)
 		return
@@ -294,7 +303,9 @@ func recentLines(stream reconcile.LogStream) ([]reconcile.LogLine, bool, error) 
 	return lines, truncated, nil
 }
 
-func (h *RuntimeHandler) follow(w http.ResponseWriter, r *http.Request, d resource.Deployment, env resource.Environment, opts reconcile.LogOptions) {
+// followLogs streams the lines of the stream open gives as NDJSON, counted
+// against limit, ending after idle without a line or max in all.
+func followLogs(w http.ResponseWriter, r *http.Request, limit *streamLimiter, idleAfter, maxDuration time.Duration, open func(context.Context) (reconcile.LogStream, error)) {
 	reqID := audit.RequestIDFrom(r.Context())
 	caller, ok := callerFrom(r.Context())
 	if !ok {
@@ -305,22 +316,22 @@ func (h *RuntimeHandler) follow(w http.ResponseWriter, r *http.Request, d resour
 	// its own, just past its maximum. A connection that can't take one
 	// can't stream.
 	rc := http.NewResponseController(w)
-	if err := rc.SetWriteDeadline(time.Now().Add(h.max + 30*time.Second)); err != nil {
+	if err := rc.SetWriteDeadline(time.Now().Add(maxDuration + 30*time.Second)); err != nil {
 		log.Printf("api: %s %s: can't stream here (request %s): %v", r.Method, r.URL.Path, reqID, err)
 		WriteProblem(w, http.StatusInternalServerError, "internal error", "this connection can't stream; read recent lines without follow", reqID)
 		return
 	}
-	if !h.streams.acquire(caller.ID) {
+	if !limit.acquire(caller.ID) {
 		w.Header().Set("Retry-After", "30")
 		WriteProblem(w, http.StatusTooManyRequests, "too many requests",
-			"too many log streams open: at most "+strconv.Itoa(h.streams.perCaller)+" per caller and "+strconv.Itoa(h.streams.total)+" in all; close one and retry", reqID)
+			"too many log streams open: at most "+strconv.Itoa(limit.perCaller)+" per caller and "+strconv.Itoa(limit.total)+" in all; close one and retry", reqID)
 		return
 	}
-	defer h.streams.release(caller.ID)
+	defer limit.release(caller.ID)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	stream, err := h.runtime.Logs(ctx, d, env, opts)
+	stream, err := open(ctx)
 	if err != nil {
 		platformFailed(w, r, err)
 		return
@@ -350,9 +361,9 @@ func (h *RuntimeHandler) follow(w http.ResponseWriter, r *http.Request, d resour
 	}()
 
 	enc := json.NewEncoder(w)
-	idle := time.NewTimer(h.idle)
+	idle := time.NewTimer(idleAfter)
 	defer idle.Stop()
-	deadline := time.NewTimer(h.max)
+	deadline := time.NewTimer(maxDuration)
 	defer deadline.Stop()
 	end := func(reason string) {
 		_ = enc.Encode(map[string]string{"end": reason})
@@ -367,7 +378,7 @@ func (h *RuntimeHandler) follow(w http.ResponseWriter, r *http.Request, d resour
 			if err := rc.Flush(); err != nil {
 				return
 			}
-			idle.Reset(h.idle)
+			idle.Reset(idleAfter)
 		case err := <-ended:
 			if !errors.Is(err, io.EOF) {
 				log.Printf("api: %s %s: log stream failed (request %s): %v", r.Method, r.URL.Path, reqID, err)

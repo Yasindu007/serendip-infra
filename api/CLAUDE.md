@@ -25,6 +25,13 @@
     a client-supplied `metadata.id` is dropped.
   - A 5xx answer never carries internal error text (`writeStoreErr`).
   - The model: `docs/architecture/authorization.md`, ADR 0014.
+  - A kind served only beneath its owner (a Build, spec 022) goes in
+    `nestedPaths`, not `resourcePaths`: it gets its own action namespace
+    (`serendip/builds/*`) without generic CRUD routes. Use `actionPath`
+    wherever a kind's actions are looked up.
+  - Naming a Secret that the system will read for the caller (a build's
+    `source.credentialSecret`) needs the value's data action at that
+    Secret, checked by the handler (`sourceChecker`).
   - Agents (spec 018): `core/policy` denies them access management and
     answers `NeedsApproval` for their deletes. `deny()` turns that into a
     403 with `ProblemNeedsApproval`, and every DELETE route must check an

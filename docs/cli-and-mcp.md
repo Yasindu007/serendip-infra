@@ -102,8 +102,13 @@ the process list shows it:
   - **The server ends a stream** after 5 minutes without new lines, or
     10 minutes in all; run the command again to keep following.
   - **Limits:** at most 3 streams at once per person, and 20 per server.
-- **MCP tools answer once,** so `deployments_logs` reads recent lines and
-  has no `follow`.
+- **Build logs** work the same way: `serendip builds logs <id>`, with
+  `--tailLines`, `--sinceSeconds` and `--follow`, which ends when the build
+  does. They share the same limits, and need the same permission. A
+  build's logs and events are kept for an hour after it ends; after that
+  they answer 410 ("logs expired"), and the build keeps its outcome.
+- **MCP tools answer once,** so `deployments_logs` and `builds_logs` read
+  recent lines and have no `follow`.
 
 ## AI assistants: `serendip mcp` (local)
 
@@ -202,6 +207,12 @@ tools.
 | `serendip approvals list` | `approvals_list` | `GET /v1/approvals` | Approvals the caller may read, newest first, a page at a time |
 | `serendip approvals reject <id>` | — | `POST /v1/approvals/{id}/reject` | Reject a request |
 | `serendip approvals request` | `approvals_request` | `POST /v1/approvals` | Ask for a delete that needs a person's approval. A person decides it; the requester never can |
+| `serendip builds cancel <id>` | `builds_cancel` | `POST /v1/builds/{id}/cancel` | Stop a build that hasn't finished. What's running is unchanged |
+| `serendip builds events <id>` | `builds_events` | `GET /v1/builds/{id}/events` | Platform events about a build's run, newest first. Kept for an hour after the build ends |
+| `serendip builds get <id>` | `builds_get` | `GET /v1/builds/{id}` | One build: its phase, steps, commit, image and times |
+| `serendip builds list <id>` | `builds_list` | `GET /v1/components/{id}/builds` | A source Component's builds, newest first, each with its phase, the commit built, its image and its times |
+| `serendip builds logs <id>` | `builds_logs` | `GET /v1/builds/{id}/logs` | A build's log lines, oldest first, kept for an hour after it ends. Build output can hold secrets, so logs need their own permission |
+| `serendip builds trigger <id>` | `builds_trigger` | `POST /v1/components/{id}/builds` | Build a source Component's image. It waits its turn behind a running build, and a successful build becomes the Component's new release. Needs the builds package |
 | `serendip capabilities create` | — | `POST /v1/capabilities` | Create a Capability |
 | `serendip capabilities delete <id>` | — | `DELETE /v1/capabilities/{id}` | Delete a Capability. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
 | `serendip capabilities get <id>` | — | `GET /v1/capabilities/{id}` | Get one Capability |

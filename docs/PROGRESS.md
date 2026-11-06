@@ -16,7 +16,7 @@ Last updated: 2026-11-06
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T007
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T008
 are done.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
@@ -141,13 +141,31 @@ are done.**
     T002's `image`-required note is closed.
   - **RP-043** was added: the head read runs on the reconcile loop.
   - **Reviews:** contract-guardian and go-reviewer; their fixes are in.
-- **Next step:** T008, the API. It must:
-  - **say "logs expired"** by checking `ObserveBuild().Gone`, since
-    BuildLogs' expired error has no sentinel;
-  - **check the caller may read `source.credentialSecret`**, since the
-    reconciler reads it as the system;
-  - **check the build capability is ready** for `source` (422 naming the
-    package).
+- **T008 is done** (2026-11-06): the builds API. The details are in
+  tasks.md's "Done as".
+  - **Routes:** `api/build_handler.go`, covering trigger, list, get,
+    cancel, events and logs. Build gets `serendip/builds/*` through
+    `nestedPaths`, with no generic CRUD routes.
+  - **Logs and events:**
+    - a build not yet started answers 409;
+    - an expired run answers 410 "logs expired" (`Gone`);
+    - without `WithBuilds`, 503.
+    - They share the Deployment logs' caps (`readRecentLogs` and
+      `followLogs`).
+  - **`source` on a Component:**
+    - the package not ready gives 422, naming it;
+    - `credentialSecret` needs `serendip/secrets/value/read` at that
+      Secret, when it's newly named or the repository changes. So Owner
+      and Contributor need a Secrets role to name one.
+  - **`GET /v1/packages`** gains `installable` and `notInstallable`.
+  - **The catalogue** has six `builds_*` operations, and
+    `docs/cli-and-mcp.md` is updated.
+  - **go-reviewer:** its fixes are in.
+- **Next step:** T009, `serendipd` wiring:
+  - `WithBuilds` (the lazy build handle);
+  - `NewBuildReconciler` with `engine.Enqueue`;
+  - `BuildCleanup` for `KindBuild`;
+  - the catalogue's builds installer.
 
   `serendip-t018` is up, and `serendipd` isn't running.
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
@@ -155,7 +173,8 @@ are done.**
   T003 and T004 (`feat(core): spec 022 T003 store uniqueness and T004 cheap resync`),
   T005 (`feat(providers): spec 022 T005 workflow-plane installer`),
   T006 (`feat(providers): spec 022 T006 build provider and gitremote`), and
-  T007 (`feat(core): spec 022 T007 build reconciler and auto-build`).
+  T007 (`feat(core): spec 022 T007 build reconciler and auto-build`), and
+  T008 (`feat(api): spec 022 T008 builds API`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;
