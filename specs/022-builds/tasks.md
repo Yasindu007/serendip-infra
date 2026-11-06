@@ -470,6 +470,37 @@ Dependency sketch:
 - **Files:** `api/spec022_acceptance_test.go`.
 - **Verify:** `go test ./api/ -run Spec022` passes, and `go test ./...`
   passes.
+- **Done as:**
+  - **The fakes:** `builder022` (runs that move only when the test says,
+    remembering each run's credential; follow streams from a channel),
+    `platform022` (records the image each Component and Environment
+    runs), `installer022` and `creds022`. The real Build, Component
+    (`WithBuilds`), Deployment, ProviderInstance and Approval reconcilers
+    run by hand after each change, with `UninstallCleanup` and
+    `BuildCleanup` as the approval's clean-ups.
+  - **One test per criterion,** `TestSpec022Criterion{1,3,4,6,7,8,10,11}_*`:
+    - 1: measured idle and peak cost with its source; the unmeasured
+      package reads `null`, never a number.
+    - 3: a Contributor's install is a 403 and audited; the Owner's goes
+      NotInstalled → Installing → Ready, audited with the decision.
+    - 4: ten concurrent installs give one 201 and nine 409s; a write past
+      the API gets `ErrDuplicate` from the store's unique key.
+    - 6: create, trigger, queued → running → succeeded, follow over a real
+      connection, the built image served in development, then promoted.
+    - 7: the credential reaches the build, but no API response, captured
+      `log` output or audit column carries it.
+    - 8: a failed build shows failed with its logs; the Component and
+      development keep the earlier image; a running build cancelled reads
+      cancelled and the run is stopped.
+    - 10: the removal sentence comes before any request; an agent's delete
+      is `needs-approval`, its request stays pending (nothing removed)
+      until a person approves; then the workloads are uninstalled and
+      builds reads NotInstalled.
+    - 11: a Reader sees runs and events but not logs, and can't trigger or
+      cancel; every console action is a CLI command and an MCP tool;
+      follow is CLI-only.
+  - **Left to other tasks:** 2, 5, 9 and 12 (T013, T014 and the
+    installer's and reconciler's own tests).
 
 ## T013 — Footprint on the simulated T470, and the stated cost
 
