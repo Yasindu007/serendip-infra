@@ -17,7 +17,8 @@ Last updated: 2026-11-09
 ## Current phase
 
 **Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T013
-are done; T014 (real-cluster verification on `serendip-t018`) is next.**
+are done; T014 (real-cluster verification) has been run, and is ticked
+once T015 fixes F4 and F1 (see "T014 was run live" below).**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
   findings":
@@ -224,9 +225,42 @@ are done; T014 (real-cluster verification on `serendip-t018`) is next.**
       won't hit the leftover-CRD refusal (VERSIONS.md).
   - **Network:** port 22 to GitHub is blocked on this network. Pushes go
     over SSH on 443 (see the GitHub pacing memory).
-- **Next: T014,** live on `serendip-t018` through the console, the CLI
-  and Claude Code via `serendip mcp`. That's criteria 3–11, recorded in
-  `specs/022-builds/verification.md`.
+- **T014 was run live** (2026-11-09), on `serendip-t018`; the evidence
+  is in `specs/022-builds/verification.md`. It isn't ticked yet.
+  - **Passed:** criteria 1, 3–9 and 11, including Claude Code through
+    `serendip mcp`, with the agent's removal waiting for a person.
+  - **Criterion 10 fails one point: the cluster isn't clean** after
+    removal.
+    - **F4:** finished builds' Argo Workflows, with their pods and 2 GiB
+      workspace volumes, stay in `workflows-serendip-builds`.
+    - **F1:** `cluster-agent-tls` stays too.
+    - **Both are left on the cluster on purpose,** as T015's test.
+  - **Other findings for T015:**
+    - **F2:** after a source change whose build fails, the Component and
+      its Deployments claim nothing runs.
+    - **F3:** the credential copy outlives its run, against plan
+      decision 3.
+    - **U1–U4:** console logs go stale; a cancelled step reads Running;
+      `tailLines` is taken before the Argo filter; a 503 says "being set
+      up" when the package isn't installed.
+- **Next: T015,** the reviews plus F1–F4 and U1–U4. Then re-run a
+  removal after a build on `serendip-t018`, which must end clean. That
+  ticks T014.
+  - **OpenBao on `serendip-t018` was re-initialised** (the spec 018 unseal
+    file was lost from temp). Its credentials are now in
+    `C:\Users\malit\.serendip-t018\openbao-init.json`. Pass it with
+    `SERENDIP_OPENBAO_CREDENTIALS_PATH`.
+  - **Scratch** (session `535cb08d…`, `scratchpad/t014/`): `run.sh`
+    starts `serendipd` (`:8088`, `t014.db`); `keys.env` holds the API
+    keys `verifier`, `t014-contrib` and `t014-reader`; `sd.sh <key> …`
+    runs the CLI; `api.sh` uses curl; `cdp.mjs` drives headless Chrome
+    on port 9333.
+  - **GitHub repositories for the run:**
+    `serendipinfra/serendip-t014-public` and `-private`. The private
+    one's read-only token goes in
+    `C:\Users\malit\.serendip-t018\t014-private-token.txt` (the user
+    makes it).
+  - **`bench-t470` is deleted.**
 - **GitHub (2026-11-09):** branches `spec-010` … `spec-019`, `spec-021`
   and `spec-020` are pushed to the fork. PR #25 (spec 002) is open on
   `Serendip-Infra/serendip-infra`. The PRs are cross-fork, so they can't

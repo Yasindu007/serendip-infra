@@ -564,6 +564,16 @@ Dependency sketch:
 - **Files:** `specs/022-builds/verification.md`.
 - **Verify:** each criterion has evidence (commands, outputs and
   screenshots) in `verification.md`, and the cluster ends clean.
+- **Run as** (2026-11-09; not ticked yet, because the cluster didn't end
+  clean): `verification.md` holds the evidence.
+  - **Passed:** criteria 1, 3–9 and 11, including Claude Code through
+    `serendip mcp`, with the agent's removal waiting for a person.
+  - **Criterion 10 fails one point:** finished builds' Argo Workflows,
+    pods and workspace volumes outlive the removal (F4), and so does the
+    agent's TLS Secret (F1). They're left on `serendip-t018` for T015.
+  - **Findings for T015:** F1–F4, and U1–U4.
+  - **Ticked once** T015 has fixed F4 and F1 and a removal after a build
+    leaves the cluster clean.
 
 ## T015 — Reviews and fixes
 
