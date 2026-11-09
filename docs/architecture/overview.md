@@ -62,6 +62,7 @@ CLI · MCP · unified API.
 |---|---|---|
 | Kubernetes distribution | K3s | ADR 0001 |
 | Application platform | OpenChoreo | Application/component deployment, GitOps. ADR 0005 |
+| Builds from source (optional package) | OpenChoreo's workflow plane, `registry:2` | Dockerfile builds into a local registry; installable only with its measured cost. Spec 022, ADR 0020 |
 | Cluster management (multi-cluster) | Rancher | Enabled once useful (3+ nodes / multi-cluster); not required at edge-1 |
 | Infrastructure provisioning | Crossplane | Composition/reconciliation engine for non-K8s infra |
 | Identity | Thunder | Go-based, avoids the Java-heavy WSO2 Identity Server / Keycloak footprint. ADR 0006 |

@@ -27,6 +27,10 @@
   (`InterfaceName`/`ActorName` in audit.go) set by the Engine on the
   context passed into `Reconcile` — individual `Reconciler`
   implementations should not set these themselves.
+  - The one deliberate exception: builds Serendip starts itself (a
+    source Component's first build, and auto-build) are created as
+    `system:auto-build` (`AutoBuildActor`), through `audit.WithActor` on
+    that one Create (spec 022 T007).
 - No `core/` package imports `providers/` (constitution rule 2) — this
   package is no exception, even though nothing in `providers/` exists yet
   to import.

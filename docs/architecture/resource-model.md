@@ -27,7 +27,7 @@ for resources that have nothing to do with Kubernetes underneath (an
 ### Organizational tree
 
 ```
-Organization → Team → Project ┬→ Application → Component
+Organization → Team → Project ┬→ Application → Component → Build
                               └→ Environment → Deployment ⇢ Component
 ```
 
@@ -54,6 +54,28 @@ was owned by one Environment; migration 0008 moved existing ones up.
   Components of the same Application). It is owned by exactly one
   Application. It runs nowhere by itself: it's `Released` once its current
   spec is a release.
+  - **Since spec 022 it has exactly one of `image` or `source`.**
+    `source` is `repository` (HTTPS or SSH), `branch` (default `main`),
+    `path` (default `.`), `dockerfile` (default `Dockerfile`),
+    `credentialSecret` (a Secret's ID) and `autoBuild`. Its values reach
+    a build script, so `ValidateComponentSource` holds them to a plain,
+    shell-inert grammar. It needs the build capability ready.
+  - **A source Component's status** has `image`: the newest successful
+    build of its current source (or, until that exists, of an earlier
+    one), which its releases and Deployments use. It reads
+    `WaitingForBuild` with no successful build, and has `Built` and,
+    with auto-build on, `AutoBuild` conditions.
+- **Build** (spec 022) — one build of a Component's source into an
+  image, owned by exactly one Component, so the Component's scope governs
+  it and it goes with the Component. Its spec is an optional full
+  `commit` (empty: the branch's head) and `cancel`. Its status has the
+  phase (`Queued`, `Running`, `Succeeded`, `Failed`, `Cancelled`), the
+  commit built, the image, start and finish times, steps, and the
+  Component's source as it was when the build was first seen. Triggering
+  is creating one, by a person, an agent, or `system:auto-build`; there's
+  no delete of its own. Records outlive the platform's runs, whose logs
+  then read "expired". Detail: `application-platform.md`, "Builds (spec
+  022)".
 - **Deployment** (spec 020) — one Component running in one Environment,
   owned by that Environment, with a `depends-on` edge to the Component.
   Its spec names the `component`, an optional `release` (empty: the
@@ -112,6 +134,11 @@ Site → Cluster → Node
   installed: `capabilityId` and `providerId` name it, it's platform-wide
   (no owner, no `environmentId`), and one exists per capability. Removing
   it goes through an Approval, whose clean-up uninstalls the package.
+  - **One per capability is enforced by the store** since spec 022:
+    `resources.unique_key` (`capabilityId/environmentId`) with
+    `UNIQUE (kind, unique_key)`, so a racing install gets 409 (RP-033).
+  - **`status.applied`** (spec 022) is the fingerprint of what the last
+    full install applied, so an unchanged resync skips Helm.
 - **Approval** — the record of one destructive action (today, a delete):
   what was asked, who asked, what it removes (its blast radius), who or
   what decided (policy, or a person), and how execution and verification
@@ -125,7 +152,7 @@ Resources are connected by typed edges, not implicit foreign keys:
 
 | Edge | Example |
 |---|---|
-| `owns` | Project owns Environment and Application; Application owns Component; Environment owns Deployment |
+| `owns` | Project owns Environment and Application; Application owns Component; Component owns Build (spec 022); Environment owns Deployment |
 | `runs-on` | Component runs-on Cluster; Cluster runs-on Node(s) |
 | `depends-on` | Deployment depends-on its Component; Component depends-on the Components it calls (spec 020); Component depends-on Database |
 | `provided-by` | Database provided-by a Provider instance (e.g. CloudNativePG) |

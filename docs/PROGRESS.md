@@ -16,299 +16,85 @@ Last updated: 2026-11-09
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T015
-are done; T014's re-run after T015 ended clean (2026-11-09). Next: T016
-(docs and close-out).**
-- **Plan approved** 2026-10-24.
-- **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
-  findings":
-  - **Also written:** `providers/build/openchoreo/VERSIONS.md`, and
-    `specs/022-builds/spike/` (the working `serendip-dockerfile` workflow,
-    and recorded `info/refs` bodies for T006's tests).
-  - **Risks:** RP-038 and RP-039 were added.
-  - **The spike's objects were removed** from `serendip-t018`, which is
-    still running.
-- **What the spike changed:**
-  - **Runs are standalone,** in `serendip-builds`, with no OpenChoreo
-    labels, because labelled runs need `allowedWorkflows`.
-  - **Outputs** are read from the Argo Workflow's nodes.
-  - **The build runs `privileged` without `hostUsers: false`,** which
-    fails on kind (RP-038).
-  - **The Git Secret is always `<run>-git`.** It's created before the
-    run, in `workflows-serendip-builds`.
-  - **Uninstall leaves the Argo CRDs** (RP-039).
-  - **Idle cost is ~46 MB,** not 200–400 MiB.
-  - **A no-change Helm run takes 19–24 s,** so the fingerprint matters.
-- **T002 is done** (2026-10-24):
-  - **ADR 0020** (`docs/decisions/0020-builds-from-source.md`).
-  - **`core/provider.Requirements`.** `Package.Requirements`, `Removal`
-    and `Installable()` were added, and `Catalogue.Validate` refuses an
-    unmeasured package. `ReportStart` reports it `Unavailable`, with
-    "not installable until its resource cost is measured".
-  - **`resource.Build`** (owned by exactly one Component; a full commit
-    ID), and `ComponentSpec.Source` with `ValidateComponentSource`. That
-    validation is strict, because the values reach a build script.
-  - **The status fields:** `ProviderInstanceStatus.Applied` and
-    `PackageState.Applied`. They're only fields so far; T004 writes and
-    reads them.
-  - **`reconcile.BuildProvider`** and `BuildObservation`. The
-    observation has a `Gone` flag, for a run that expired.
-  - **The test catalogues** in `api/` and `core/reconcile` now carry a
-    measured `Requirements`.
-  - **contract-guardian passed it.** Its three small validation fixes are
-    in, and RP-040 was added (symlinks inside a repository; recheck in
-    T005).
-  - **Still open, for T007:** `validateComponentSpec`
-    (`core/reconcile/application.go`) still requires `image`. T007 must
-    resolve a source Component's image, or apply exactly-one-of, before
-    that check runs.
-- **T003 is done** (2026-10-25), fixing RP-033:
-  - **Migration 0009** adds `resources.unique_key`, with
-    `UNIQUE (kind, unique_key)`. Of existing duplicates, only the oldest
-    is keyed, and each other one gets a migration note.
-  - **`store.ErrDuplicate`.** `sqlite.Store.SetUniqueKey(func(S) string)`
-    applies the key on Create. Update keeps a keyed row's key in step,
-    from a review point. A store without a key function, such as
-    `serendipd`'s reconciler store, leaves keys alone, and unkeyed
-    duplicates stay unkeyed.
-  - **The key** is `resource.ProviderInstanceKey`
-    (`capabilityId/environmentId`), wired in `api/server.go`.
-  - **The API answers 409** for `ErrDuplicate`. `packageValidator`'s own
-    duplicate check now wraps `ErrDuplicate` too, so it's 409, not 400.
-    Racing installs get one 201 and the rest 409. Without the key, 2–3
-    got through.
-- **T004 is done** (2026-10-25):
-  - **The reconciler persists `PackageState.Applied`** into
-    `status.applied`, with the Ready condition (`setStatus`), writing
-    only when either changes.
-  - **It keeps the value while the package is still `Installing`,** so
-    the next poll checks rather than re-applying.
-  - **Tested:** 10 resyncs with nothing changed make no full install and
-    no store write.
-- **T005 is done** (2026-11-01): `providers/build/openchoreo`
-  (`installer.go`, `registry.go`, `workflow.go`, `requirements.go`, with
-  tests).
-  - **Install:** first the registry's port check, then the CA copy, Helm
-    (chart 1.3.1), `ClusterWorkflowPlane/default`, the registry (PVC,
-    Deployment, Service; `hostNetwork` on 5000) and the
-    `serendip-dockerfile` `ClusterWorkflow`.
-  - **The fingerprint** (`Fingerprint()`) covers the Helm args and every
-    hand-built object. When it matches, Install makes about 5 GETs:
-    - a missing object is repaired at once;
-    - Helm runs only for the chart's Deployments or the agent;
-    - a settling fault (a rollout, or the agent's connection) is waited
-      out for 3 min, doubling per repair up to 30 min.
-  - **Uninstall** follows decision 12's order. It's idempotent, and returns
-    `ErrRunsRemaining` while runs finalize.
-  - **The build script** refuses a `path` or `dockerfile` that a symlink
-    points outside the checkout, checked in the real `podman-runner`
-    image (RP-040 updated). **RP-041** was added: the registry is
-    unauthenticated on the node's network.
-  - **A core fix, from contract-guardian:** `UninstallCleanup` no longer
-    uninstalls a package another ProviderInstance still provides
-    (removing a duplicate used to tear down the real one).
-  - The chart's names were taken from the pulled chart (`VERSIONS.md`).
-    Nothing ran on the cluster: T005 is verified against fakes, and
-    T014 runs it live.
-- **T006 is done** (2026-11-01): `builds.go` and `buildlogs.go` (the
-  `Builds` BuildProvider, `NewBuilds(client)`) and
-  `providers/internal/gitremote`. The details are in tasks.md's "Done as".
-  - **Runs** are named `build-<16 hex of sha256(ID)>`, and images go to
-    `serendip/cmp-<hash>`.
-  - **Phase:** the run's conditions, or the Argo Workflow's phase when
-    that's further on. Steps, commit and image come from the Workflow's
-    nodes.
-  - **Logs** are read step by step, and a follow ends with the run.
-  - **gitremote** is HTTPS only, refuses redirects off HTTPS, and caps
-    the answer at 8 MiB.
-  - **Reviews:** contract-guardian passed, and its blocker is fixed;
-    go-reviewer's fixes are in. **RP-042** was added (a follower's
-    polling).
-  - **Upstream facts** (status shapes, pod names, Argo's own log lines)
-    are in `VERSIONS.md`. The `argo=true` filter is rechecked live in
-    T014.
-- **T007 is done** (2026-11-06): `BuildReconciler`, image resolution and
-  auto-build (`core/reconcile/build.go`, `componentbuild.go`). The
-  details are in tasks.md's "Done as".
-  - **A source Component** runs its newest successful build of its
-    current source. That's `status.image`, which the Deployment reconciler
-    also uses. Until there is one, it reads `WaitingForBuild`.
-  - **The first build** is automatic, on create or a source change, as
-    `system:auto-build`.
-  - **Cancel and start:** cancel always calls `CancelBuild`. A failed
-    start removes the credential copy and retries.
-  - **Auto-build** reads the head every 5 minutes, with an `AutoBuild`
-    condition. HeadCommit's errors are now core sentinels (`ErrSource*`).
-    T002's `image`-required note is closed.
-  - **RP-043** was added: the head read runs on the reconcile loop.
-  - **Reviews:** contract-guardian and go-reviewer; their fixes are in.
-- **T008 is done** (2026-11-06): the builds API. The details are in
-  tasks.md's "Done as".
-  - **Routes:** `api/build_handler.go`, covering trigger, list, get,
-    cancel, events and logs. Build gets `serendip/builds/*` through
-    `nestedPaths`, with no generic CRUD routes.
-  - **Logs and events:**
-    - a build not yet started answers 409;
-    - an expired run answers 410 "logs expired" (`Gone`);
-    - without `WithBuilds`, 503.
-    - They share the Deployment logs' caps (`readRecentLogs` and
-      `followLogs`).
-  - **`source` on a Component:**
-    - the package not ready gives 422, naming it;
-    - `credentialSecret` needs `serendip/secrets/value/read` at that
-      Secret, when it's newly named or the repository changes. So Owner
-      and Contributor need a Secrets role to name one.
-  - **`GET /v1/packages`** gains `installable` and `notInstallable`.
-  - **The catalogue** has six `builds_*` operations, and
-    `docs/cli-and-mcp.md` is updated.
-  - **go-reviewer:** its fixes are in.
-  - **A run that expires mid-request** now answers 410, not 502.
-  - **RP-044:** the credential check rests on the build step never seeing
-    the credential.
-- **T009 is done** (2026-11-06, `dc706a2`): `serendipd` wiring.
-  The details are in tasks.md's "Done as".
-  - **The catalogue's builds entry** has the installer, the (still nil)
-    `Requirements` and the removal sentence; `GET /v1/packages` shows it
-    available but not installable, checked live on `serendip-t018`.
-  - **`lazyBuilds`** is set while the package reports Ready and cleared
-    otherwise, through `registerPackages`' `onReadiness` hook.
-  - **The Build reconciler** and `ComponentReconciler.WithBuilds` use the
-    lazy handle; `api.WithBuilds` too.
-  - **`BuildCleanup`** uses the provider directly, so deleting a built
-    Component works after the package is removed.
-- **T010 is done** (2026-11-06): CLI, MCP and docs. The details are in
-  tasks.md's "Done as".
-  - **The builds commands and tools** came from T008's catalogue; T010
-    tests them (`TestBuildsCommands`, the MCP tool list, follow CLI-only).
-  - **`serendip packages list`** prints idle and in-use cost, or "not
-    measured" with no number, plus each package's measurement source and
-    removal sentence. `--json` and MCP give the raw record.
-  - **`docs/cli-and-mcp.md`** gains "Packages and builds".
-- **T011 is done** (2026-11-06): the console. The details are in
-  tasks.md's "Done as".
-  - **The Builds tab:** runs, start at the head or a commit, cancel, and
-    a run's steps, logs (follow and reconnect, shared with Deployments)
-    and events; "Logs expired" for a 410.
-  - **The Component form:** image or source, the source fields validated
-    as the server does, a credential Secret picker, auto-build, and a
-    warning while the builds package isn't ready.
-  - **The Packages page:** measured cost, or "Not measured" with no
-    number; install only when `installable`; the API's removal sentence.
-  - Checked by tests and the build only, not in a browser against
-    `serendipd`: T014 runs it live.
-- **T012 is done** (2026-11-06): in-process acceptance tests,
-  `api/spec022_acceptance_test.go`, for criteria 1, 3, 4, 6–8, 10 and
-  11. They use fake build, platform and installer providers with the
-  real reconcilers. The details are in tasks.md's "Done as".
-- **T013 is done** (2026-11-09). Details are in tasks.md's "Done as" and
-  the results README,
-  `profiles/edge-1/bench/results/2026-11-06-spec022-simulated-t470/`.
-  - **Without the package: PASS** against spec 020's run.
-  - **Stated cost** (`providers/build/openchoreo/requirements.go`): idle
-    453 MiB and 19 mcores, peak 1129 MiB and 1787 mcores, with the fit
-    note. `GET /v1/packages` returns those numbers, with
-    `installable: true`.
-  - **Found and fixed on the way:**
-    - **RP-045:** the package couldn't be installed. Installs and
-      removals now run as background package jobs in `core/reconcile`.
-    - **RP-046:** Argo's full CRDs held kube-apiserver ~550 MiB higher.
-      The installer now sets `argo-workflows.crds.full=false` and
-      `crds.keep=true` (the user chose this). Idle fell from 954 to
-      453 MiB, and a full Helm run from 23 s to 5 s.
-    - **The harness** now states cost at the node level, not only the
-      package's pods.
-  - **contract-guardian passed** (no blockers) on core and providers.
-  - **Leftovers:**
-    - `bench-t470` is still up; delete it with
-      `profiles/edge-1/bench/kind-t470-setup.sh down bench-t470`.
-    - `serendip-t018` is up, with no Argo CRDs on it, so T014's install
-      won't hit the leftover-CRD refusal (VERSIONS.md).
-  - **Network:** port 22 to GitHub is blocked on this network. Pushes go
-    over SSH on 443 (see the GitHub pacing memory).
-- **T014 was run live** (2026-11-09), on `serendip-t018`; the evidence
-  is in `specs/022-builds/verification.md`. It isn't ticked yet.
-  - **Passed:** criteria 1, 3–9 and 11, including Claude Code through
-    `serendip mcp`, with the agent's removal waiting for a person.
-  - **Criterion 10 fails one point: the cluster isn't clean** after
-    removal.
-    - **F4:** finished builds' Argo Workflows, with their pods and 2 GiB
-      workspace volumes, stay in `workflows-serendip-builds`.
-    - **F1:** `cluster-agent-tls` stays too.
-    - **Both are left on the cluster on purpose,** as T015's test.
-  - **Other findings for T015:**
-    - **F2:** after a source change whose build fails, the Component and
-      its Deployments claim nothing runs.
-    - **F3:** the credential copy outlives its run, against plan
-      decision 3.
-    - **U1–U4:** console logs go stale; a cancelled step reads Running;
-      `tailLines` is taken before the Argo filter; a 503 says "being set
-      up" when the package isn't installed.
-- **T015 is done** (2026-11-09): F1–F4 and U1–U4 are fixed. The four
-  reviews ran, and every finding is fixed or recorded (RP-041 and RP-043
-  updated; RP-047–RP-052 new). `tasks.md` T015 has the detail.
-  - **F2 is a decision (RP-048):** a source Component keeps running an
-    earlier source's newest successful build until its current source
-    builds, and the new `Built` condition says so.
-  - **Deferred to a builds-hardening follow-up:** digest deploys and
-    registry auth (RP-041), a build NetworkPolicy (RP-049), step limits
-    (RP-052), and `hostUsers: false` / no service-account token
-    (RP-038).
-- **T014 is ticked** (2026-11-09): the live re-run on `serendip-t018`
-  (install, build `t014-pub`, remove) cleared T014's leftovers and the
-  new build. The removal ended clean 40 s after the delete: no Workflows,
-  pods, PVCs or credential copies, and no `cluster-agent-tls`. Only the
-  empty namespaces and the Argo CRDs remain, by design.
-  `verification.md` has the evidence.
-- **Next: T016** (docs and close-out; see tasks.md). `serendipd` from
-  the re-run may still be on `:8088`. Stop it, or leave it for T016,
-  which needs no cluster.
-  - **OpenBao on `serendip-t018` was re-initialised** (the spec 018 unseal
-    file was lost from temp). Its credentials are now in
-    `C:\Users\malit\.serendip-t018\openbao-init.json`. Pass it with
-    `SERENDIP_OPENBAO_CREDENTIALS_PATH`.
-  - **Scratch** (session `535cb08d…`, `scratchpad/t014/`): `run.sh`
-    starts `serendipd` (`:8088`, `t014.db`); `keys.env` holds the API
-    keys `verifier`, `t014-contrib` and `t014-reader`; `sd.sh <key> …`
-    runs the CLI; `api.sh` uses curl; `cdp.mjs` drives headless Chrome
-    on port 9333.
-  - **GitHub repositories for the run:**
-    `serendipinfra/serendip-t014-public` and `-private`. The private
-    one's read-only token goes in
-    `C:\Users\malit\.serendip-t018\t014-private-token.txt` (the user
-    makes it).
+**Spec 022 (builds, the workflow-plane package): COMPLETE** (T001–T016,
+2026-10-24 → 2026-11-09). **Next: choose the next spec** (below).
+- **Records:**
+  - `specs/022-builds/`: spec, plan (decisions, T001 spike findings, two
+    T013 amendments), tasks (a "Done as" note per task), and
+    `verification.md` for `serendip-t018`;
+  - **ADR 0020** (`docs/decisions/0020-builds-from-source.md`);
+  - `docs/architecture/application-platform.md` ("Builds (spec 022)"),
+    `resource-model.md` (Build, Component `source`), `provider-model.md`
+    ("Measured requirements, required to install"), `authorization.md`
+    (Builds; the credential check);
+  - the risk register (RP-033 closed, RP-034's cost part closed, RP-037
+    mitigated, RP-038–RP-052 new; the index gained RP-030–RP-037's rows),
+    `build-vs-adopt.md`, `docs/cli-and-mcp.md` ("Packages and builds");
+  - footprint: `profiles/edge-1/bench/results/2026-11-06-spec022-simulated-t470/`.
+- **What it built:**
+  - **The optional `build` package** (`openchoreo-workflow-plane`,
+    `providers/build/openchoreo`): the workflow-plane chart 1.3.1 with
+    minimal Argo CRDs, `ClusterWorkflowPlane/default`, a `registry:2`
+    (`hostNetwork`, pulled as `localhost:5000`), and Serendip's own
+    `serendip-dockerfile` workflow (podman). A fingerprint in
+    `status.applied` makes an unchanged resync ~5 GETs.
+  - **Measured cost, required to install** (`core/provider.Requirements`):
+    idle 453 MiB / 19 mcores, peak 1129 MiB / 1787 mcores at the node
+    level. An unmeasured package can't be installed.
+  - **Installs and removals run as background package jobs**
+    (`core/reconcile/packagejob.go`, RP-045).
+  - **Store uniqueness** (`unique_key`, migration 0009), closing RP-033.
+  - **The `Build` kind,** owned by its Component; a Component has one of
+    `image` or `source`, runs its newest successful build, builds first
+    on its own, and can auto-build by polling the head over smart HTTP
+    (`providers/internal/gitremote`) every 5 minutes.
+  - **API, CLI, MCP and console:** `/v1/components/{id}/builds`,
+    `/v1/builds/{id}[/cancel|/events|/logs]`, `builds_*` tools, a Builds
+    tab, the source form, and cost on the Packages page.
+  - **Removal** through an Approval leaves the cluster clean except the
+    empty namespaces and the Argo CRDs (RP-039), checked live.
+- **Deferred to a builds-hardening follow-up:** digest deploys and
+  registry auth (RP-041), a build NetworkPolicy (RP-049), step limits
+  (RP-052), and `hostUsers: false` / no service-account token (RP-038).
+  Also not done (plan.md): buildpacks, webhooks, external registries,
+  registry GC, multi-node pulls, pruning old Builds.
+- **Next spec candidates** (the user decides; propose, don't start):
+  - **Spec 023, the observability package** (the other optional package;
+    it must declare measured `Requirements` before it can be installed);
+  - **builds hardening** (the list above);
+  - the older candidates in "Next up" below.
+- **Left running / on disk:**
+  - **`serendip-t018`** is up. After T014's re-run it holds no build
+    workloads, only the empty build namespaces and the Argo CRDs.
+  - **A scratch `serendipd` from T014's re-run was still on `:8088`**
+    at T016 (PID 23744; stopping it needed the user's permission). Stop
+    it with `taskkill /PID 23744 /F` if it's still there.
+  - **OpenBao on `serendip-t018` was re-initialised;** its credentials
+    are in `C:\Users\malit\.serendip-t018\openbao-init.json` (pass
+    `SERENDIP_OPENBAO_CREDENTIALS_PATH`).
+  - **GitHub repositories for T014:**
+    `serendipinfra/serendip-t014-public` and `-private` (the token is in
+    `C:\Users\malit\.serendip-t018\t014-private-token.txt`).
   - **`bench-t470` is deleted.**
-- **GitHub (2026-11-09):** branches `spec-010` … `spec-019`, `spec-021`
-  and `spec-020` are pushed to the fork. PR #25 (spec 002) is open on
-  `Serendip-Infra/serendip-infra`. The PRs are cross-fork, so they can't
-  stack: open them one or two at a time in order, with
-  `--no-maintainer-edit`, and merge with "Create a merge commit". The
-  spec 003 PR body is written; the user opens the PRs.
-- **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
-  T002 (`feat(core): spec 022 T002 ADR 0020 and build core types`), and
-  T003 and T004 (`feat(core): spec 022 T003 store uniqueness and T004 cheap resync`),
-  T005 (`feat(providers): spec 022 T005 workflow-plane installer`),
-  T006 (`feat(providers): spec 022 T006 build provider and gitremote`), and
-  T007 (`feat(core): spec 022 T007 build reconciler and auto-build`), and
-  T008 (`feat(api): spec 022 T008 builds API`, then
-  `fix(api): spec 022 T008 expired build reads and RP-044`), and
-  T009 (`feat(cmd): spec 022 T009 serendipd builds wiring`), and
-  T010 (`feat(cmd): spec 022 T010 builds CLI, MCP and docs`), and
-  T011 (`feat(ui): spec 022 T011 builds console`), and
-  T012 (`test(api): spec 022 T012 acceptance tests`), and
-  T013 (`feat(core): spec 022 T013 package jobs, minimal Argo CRDs and the builds package's cost`).
-- **Key decisions** (plan.md):
-  - Serendip's own `serendip-dockerfile` workflow, without upstream's
-    `generate-workload` or ExternalSecrets;
-  - a `registry:2`, pulled through `localhost`;
-  - no ESO: a per-run Secret copy;
-  - no install without measured `Requirements` (RP-034 and RP-037);
-  - a `Build` kind;
-  - auto-build by polling over smart HTTP;
-  - a fingerprint for a cheap resync;
-  - a `unique_key` column (RP-033);
-  - ADR 0020.
-- **One change from the spec:** turning auto-build on or off is
-  `components/write`.
+  - **Network:** port 22 to GitHub is blocked here; pushes go over SSH on
+    443 (the GitHub pacing memory).
+- **Committed** on local `main`, **not pushed:** every spec 022 commit,
+  from `docs(spec): spec 022 plan and T001 spike` to the T016 close-out.
+  By the pacing rule, spec 022 goes up as a branch (`spec-022`) when its
+  turn comes.
+- **GitHub (2026-11-09):** branches `spec-010` … `spec-021` are pushed to
+  the fork. PR #25 (spec 002) is open on `Serendip-Infra/serendip-infra`.
+  The PRs are cross-fork, so they can't stack: open them one or two at a
+  time in order, with `--no-maintainer-edit`, and merge with "Create a
+  merge commit". The spec 003 PR body is written; the user opens the PRs.
+- **Key decisions** (plan.md, ADR 0020): our own workflow, not the
+  samples; `registry:2` through `localhost`; no ESO, a per-run Secret
+  copy; no install without measured `Requirements`; a `Build` kind;
+  polling, not webhooks; a resync fingerprint; a `unique_key` column.
+  **One change from the spec:** turning auto-build on or off is
+  `components/write`. **One decision in T015:** a source Component keeps
+  an earlier source's build running until its current source builds
+  (RP-048).
 
 Previous phase:
 

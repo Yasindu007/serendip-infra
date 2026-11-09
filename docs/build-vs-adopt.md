@@ -12,7 +12,7 @@ console, CLI and MCP) and integrates everything else.
 - **Accepted risks and costs** of these choices live in
   `docs/risk-register.md`.
 
-Last updated: 2026-11-01.
+Last updated: 2026-11-09.
 
 ## Built (Serendip's own code)
 
@@ -37,6 +37,11 @@ Last updated: 2026-11-01.
 | Log following | NDJSON over `fetch`, with caps, idle and maximum timers; the console reconnects | Spec 020 plan decision 8 |
 | JSON Schema validation | `core/jsonschema`: the platform's schemas use 7 keywords. It's about 300 lines of stdlib, fails closed on anything else, and refuses unknown settings the platform would silently drop | Spec 020 T008 |
 | A branch's head commit | `providers/internal/gitremote`: one `GET info/refs` over Git's smart HTTP, parsed as pkt-lines (protocol v0). It's about 200 lines of stdlib, HTTPS only, and it downloads no objects | Spec 022 plan decision 7, T006 |
+| The build workflow (`serendip-dockerfile`) | One `ClusterWorkflow` of Serendip's own: check out, `podman build`, push, output the image and commit. Serendip reads the image from the run and releases it itself, so upstream's `generate-workload` step and its ExternalSecrets aren't needed | Spec 022 plan decision 1, ADR 0020 |
+| Build runs as a resource kind (`Build`) | A trigger is a store create, so audited and reconciled like any change; history outlives the plane's 1 h runs; an agent's trigger takes the same policy path | Spec 022 plan decision 5, ADR 0020 |
+| A Git credential for one run | The build reconciler reads it through the Secrets capability and copies it into a plain Secret for that run only, deleted when the run ends (RP-050) | Spec 022 plan decision 3, T015 |
+| Background package jobs | `core/reconcile/packagejob.go`: a package's install or removal runs beside the reconcile loop, one per package, bounded at 30 min, because Helm's `--wait` outlives a 10 s reconcile (RP-045) | Spec 022 T013 |
+| Store-level uniqueness | `resources.unique_key` with `UNIQUE (kind, unique_key)`, closing RP-033 | Spec 022 plan decision 9, T003 |
 
 ## Adopted (other projects, integrated)
 
@@ -54,6 +59,9 @@ Last updated: 2026-11-01.
 | local-path provisioner | Storage (edge-1) | ADR 0002 | Longhorn at 3 nodes |
 | cert-manager | OpenChoreo dependency | Spec 010 | |
 | WSO2 Agent Manager | AI agent identities (POC, beside Serendip) | Spec 018 | Not part of edge-1 |
+| OpenChoreo's workflow plane (chart `1.3.1`, with Argo Workflows) | Builds from source (the optional `build` package) | Spec 022, ADR 0020 | Argo is a cluster component the chart brings, not a Go dependency. Installed with the minimal Argo CRDs (RP-046); they outlive removal (RP-039) |
+| `registry:2` (CNCF `distribution`) | Storing built images | Spec 022 plan decision 2 | Hand-built Deployment with `hostNetwork`, pulled through `localhost`, so single-node (RP-041) |
+| `podman` (upstream's `podman-runner` image) | Building a Dockerfile inside the run | Spec 022 plan decision 1 | Privileged, without user namespaces on kind (RP-038) |
 | MCP Go SDK (`modelcontextprotocol/go-sdk` v1.8.0) | MCP protocol (stdio and streamable HTTP) | ADR 0017, spec 021 | Chosen over hand-written, to avoid maintaining protocol churn ourselves. 9 modules, at most +2.4 MB; confined to `mcp/` (its `golang.org/x/sys` is also used directly by the CLI for an owner-only folder ACL on Windows) |
 
 ## Rejected (considered and turned down)
@@ -65,6 +73,10 @@ Last updated: 2026-11-01.
 | OpenChoreo's `occ` CLI and MCP | Serendip's CLI and MCP | They bypass Serendip's RBAC, approvals and audit; an admin-only escape hatch is deferred | Spec 021 |
 | `client-go` | Our small REST client | Weight (constitution 4) | Spec 006 |
 | `go-git`, or shelling out to `git ls-remote`, for auto-build's head check | `gitremote` | A large dependency, or a host binary, for one read of a ref list | Spec 022 T006 |
+| OpenChoreo's sample `ClusterWorkflow`s (`dockerfile-builder`; Paketo, GCP and Ballerina buildpacks) with `generate-workload` | Serendip's own `serendip-dockerfile` | They write a Workload from the run and pull credentials through ExternalSecrets; Serendip releases the image itself. Buildpacks are a later spec | Spec 022 plan decision 1 |
+| External Secrets Operator (ESO) for build credentials | A per-run Secret copy from the Secrets capability | A fourth component with its own CRDs and pods to keep current, for a copy ESO would make anyway | Spec 022 plan decision 3, ADR 0020 |
+| Webhooks for auto-build | Polling the branch head every 5 min over smart HTTP | A laptop behind NAT has no public URL, and OpenChoreo's webhook endpoint sits behind `openchoreo-api`, which Serendip doesn't use. Revisit with public ingress | Spec 022 plan decision 7 |
+| Argo's full CRDs (the chart default) | The chart's minimal CRDs | kube-apiserver idled ~550 MiB higher, and every Helm run downloaded them from GitHub | Spec 022 T013, RP-046 |
 | Service proxy, or an in-cluster helper, for the identity provider's management API | In-process port-forward | The proxy strips `Authorization`; a helper is another image to maintain | ADR 0015 |
 | SPDY-over-WebSocket port-forward (KEP-4006) | Legacy WebSocket mode | Needs a SPDY implementation (RP-004 watches this) | ADR 0015 |
 | A 428 "approval required" on every DELETE | Policy-approved Approvals | An approval for everything is a hassle; roles decide | Spec 019 |

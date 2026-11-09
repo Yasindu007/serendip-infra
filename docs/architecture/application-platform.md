@@ -10,6 +10,8 @@ This document describes the Application Platform capability
 - spec 020's environments, Deployments, promotion, the runtime view,
   configuration from schemas, declared dependencies and the platform view
   ("Environments and Deployments (spec 020)" below; ADR 0019).
+- spec 022's builds from source, as the optional `build` package
+  ("Builds (spec 022)" below; ADR 0020).
 
 ADR 0005 is the authoritative record for *why* OpenChoreo;
 ADR 0010 for *why the foundation shells out to `helm`* (a per-capability
@@ -345,7 +347,8 @@ Read live through `serendipd`'s own Kubernetes client (ADR 0019):
   - **Platform-wide:** writes are decided at `/`, and no owner is allowed.
   - **Readiness** is in `GET /v1/readiness`.
   - **Removal** goes through an Approval.
-  - **Neither package has an installer** until specs 022 and 023.
+  - **The builds package has an installer** since spec 022 ("Builds
+    (spec 022)" below); the observability package gets one in spec 023.
 
 ### Verification (spec 020)
 
@@ -363,6 +366,137 @@ Read live through `serendipd`'s own Kubernetes client (ADR 0019):
   No regression against a same-day baseline. The first deploy into a new
   Environment served in 70 s on the simulated T470 and in 18–24 s on
   `serendip-t018` (RP-035).
+
+## Builds (spec 022)
+
+The optional `build` capability, installed as a package (the
+`openchoreo-workflow-plane` catalogue entry). It builds a Component's
+image from a Git repository, and the Component's releases use it. ADR
+0020 records why it's built this way. Code: `core/resource/build.go`,
+`core/reconcile/build.go`, `componentbuild.go` and `packagejob.go`,
+`api/build_handler.go`, `cmd/serendipd/packages.go`, and
+`providers/build/openchoreo/` (pinned versions in its `VERSIONS.md`).
+
+### What the package installs
+
+In order, through a background package job (`packagejob.go`), since Helm
+outlives a 10 s reconcile (RP-045):
+
+1. **The workflow-plane chart `1.3.1`** (ADR 0010's Helm path), with
+   Argo Workflows, in `openchoreo-workflow-plane`. It uses the chart's
+   minimal Argo CRDs (`argo-workflows.crds.full=false`,
+   `crds.keep=true`). The full ones held kube-apiserver ~550 MiB higher
+   (RP-046), and either set outlives removal (RP-039).
+2. **The CA trust copy and `ClusterWorkflowPlane/default`,** hand-built
+   like `DataPlane`.
+3. **A registry:** `registry:2.8.3`, a hand-built Deployment, Service
+   and PVC in `serendip-builds`, with `hostNetwork` on port 5000. Builds
+   push over its Service; workloads pull `localhost:5000/...`, so it's
+   single-node. It's unauthenticated on the node's network (RP-041).
+4. **Serendip's own `serendip-dockerfile` `ClusterWorkflow`:** check out,
+   `podman build` (privileged, without user namespaces: RP-038), push,
+   and output the image and commit. There's no `generate-workload` step
+   and no ExternalSecret; Serendip reads the image from the run.
+
+- **A cheap resync:** the installer fingerprints the Helm arguments and
+  every hand-built object, and the reconciler keeps it in
+  `status.applied`. When it matches, a resync makes about 5 GETs instead
+  of a Helm run; a missing object is repaired at once.
+- **Measured cost, stated before install** (`requirements.go`, from spec
+  022 T013): idle 453 MiB and 19 mcores, peak 1129 MiB and 1787 mcores
+  while a build runs, measured as the node's use beyond the platform.
+  `provider-model.md` has the rule.
+- **Removal** shows the catalogue's removal sentence first, and goes
+  through an Approval. Uninstall removes the `ClusterWorkflow`, the runs,
+  their Argo Workflows (then the run namespace's pods and PVCs), the
+  plane, `cluster-agent-tls`, the chart, and the registry with its PVC.
+  Every step is idempotent. Build records stay; their logs read
+  "expired". The empty namespaces and the Argo CRDs remain.
+
+### Builds and the image a Component runs
+
+- **A Component has exactly one of `image` or `source`**
+  (`repository`, `branch` = `main`, `path` = `.`, `dockerfile` =
+  `Dockerfile`, `credentialSecret`, `autoBuild`). Switching is allowed
+  both ways. The values reach a build script, so
+  `ValidateComponentSource` holds them to a shell-inert grammar.
+- **A `Build`** is owned by its Component. Spec: `commit` (empty for the
+  branch's head) and `cancel`. Status: phase (`Queued`, `Running`,
+  `Succeeded`, `Failed`, `Cancelled`), commit, image, times, steps, and
+  the source as it was when the build was first seen.
+- **`BuildReconciler`** runs one build at a time per Component. It reads
+  the credential through the Secrets capability and copies it into a
+  plain Secret for that run only (`<run>-git` in
+  `workflows-serendip-builds`), deleted once the run ends (RP-050).
+  - **Runs** are standalone `WorkflowRun`s in `serendip-builds`, named
+    `build-<16 hex of sha256(ID)>`, kept 1 h after they finish
+    (`ttlAfterCompletion`). After that a Build's logs read "expired".
+  - **Images** go to `serendip/cmp-<hash>`.
+  - **Cancel** sets `spec.cancel`; the reconciler deletes the run, which
+    stops it, and keeps its Argo Workflow so the logs up to the cancel
+    stay readable.
+- **The image** (`ComponentReconciler`, recorded in `status.image`) is
+  the newest successful build of the current source. The Component and
+  Deployment reconcilers hand the provider a spec with that image, so the
+  application provider is unchanged and each successful build is a new
+  release.
+  - **No successful build yet:** `WaitingForBuild`.
+  - **The current source not built yet,** after a source change: the
+    Component keeps running the newest successful build of an earlier
+    source, and the `Built` condition says so (RP-048).
+  - **A failed build changes nothing that's running.**
+- **The first build is automatic,** on create or a source change, as
+  `system:auto-build`.
+- **Auto-build** polls the branch's head every 5 minutes over Git's smart
+  HTTP (`providers/internal/gitremote`, HTTPS only), not webhooks. The
+  `AutoBuild` condition says why it can't see new commits:
+  `SSHUnsupported`, `NeedsCredential`, `RepositoryNotFound`,
+  `NoSuchBranch`, `CredentialUnreadable` or `Unreachable`. The read runs
+  on the reconcile loop (RP-043), and reaches any HTTPS address a
+  Component names (RP-051).
+- **Without the package,** `source` is refused with 422, naming it. The
+  provider is reached through a lazy `build` handle that's set while the
+  package reports Ready.
+
+### Routes
+
+| Route | Action |
+|---|---|
+| `POST /v1/components/{id}/builds` (`commit`) | `serendip/builds/write` |
+| `GET /v1/components/{id}/builds`, `GET /v1/builds/{id}` | `serendip/builds/read` |
+| `POST /v1/builds/{id}/cancel` | `serendip/builds/write` |
+| `GET /v1/builds/{id}/events` | `serendip/builds/read` |
+| `GET /v1/builds/{id}/logs[?follow=true]` | `serendip/components/logs/read` |
+
+- **There are no generic CRUD routes** and no `DELETE`: builds go with
+  their Component. `authorization.md` has the credential rule.
+- **Logs** share the Deployment logs' caps and NDJSON follow. A build not
+  started yet answers 409; an expired run, 410 "logs expired", and one
+  that never ran, 410 too; the
+  capability not ready, 503 with its readiness.
+- **Every route is a CLI command and an MCP tool** (`builds_*`; follow is
+  CLI-only). The console has a Builds tab, the source fields on the
+  Component form, and the package's cost on the Packages page.
+
+### Verification (spec 022)
+
+- **In process:** `api/spec022_acceptance_test.go` (criteria 1, 3, 4,
+  6–8, 10 and 11).
+- **Footprint:** `profiles/edge-1/bench/results/2026-11-06-spec022-simulated-t470/`.
+  Without the package, no regression against spec 020's run. Builds of a
+  small repository took 2m16s–3m30s at the 2-CPU quota.
+- **On a real cluster:** `specs/022-builds/verification.md`
+  (`serendip-t018`). Install from the console, public and private builds
+  (the credential found in no response, log or audit row), a failure, a
+  cancel, auto-build on a pushed commit, a Reader's 403 on logs, Claude
+  Code through `serendip mcp` with its removal waiting for a person, and
+  a removal that ended clean.
+- **Not done** (plan.md): buildpacks, webhooks, external registries,
+  registry garbage collection, multi-node pulls, a remote workflow plane,
+  signing and scanning, and pruning old Builds. A builds-hardening
+  follow-up holds digest deploys and registry auth (RP-041), a build
+  NetworkPolicy (RP-049), step limits (RP-052) and user namespaces
+  (RP-038).
 
 ## Deployment foundation (spec 010)
 
@@ -468,7 +602,8 @@ interval.
 - **Watching upstream objects** instead of re-checking them: status still
   trails OpenChoreo by up to one early re-check step (about 2s at the
   observed rollout times). Out of scope for edge-1 (spec 014).
-- **Build Plane, Observability Plane, Thunder** (ADR 0005 and prior scope).
+- ~~Build Plane~~: spec 022, as the optional builds package (above).
+- **Observability Plane, Thunder** (ADR 0005 and prior scope).
   kgateway is deployed by the Gateway capability (`gateway.md`), not here.
 
 ## Real-cluster verification (spec 011, kind, Kubernetes 1.34.0)

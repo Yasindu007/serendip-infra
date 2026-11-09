@@ -463,7 +463,7 @@ Dependency sketch:
     number in MiB or cores) and `lib.test.ts` (source spec and
     validation). 133 tests pass; the build is 99.2 KiB gz.
 
-## T012 [A] — In-process acceptance tests
+## T012 [A] — In-process acceptance tests ✅ 2026-11-06
 
 - **Do:** `api/spec022_acceptance_test.go` for criteria 1, 3, 4, 6–8,
   10 and 11, on a fake build provider and installer.
@@ -645,7 +645,7 @@ Dependency sketch:
   - **T014's re-run** (removal after a build) ended clean, so T014 is
     ticked.
 
-## T016 [A] — Docs and close-out
+## T016 [A] — Docs and close-out ✅ 2026-11-09
 
 - **Do:**
   - `application-platform.md` ("Builds (spec 022)"), `resource-model.md`
@@ -659,3 +659,38 @@ Dependency sketch:
 - **Files:** those docs.
 - **Verify:** `docs-keeper` reports nothing out of sync; every RP touched
   names spec 022.
+- **Done as** (2026-11-09):
+  - **`application-platform.md`:** a new "Builds (spec 022)" section
+    (what the package installs, builds and the image a Component runs,
+    the routes, verification and what's not done); the intro, the
+    packages note and "Not done" updated.
+  - **`resource-model.md`:** Component `source` and its status, the
+    `Build` kind, the `owns` edge, and ProviderInstance's store key and
+    `status.applied`.
+  - **`provider-model.md`:** "Measured requirements, required to install
+    (spec 022)", covering `Requirements`, `Installable()`, the node-level
+    cost, package jobs and the fingerprint; the registration bullet and
+    lazy handles updated.
+  - **`authorization.md`:** a "Builds" enforcement bullet (actions,
+    Reader and Log Reader, cascade, auto-build, the credential's
+    data-action check), and a note on the build credential.
+  - **Risk register:**
+    - RP-033 was already closed by T003; its index row is now there.
+    - RP-034's cost part is closed, and RP-037 is mitigated (only the
+      builds package declares its cost).
+    - The index gained the RP-030–RP-037 rows it lacked.
+    - RP-038–RP-052 were written in T001–T015, and each names spec 022.
+  - **`build-vs-adopt.md`:**
+    - **Built:** the `serendip-dockerfile` workflow, `Build` as a kind,
+      the per-run credential copy, package jobs and the store key.
+    - **Adopted:** the workflow plane, `registry:2` and `podman-runner`.
+    - **Rejected:** the sample workflows with `generate-workload`, ESO,
+      webhooks, and Argo's full CRDs.
+  - **T012's heading** was ticked; it had been done since 2026-11-06.
+  - **docs-keeper** found no errors in these. It named stale spots
+    elsewhere, now fixed: `reconciliation.md` (the Build and package-job
+    converging rows, `BuildProvider`'s lazy handle), `capability-model.md`
+    and `overview.md` (a builds row), the architecture `README.md`, the
+    410 for a build that never ran, RP-034's and RP-037's headings, and
+    `core/reconcile/CLAUDE.md` (the `system:auto-build` actor exception)
+    and `providers/CLAUDE.md` (declaring `Requirements`).

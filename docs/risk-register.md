@@ -50,6 +50,14 @@ purpose), **Closed** (fixed).
 | RP-027 | Tokens aren't bound to the Serendip server they were issued for | Security (medium) | Mitigated | Spec 021 T012 security review |
 | RP-028 | Migration 0008 re-parents Applications and changes what Environment-scope assignments cover, without audit rows | Audit | Decided | Spec 020 T003 |
 | RP-029 | Release listing scans every release, and a component-type change re-releases every Component | Performance | Accepted | Spec 020 T005 review |
+| RP-030 | Deployment writes scan every Deployment; platform failures wait for a resync | Performance, resilience | Accepted | Spec 020 T006 review |
+| RP-031 | Log reads aren't audited; following logs holds connections open | Security, performance | Accepted | Spec 020 T007 |
+| RP-032 | A Deployment's unchanged configuration isn't checked again | Correctness | Accepted | Spec 020 T008 review |
+| RP-033 | Two simultaneous package installs could both pass the one-per-capability check | Correctness | Closed (spec 022 T003) | Spec 020 T010 |
+| RP-034 | The console couldn't state a package's measured cost (stated since spec 022); follows reconnect; the Deploy tab lists every Deployment | Honesty, performance | Accepted (cost part closed, spec 022) | Spec 020 T012 |
+| RP-035 | The first deploy into a new Environment takes about 70 s to serve | Performance | Accepted | Spec 020 T014 |
+| RP-036 | Right after a restart, Applications, Components and Deployments read not-ready for a few seconds | Honesty, noise | Accepted | Spec 020 T015 |
+| RP-037 | Only the builds package declares its resource requirements in code (spec 022); older providers don't | Honesty, documentation | Mitigated (spec 022) | Spec 020 T016 review |
 | RP-038 | Build steps run privileged, without user namespaces | Security | Open | Spec 022 T001 |
 | RP-039 | The workflow plane's Argo CRDs outlive its removal (the per-run download ended in T013) | Footprint, network | Decided | Spec 022 T001 |
 | RP-040 | A repository's own contents can't be checked before its build | Security | Open | Spec 022 T002 |
@@ -688,10 +696,10 @@ purpose), **Closed** (fixed).
   - **What's left:** an unkeyed duplicate stays unkeyed until it's
     removed. So, like before, it could still be edited to collide.
 
-## RP-034 — The console can't state a package's measured cost yet; follows reconnect; the Deploy tab lists every Deployment
+## RP-034 — The console couldn't state a package's measured cost (stated since spec 022); follows reconnect; the Deploy tab lists every Deployment
 
-- **Kind:** honesty and performance. **Status:** Accepted, 2026-10-23.
-  **Found:** spec 020 T012.
+- **Kind:** honesty and performance. **Status:** Accepted, 2026-10-23;
+  the cost part closed 2026-11-09 (spec 022). **Found:** spec 020 T012.
 - **What:**
   - **Package cost.** Spec 020 asks the console to say what a package
     costs before it's installed. `GET /v1/packages` carries no measured
@@ -723,6 +731,20 @@ purpose), **Closed** (fixed).
     out to be held open for hours.
   - **Listing:** add a `component` filter to `GET /v1/deployments` if
     the list grows large.
+- **Update, 2026-11-09 (spec 022): the cost part is closed.**
+  - **The catalogue carries a package's measured cost**
+    (`core/provider.Requirements`, spec 022 T002), and
+    `Catalogue.Validate` refuses an installable package without it.
+  - **`GET /v1/packages`** returns `requirements` (`null` when not
+    measured), `installable` and `notInstallable` (T008).
+  - **The Packages page** shows idle and peak cost, where it was
+    measured and the fit note, before the install button. An unmeasured
+    package reads "Not measured" with no number, and can't be installed
+    (T011).
+  - **The builds package's numbers** come from T013's run
+    (`profiles/edge-1/bench/results/2026-11-06-spec022-simulated-t470/`).
+  - **Still accepted, unchanged:** the follow reconnect, and the Deploy
+    tab's full list. Spec 022's Builds tab follows the same way.
 
 ## RP-035 — The first deploy into a new Environment takes about 70 s to serve
 
@@ -772,10 +794,11 @@ purpose), **Closed** (fixed).
   observed state with a "not re-checked since the restart" note instead
   of flipping to not-ready.
 
-## RP-037 — No provider declares its resource requirements in code
+## RP-037 — Only the builds package declares its resource requirements in code (spec 022); older providers don't
 
-- **Kind:** honesty and documentation. **Status:** Accepted, 2026-10-23.
-  **Found:** spec 020 T016 contract review.
+- **Kind:** honesty and documentation. **Status:** Mitigated, 2026-11-09
+  (spec 022). Accepted 2026-10-23. **Found:** spec 020 T016 contract
+  review.
 - **What:** `providers/CLAUDE.md` and `provider-model.md` say a provider
   declares its capabilities, resource requirements (RAM and CPU on
   reference hardware), health check and upgrade behaviour.
@@ -791,6 +814,22 @@ purpose), **Closed** (fixed).
 - **Revisit:** when the provider registry gains a requirements field.
   Spec 022's packages need it anyway, to state a package's cost before
   installing it (RP-034). Fill it from the benchmark results then.
+- **Update, 2026-11-09 (spec 022): mitigated.**
+  - **The registry gained the field:** `core/provider.Requirements`
+    (idle and peak memory and CPU, where and when it was measured, and a
+    fit note), carried by each catalogue `Package` (T002).
+  - **The builds package declares it,** from T013's measurement, in
+    `providers/build/openchoreo/requirements.go`: idle 453 MiB and 19
+    mcores, peak 1129 MiB and 1787 mcores, stated at the node level
+    (RP-046).
+  - **Enforced:** a package without `Requirements` can't be installed.
+  - **What's left:** the always-on providers (K3s, OpenChoreo's
+    platform, OpenBao, Thunder, the gateway, storage) still don't
+    declare theirs; that was out of spec 022's scope. Their numbers stay
+    in the benchmark results.
+- **Revisit:** when a spec next changes one of those providers, or
+  before the observability package (spec 023) gets an installer, which
+  must declare its own.
 
 ## RP-038 — Build steps run privileged, without user namespaces
 

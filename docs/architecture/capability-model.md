@@ -46,6 +46,7 @@ escape hatch").
 | Application platform | Yes | OpenChoreo (ADR 0005) | KubeVela + Crossplane + Argo (evaluated, not selected) |
 | Infrastructure provisioning | No | Crossplane | Terraform/OpenTofu |
 | GitOps delivery | Yes | Argo CD / Argo Workflows | — |
+| Builds from source (`build`, optional package) | No | OpenChoreo's workflow plane (Argo Workflows) with `registry:2` (spec 022, ADR 0020) | — (buildpacks, external registries later) |
 | Storage (primary) | Yes | local-path → Longhorn | External CSI (ADR 0002) |
 | Storage (backup) | No | S3-compatible / NFS | — (never counted as primary redundancy) |
 | Database | No | CloudNativePG (PostgreSQL) | Embedded, managed/external PostgreSQL |

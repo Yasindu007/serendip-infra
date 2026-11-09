@@ -83,7 +83,8 @@ provider-neutral reasons):
 | Component | `Ready` = `Progressing`, `WaitingForApplication` or `ProviderNotReady`; or `Ready` true with `Reachable=Pending` (a provider that reports reachability on Components; OpenChoreo's doesn't since spec 020) |
 | Application | `Ready` = `Progressing` or `ProviderNotReady` |
 | Deployment (spec 020) | `Ready` = `Progressing`, `ProviderNotReady` or `WaitingForComponent` |
-| ProviderInstance (spec 020) | installing, or the platform not ready yet (`RequeueAfter` 15 s) |
+| ProviderInstance (spec 020) | installing, or the platform not ready yet (`RequeueAfter` 15 s). Since spec 022 an install or removal runs as a background package job (`packagejob.go`, at most 30 min); a reconcile waits 3 s for it, then reads Installing and requeues |
+| Build (spec 022) | phase `Queued` or `Running` (requeued until it finishes). With auto-build on, its Component also re-reads the branch head every 5 min |
 | Volume | `Bound` false with reason `Pending`, or `ProviderNotReady` |
 | Secret | `ProviderNotReady` (otherwise nothing to converge) |
 
@@ -141,8 +142,10 @@ and engine are already running:
   `GatewayEndpoint`), then runs its own setup.
 - **Lazy provider handles**: reconcilers are registered at startup, before any
   setup finishes, against thin wrappers in `cmd/serendipd/lazy.go` (one per
-  `StorageProvider`, `SecretsProvider`, `ApplicationPlatformProvider`, over an
-  atomic pointer). Until setup stores the real provider, every method returns
+  `StorageProvider`, `SecretsProvider`, `ApplicationPlatformProvider`, and
+  since spec 022 `BuildProvider`, over an atomic pointer). The build handle
+  follows the builds package's readiness: set while it reports Ready,
+  cleared otherwise. Until setup stores the real provider, every method returns
   `reconcile.ErrProviderNotReady`. `core/` and the providers do not change
   shape for this.
 - **Reconciler handling**: `ErrProviderNotReady` becomes a Condition with

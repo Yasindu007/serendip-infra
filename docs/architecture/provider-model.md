@@ -57,7 +57,9 @@ Registry:
 - **name** — unique provider identifier (e.g. `longhorn`, `thunder`).
 - **capabilities provided** — which capability interface(s) it implements.
 - **resource requirements** — RAM/CPU footprint on reference hardware
-  (T470-class), used by the topology planner and installer.
+  (T470-class), used by the topology planner and installer. Since spec
+  022 this is `core/provider.Requirements` for optional packages (below);
+  the always-on providers don't declare it yet (RP-037).
 - **health check contract** — how the reconciliation loop verifies the
   provider is alive.
 - **upgrade behavior** — how version upgrades are performed/verified.
@@ -356,13 +358,45 @@ its risk for a project with no production clusters.
 
 The Kubernetes-facing providers no longer have to exist when reconcilers are
 registered. `cmd/serendipd/lazy.go` holds one small wrapper per interface
-(`StorageProvider`, `SecretsProvider`, `ApplicationPlatformProvider`) over an
-atomic pointer. Background setup stores the real provider once it succeeds;
+(`StorageProvider`, `SecretsProvider`, `ApplicationPlatformProvider`, and
+since spec 022 `BuildProvider`) over an atomic pointer. The build handle
+follows the package's readiness: set while it reports Ready, cleared
+otherwise. Background setup stores the real provider once it succeeds;
 until then every method returns `reconcile.ErrProviderNotReady`, a sibling of
 `ErrNotConfigured`, which reconcilers turn into a `ProviderNotReady`
 Condition plus an early re-check. The wrappers live in the composition root
 so neither `core/` nor the providers change shape. A new capability whose
 setup can be slow follows the same pattern. Detail: `reconciliation.md`.
+
+## Measured requirements, required to install (spec 022)
+
+`core/provider.Requirements` is a package's measured cost on reference
+hardware: idle memory (MiB) and CPU (millicores), peak memory and CPU
+while it works (for builds, while a build runs), where and when it was
+measured (`measuredOn`), the benchmark results folder (`results`), and a
+plain fit note.
+
+- **Each provider package declares its own value in one place**
+  (`providers/build/openchoreo/requirements.go`), and the catalogue's
+  `reconcile.Package` points at it, with a `removal` sentence saying what
+  removing the package loses.
+- **`Package.Installable()`** refuses a package without an installer, or
+  without valid `Requirements`. `Catalogue.Validate` and `ReportStart`
+  use it, so an unmeasured package reads `Unavailable`, "not installable
+  until its resource cost is measured", and can't be installed.
+- **`GET /v1/packages`** returns `requirements` (`null` when not
+  measured, never a guessed number), `installable` and `notInstallable`.
+  The console, CLI and MCP show the cost before an install (RP-034).
+- **The cost is the node's use beyond the platform,** never below the
+  package's own pods, because a package's cost can hide outside them
+  (RP-046: Argo's full CRDs held kube-apiserver ~550 MiB higher).
+- **Installs and removals run as background package jobs**
+  (`core/reconcile/packagejob.go`), one per package at a time, bounded at
+  30 minutes, since an installer's Helm `--wait` outlives a reconcile
+  (RP-045). A reconcile waits 3 s for the job, then reads Installing.
+- **A cheap resync:** `Install` gets the instance's `status.applied`
+  fingerprint back and skips the full install while it matches and its
+  quick checks pass.
 
 ## Open questions
 

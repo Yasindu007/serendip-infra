@@ -8,7 +8,7 @@ standalone in under ~5 minutes and contain decisions, not exploration.
 | File | Contents | Status |
 |------|----------|--------|
 | `overview.md` | What Serendip is, positioning, the planes, build-vs-adopt table | Done |
-| `resource-model.md` | Org → Team → Project, which owns Applications (→ Component) and Environments (→ Deployment, spec 020, ADR 0019); Site/Cluster/Node; Network/Database/Storage; Incident/Alert. Fields, relationships, status conventions | Done |
+| `resource-model.md` | Org → Team → Project, which owns Applications (→ Component → Build, spec 022) and Environments (→ Deployment, spec 020, ADR 0019); Site/Cluster/Node; Network/Database/Storage; Incident/Alert. Fields, relationships, status conventions | Done |
 | `capability-model.md` | Capability list, capability spec format, default providers per capability | Done |
 | `provider-model.md` | Provider interface contracts (Go), registration, lifecycle, replacement, "bring your own capability" | Done |
 | `deployment-profiles.md` | edge-1 / small-3 / standard-5 / private-cloud; what each enables; upgrade paths between them; topology planner behavior | Done |

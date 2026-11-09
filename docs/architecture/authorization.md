@@ -134,6 +134,30 @@ unrestricted, as in Azure.
     `serendip/components/logs/read`, at the Deployment.
   - **These handler checks** are refused, and audited, exactly like the
     route's own (below).
+- **Builds** (spec 022): a Build sits under its Component, so roles at
+  the Project, Application or Component apply.
+  - **Triggering and cancelling** need `serendip/builds/write`; runs and
+    events need `serendip/builds/read`; **logs** need
+    `serendip/components/logs/read`. So a Reader sees runs and events but
+    not logs, and Log Reader adds them.
+  - **Builds have no generic CRUD routes** and no delete of their own. A
+    Component's cascade delete needs `serendip/builds/delete` for its
+    Builds.
+  - **Turning auto-build on or off** is a Component edit, so
+    `serendip/components/write`. Builds Serendip starts itself are
+    audited as `system:auto-build`.
+  - **Naming a `credentialSecret`** on a Component's source, or changing
+    the repository of a source that has one, needs the data action
+    `serendip/secrets/value/read` at that Secret (403, audited, without
+    it). The build sends the value to the repository's host, so a
+    Contributor mustn't be able to point someone else's credential at a
+    host they control. **So Owner and Contributor need a Secrets role**
+    (Secrets User or Officer) to name one. Other source fields stay
+    editable without it, which holds only while the build step can't see
+    the credential (RP-044).
+  - **Installing or removing the builds package** is a package write at
+    `/`, like any package; an agent's removal waits for a person's
+    Approval.
 - **Lists and graph results** keep only what the caller may read.
 - **A refusal** is 403 naming the missing action and scope.
 - **Authenticated only:** `GET /v1/session`,
@@ -295,6 +319,12 @@ path**, never at a path alone. Access is decided per Secret, so two
 Secrets must never share a value; a shared path would let a Secret in one
 project reach another's (spec 017 T011). Paths are validated and can't
 change after creation, and Secret IDs are always the server's.
+
+**A build's Git credential** (spec 022) is read by the build reconciler
+as the system, so the check is made when a person names it on a
+Component (above, "Builds"), not at build time. The reconciler copies the
+value into a plain Kubernetes Secret for that one run, deleted once the
+run ends (RP-050).
 
 ## Known limits
 
