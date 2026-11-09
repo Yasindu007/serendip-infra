@@ -16,10 +16,9 @@ Last updated: 2026-11-09
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T013
-and T015 are done. T014 (real-cluster verification) has been run, and is
-ticked once a removal after a build on `serendip-t018` ends clean with
-T015's fixes (see "Next" below). Then T016.**
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T015
+are done; T014's re-run after T015 ended clean (2026-11-09). Next: T016
+(docs and close-out).**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
   findings":
@@ -254,12 +253,15 @@ T015's fixes (see "Next" below). Then T016.**
     registry auth (RP-041), a build NetworkPolicy (RP-049), step limits
     (RP-052), and `hostUsers: false` / no service-account token
     (RP-038).
-- **Next: the live re-run, for T014's tick.** Rebuild `serendipd`, then
-  on `serendip-t018`: install the package, run a build, and remove the
-  package. It must end with no Workflows, pods, PVCs or credential
-  copies in `workflows-serendip-builds`, and no `cluster-agent-tls`.
-  T014's leftovers are still there, so this removal must clear them too.
-  Empty namespaces and the Argo CRDs stay, by design. Then T016.
+- **T014 is ticked** (2026-11-09): the live re-run on `serendip-t018`
+  (install, build `t014-pub`, remove) cleared T014's leftovers and the
+  new build. The removal ended clean 40 s after the delete: no Workflows,
+  pods, PVCs or credential copies, and no `cluster-agent-tls`. Only the
+  empty namespaces and the Argo CRDs remain, by design.
+  `verification.md` has the evidence.
+- **Next: T016** (docs and close-out; see tasks.md). `serendipd` from
+  the re-run may still be on `:8088`. Stop it, or leave it for T016,
+  which needs no cluster.
   - **OpenBao on `serendip-t018` was re-initialised** (the spec 018 unseal
     file was lost from temp). Its credentials are now in
     `C:\Users\malit\.serendip-t018\openbao-init.json`. Pass it with

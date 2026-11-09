@@ -260,6 +260,38 @@ Tokens, passwords, keys and the repository credential were never printed.
   - `t014-pub` (v3 in dev, v1 in prod) and `t014-priv` (in dev),
     running from images cached on the node.
 
+## The re-run after T015 (2026-11-09)
+
+A `serendipd` built from `d0a4933` (T015's fixes), on `serendip-t018`,
+with T014's leftovers still there:
+
+- **15:56:44** `serendipd` started, the same store and keys.
+- **15:57:12** the Owner (`verifier`) created ProviderInstance `builds`
+  (`POST /v1/provider-instances`). It read Installing ("waiting for the
+  build registry to be ready"), and the build provider was active at
+  **15:58:45**, about 93 s later.
+- **15:58:52** `serendip builds trigger` on `t014-pub`: build
+  `build-20261109-102852` went Running, then **Succeeded**.
+- **Before the removal:** `workflows-serendip-builds` held 8 Workflows
+  (T014's 7 and this one), 15 pods and 2 PVCs, and **no credential
+  copies** (F3's fix: the copy goes when the run ends).
+- **15:59:44** the Owner deleted the ProviderInstance (`serendip
+  provider-instances delete`): "Done. Recorded as approval
+  01a1bfdb-…", which reads `Executed`.
+- **16:00:24** (40 s later), polled every 5 s: 0 Workflows, 0 pods,
+  0 PVCs in `workflows-serendip-builds`, no
+  `openchoreo-workflow-plane/cluster-agent-tls`, and no workflow-plane
+  Helm release.
+- **The end check:**
+  - `openchoreo-workflow-plane`, `serendip-builds` and
+    `workflows-serendip-builds` hold nothing (`get all,pvc,secrets,configmaps`,
+    besides `kube-root-ca.crt`); no PersistentVolume remains for them.
+  - **Left by design:** those three empty namespaces, and the 8 Argo
+    CRDs (RP-039).
+  - No ProviderInstance remains; the build provider reads not ready.
+
+**F4 and F1 are fixed live, and the cluster ends clean.**
+
 ## Outcome
 
 **Criteria 1, 3–9 and 11 pass. Criterion 10 passes except "the cluster
@@ -267,6 +299,11 @@ holds none of the package's workloads":** finished build pods, their
 Workflows and workspace volumes remain (F4). T014's "the cluster ends
 clean" therefore isn't met yet. T015 fixes F4 and F1, then re-runs a
 removal after a build.
+
+**After T015 (the re-run above): criterion 10 passes too.** A removal
+after a build, with T014's leftovers on the cluster, left no Workflows,
+pods, PVCs, credential copies or `cluster-agent-tls`. All criteria
+pass, and the cluster ends clean.
 
 ## Findings
 

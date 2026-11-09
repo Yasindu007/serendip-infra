@@ -548,7 +548,7 @@ Dependency sketch:
   - **`GET /v1/packages`** on a `serendipd` built from the source returns
     those numbers, with `installable: true`.
 
-## T014 — Real-cluster verification on serendip-t018
+## T014 — Real-cluster verification on serendip-t018 ✅ 2026-11-09
 
 - **Do:** criteria 3–11 live, through the console, the CLI, and Claude
   Code through `serendip mcp`. That includes:
@@ -572,8 +572,11 @@ Dependency sketch:
     pods and workspace volumes outlive the removal (F4), and so does the
     agent's TLS Secret (F1). They're left on `serendip-t018` for T015.
   - **Findings for T015:** F1–F4, and U1–U4.
-  - **Ticked once** T015 has fixed F4 and F1 and a removal after a build
-    leaves the cluster clean.
+  - **Ticked** (2026-11-09) after T015: a removal after a build, with
+    T014's leftovers still there, left no Workflows, pods, PVCs,
+    credential copies or `cluster-agent-tls` (40 s after the delete).
+    Only the empty namespaces and the Argo CRDs remain, by design.
+    `verification.md` "The re-run after T015" has the evidence.
 
 ## T015 — Reviews and fixes ✅ 2026-11-09
 
@@ -639,8 +642,8 @@ Dependency sketch:
   - **The register's table** gained the RP-040–043 rows it lacked.
   - **Checked:** `go vet ./...` and `go test ./...` pass, and so do
     `pnpm typecheck` and `pnpm test` (134 tests).
-  - **Still for T014's tick:** re-run a removal after a build on
-    `serendip-t018`, which must end clean.
+  - **T014's re-run** (removal after a build) ended clean, so T014 is
+    ticked.
 
 ## T016 [A] — Docs and close-out
 
