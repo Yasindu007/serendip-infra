@@ -42,6 +42,10 @@ type options struct {
 	samples, components, pollClients        int
 	sim                                     Simulation
 	notSimulated                            string
+	// pkg, when its provider is set, replaces the light-workload phases
+	// with a package run (specs/022-builds T013).
+	pkg           packageOptions
+	kubeconfigAbs string
 }
 
 func parseFlags(args []string) (options, error) {
@@ -61,6 +65,17 @@ func parseFlags(args []string) (options, error) {
 	fs.StringVar(&o.sim.CPUSet, "sim-cpuset", "", "cpuset applied to simulate reference hardware (marks the run as a simulation)")
 	fs.StringVar(&o.sim.Note, "sim-note", "", "free-text description of the simulation")
 	fs.StringVar(&o.notSimulated, "not-simulated", "", "semicolon-separated reference-hardware traits the simulation could not reproduce")
+	fs.StringVar(&o.pkg.provider, "package", "", "measure this optional package instead of the light workload (a provider name from GET /v1/packages)")
+	fs.StringVar(&o.pkg.repo, "package-repo", "https://github.com/openchoreo/sample-workloads", "builds package: the public repository the sample builds come from")
+	fs.StringVar(&o.pkg.branch, "package-branch", "main", "builds package: the sample repository's branch")
+	fs.StringVar(&o.pkg.path, "package-path", "service-go-greeter", "builds package: the build context in the sample repository")
+	fs.IntVar(&o.pkg.idleSamples, "package-idle-samples", 60, "package idle samples (60 at 10 s is 10 minutes)")
+	fs.DurationVar(&o.pkg.idleInterval, "package-idle-interval", 10*time.Second, "time between package idle and auto-build samples")
+	fs.DurationVar(&o.pkg.buildInterval, "package-build-interval", 3*time.Second, "time between samples while a build runs")
+	fs.IntVar(&o.pkg.pollerSamples, "package-poller-samples", 33, "samples with auto-build on (33 at 10 s spans one 5-minute poll; 0 skips it)")
+	fs.BoolVar(&o.pkg.fullHelm, "package-full-helm", true, "run the package's full Helm command once, for comparison with the fingerprint path")
+	fs.DurationVar(&o.pkg.installTimeout, "package-install-timeout", 20*time.Minute, "how long the package may take to become Ready")
+	fs.DurationVar(&o.pkg.buildTimeout, "package-build-timeout", 20*time.Minute, "how long one build may take")
 	if err := fs.Parse(args); err != nil {
 		return o, err
 	}
@@ -88,6 +103,7 @@ func run(args []string) error {
 	}
 	abs := func(p string) string { a, _ := filepath.Abs(p); return a }
 	kubeconfig := abs(o.kubeconfig)
+	o.kubeconfigAbs = kubeconfig
 	dbPath := filepath.Join(abs(o.out), "serendipd.db")
 	credsPath := filepath.Join(abs(o.out), "openbao-init.json")
 	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm", credsPath} {
@@ -205,6 +221,9 @@ func measure(ctx context.Context, o options, cl *cluster, nodeName string, d *da
 	res.Serendipd = processStatsOf(procSamples)
 	if err != nil {
 		return fmt.Errorf("platform sampling: %w", err)
+	}
+	if o.pkg.provider != "" {
+		return measurePackage(ctx, o, cl, nodeName, d, a, res, created)
 	}
 
 	log.Printf("workload: deploying %d exposed Components", o.components)
@@ -380,6 +399,13 @@ func runRender(args []string) error {
 	var r Result
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return err
+	}
+	// A package's stated cost is derived from the samples alone, so it's
+	// recomputed: a run from before a change to packageCost then states
+	// its cost the same way as a new one, in result.json too.
+	if r.Package != nil {
+		r.Package.Cost = packageCost(*r.Package, r.Platform)
+		return writeResult(filepath.Dir(args[0]), r)
 	}
 	out := filepath.Join(filepath.Dir(args[0]), "summary.md")
 	return os.WriteFile(out, []byte(renderSummary(r)), 0o644)

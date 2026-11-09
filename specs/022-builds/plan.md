@@ -447,6 +447,47 @@ properly.
      cores for the `service-go-greeter` Go build. That's only a sample.
      T013 measures it.
 
+## Amendment (T013, 2026-11-06): installs and removals run in the background
+
+T013's first package run found that the package couldn't be installed.
+The engine caps each reconcile at 10 s, and the installer ran Helm
+(`--wait`, up to 10 min) inside it, so Helm was killed and the release
+was left locked (RP-045). The user chose to fix it in core, for every
+package:
+- **`core/reconcile/packagejob.go`:** each package's install or removal
+  runs as a background job, at most one per package at a time, bounded
+  at 30 minutes. A reconcile waits 3 s, so a resync's quick checks still
+  finish in the same reconcile. Otherwise it reads Installing and
+  requeues, and an installed package keeps reading Ready while a slow
+  check finishes.
+- **The uninstall clean-up** is now a method,
+  `ProviderInstanceReconciler.UninstallCleanup()`, sharing those jobs.
+  It answers `ErrPackageBusy`, and the approval retries it, until the
+  removal has finished.
+- **The builds installer** recovers a release left `pending-*`, then
+  installs again.
+- **A deliberate exception** to `core/reconcile`'s single-goroutine
+  rule: dispatch stays sequential, and the job's goroutine only runs the
+  installer. It's noted in `core/reconcile/CLAUDE.md`.
+
+## Amendment (T013, 2026-11-09): minimal Argo CRDs, and cost at the node level
+
+The package run showed that the package's cost hides outside its own
+pods (RP-046). With the chart's default full Argo CRDs (4.66 MiB of
+schema), kube-apiserver idled ~550 MiB higher and cert-manager's
+cainjector ~60 MiB higher. The package's own pods were 34 MiB. The user
+chose to try the minimal CRDs first:
+- **The installer sets `argo-workflows.crds.full=false` and
+  `crds.keep=true`.** The CRDs ship inside the chart and are owned by
+  Helm. They still outlive removal (RP-039 stands), and no install
+  downloads from GitHub. Full CRDs left by an earlier install must be
+  deleted by hand first (`VERSIONS.md`).
+- **The stated cost (decision 4)** is the node's use beyond the same
+  run's platform phase, never below the package's own pods.
+- **Result:** idle 453 MiB and 19 mcores, peak 1129 MiB and 1787 mcores,
+  against 954 MiB idle with the full CRDs. A full Helm run takes 5 s, not
+  23 s.
+
 ## Interfaces and types (sketch; settled in T002)
 
 - **`core/provider`:** `Requirements{IdleMemoryMiB, IdleCPUMillicores,

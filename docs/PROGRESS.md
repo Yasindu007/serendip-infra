@@ -12,12 +12,12 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-11-06
+Last updated: 2026-11-09
 
 ## Current phase
 
-**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T012
-are done.**
+**Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T013
+are done; T014 (real-cluster verification on `serendip-t018`) is next.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
   findings":
@@ -199,10 +199,40 @@ are done.**
   `api/spec022_acceptance_test.go`, for criteria 1, 3, 4, 6–8, 10 and
   11. They use fake build, platform and installer providers with the
   real reconcilers. The details are in tasks.md's "Done as".
-- **Next step:** T013 (footprint on the simulated T470, and the stated
-  cost).
-
-  `serendip-t018` is up, and `serendipd` isn't running.
+- **T013 is done** (2026-11-09). Details are in tasks.md's "Done as" and
+  the results README,
+  `profiles/edge-1/bench/results/2026-11-06-spec022-simulated-t470/`.
+  - **Without the package: PASS** against spec 020's run.
+  - **Stated cost** (`providers/build/openchoreo/requirements.go`): idle
+    453 MiB and 19 mcores, peak 1129 MiB and 1787 mcores, with the fit
+    note. `GET /v1/packages` returns those numbers, with
+    `installable: true`.
+  - **Found and fixed on the way:**
+    - **RP-045:** the package couldn't be installed. Installs and
+      removals now run as background package jobs in `core/reconcile`.
+    - **RP-046:** Argo's full CRDs held kube-apiserver ~550 MiB higher.
+      The installer now sets `argo-workflows.crds.full=false` and
+      `crds.keep=true` (the user chose this). Idle fell from 954 to
+      453 MiB, and a full Helm run from 23 s to 5 s.
+    - **The harness** now states cost at the node level, not only the
+      package's pods.
+  - **contract-guardian passed** (no blockers) on core and providers.
+  - **Leftovers:**
+    - `bench-t470` is still up; delete it with
+      `profiles/edge-1/bench/kind-t470-setup.sh down bench-t470`.
+    - `serendip-t018` is up, with no Argo CRDs on it, so T014's install
+      won't hit the leftover-CRD refusal (VERSIONS.md).
+  - **Network:** port 22 to GitHub is blocked on this network. Pushes go
+    over SSH on 443 (see the GitHub pacing memory).
+- **Next: T014,** live on `serendip-t018` through the console, the CLI
+  and Claude Code via `serendip mcp`. That's criteria 3–11, recorded in
+  `specs/022-builds/verification.md`.
+- **GitHub (2026-11-09):** branches `spec-010` … `spec-019`, `spec-021`
+  and `spec-020` are pushed to the fork. PR #25 (spec 002) is open on
+  `Serendip-Infra/serendip-infra`. The PRs are cross-fork, so they can't
+  stack: open them one or two at a time in order, with
+  `--no-maintainer-edit`, and merge with "Create a merge commit". The
+  spec 003 PR body is written; the user opens the PRs.
 - **Committed** on local `main`, not pushed: the plan and T001 (`docs(spec): spec 022 plan and T001 spike`),
   T002 (`feat(core): spec 022 T002 ADR 0020 and build core types`), and
   T003 and T004 (`feat(core): spec 022 T003 store uniqueness and T004 cheap resync`),
@@ -214,7 +244,8 @@ are done.**
   T009 (`feat(cmd): spec 022 T009 serendipd builds wiring`), and
   T010 (`feat(cmd): spec 022 T010 builds CLI, MCP and docs`), and
   T011 (`feat(ui): spec 022 T011 builds console`), and
-  T012 (`test(api): spec 022 T012 acceptance tests`).
+  T012 (`test(api): spec 022 T012 acceptance tests`), and
+  T013 (`feat(core): spec 022 T013 package jobs, minimal Argo CRDs and the builds package's cost`).
 - **Key decisions** (plan.md):
   - Serendip's own `serendip-dockerfile` workflow, without upstream's
     `generate-workload` or ExternalSecrets;

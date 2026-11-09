@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -108,14 +110,28 @@ func newInstaller(run helm.Runner, client *kubernetes.Client) *Installer {
 	return &Installer{run: run, client: client, now: time.Now}
 }
 
+// helmInstallArgs installs Argo's minimal CRDs (crds.full=false) instead
+// of the upstream default's full ones: the full schemas are 4.66 MiB, and
+// held kube-apiserver ~550 MiB higher at idle on the simulated T470
+// (T013, RP-046). Serendip writes every Workflow itself, so the
+// server-side validation they add buys little. The minimal set ships in
+// the chart, so no install downloads from GitHub, and Helm owns it.
+// crds.keep=true keeps RP-039's decision: the CRDs outlive removal.
 func helmInstallArgs() []string {
 	return []string{
 		"upgrade", "--install", workflowPlaneRelease, workflowPlaneChart,
 		"--version", workflowPlaneVersion,
 		"--namespace", PlaneNamespace, "--create-namespace",
+		"--set", "argo-workflows.crds.full=false",
+		"--set", "argo-workflows.crds.keep=true",
 		"--wait", "--timeout", helmInstallTimeout,
 	}
 }
+
+// HelmInstallArgs is the Helm command a full install runs. The footprint
+// benchmark runs it once by itself, to compare a full Helm resync with
+// the fingerprint path (specs/022-builds T013).
+func HelmInstallArgs() []string { return helmInstallArgs() }
 
 const (
 	clusterWorkflowPlanesPath = "/apis/openchoreo.dev/v1alpha1/clusterworkflowplanes"
@@ -230,7 +246,7 @@ func (i *Installer) install(ctx context.Context, want string, withHelm bool) (re
 		return reconcile.PackageState{}, err
 	}
 	if withHelm {
-		if _, err := i.run(ctx, helmInstallArgs()...); err != nil {
+		if err := i.helmInstall(ctx); err != nil {
 			return reconcile.PackageState{}, fmt.Errorf("openchoreo builds: install the workflow plane: %w", err)
 		}
 	}
@@ -261,6 +277,56 @@ func (i *Installer) install(ctx context.Context, want string, withHelm bool) (re
 	i.repairs = 0
 	i.mu.Unlock()
 	return reconcile.PackageState{Ready: true, Message: readyMessage, Applied: want}, nil
+}
+
+// helmBusy is Helm's answer while a release is locked by an operation
+// that hasn't finished.
+const helmBusy = "another operation (install/upgrade/rollback) is in progress"
+
+// helmInstall runs the chart's install. A release left locked mid-way
+// (a process killed while Helm ran: specs/022-builds T013 found one) is
+// recovered first, then installed again. Serendip runs one Helm job per
+// package at a time (core's package jobs), so a lock it finds isn't its
+// own live one; a person's own helm run at that moment would be undone
+// (RP-045).
+func (i *Installer) helmInstall(ctx context.Context) error {
+	out, err := i.run(ctx, helmInstallArgs()...)
+	if err == nil || !strings.Contains(string(out)+err.Error(), helmBusy) {
+		return err
+	}
+	if rerr := i.recoverPending(ctx); rerr != nil {
+		return fmt.Errorf("%w; recovering the release left mid-operation: %v", err, rerr)
+	}
+	_, err = i.run(ctx, helmInstallArgs()...)
+	return err
+}
+
+// recoverPending unlocks a release an unfinished operation left pending:
+// a first install that never finished is uninstalled (there's nothing to
+// keep), and an upgrade or rollback is rolled back to the last release.
+func (i *Installer) recoverPending(ctx context.Context) error {
+	out, err := i.run(ctx, "status", workflowPlaneRelease, "--namespace", PlaneNamespace, "-o", "json")
+	if err != nil {
+		return err
+	}
+	var st struct {
+		Info struct {
+			Status string `json:"status"`
+		} `json:"info"`
+	}
+	if start := strings.IndexByte(string(out), '{'); start < 0 || json.Unmarshal(out[start:], &st) != nil {
+		return fmt.Errorf("read the release's status: %.200s", out)
+	}
+	log.Printf("openchoreo builds: release %s was left %s; recovering it", workflowPlaneRelease, st.Info.Status)
+	switch st.Info.Status {
+	case "pending-install":
+		_, err = i.run(ctx, "uninstall", workflowPlaneRelease, "--namespace", PlaneNamespace, "--wait", "--timeout", helmUninstallTimeout)
+	case "pending-upgrade", "pending-rollback":
+		_, err = i.run(ctx, "rollback", workflowPlaneRelease, "--namespace", PlaneNamespace, "--wait", "--timeout", helmInstallTimeout)
+	default:
+		err = fmt.Errorf("the release is %q, not pending", st.Info.Status)
+	}
+	return err
 }
 
 // check runs the quick checks (plan decision 8), about 5 GETs: the

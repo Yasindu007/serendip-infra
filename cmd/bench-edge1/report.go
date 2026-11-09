@@ -113,10 +113,12 @@ type Result struct {
 	// nobody polling: the baseline for Polling.
 	SerendipdWorkload ProcessStats `json:"serendipdWorkload"`
 	Polling           *Polling     `json:"polling,omitempty"`
-	Rule4             Rule4        `json:"rule4"`
-	Headroom          Headroom     `json:"headroom"`
-	Timings           Timings      `json:"timings"`
-	Findings          []string     `json:"findings,omitempty"`
+	// Package is the package run, when one was asked for.
+	Package  *PackageRun `json:"package,omitempty"`
+	Rule4    Rule4       `json:"rule4"`
+	Headroom Headroom    `json:"headroom"`
+	Timings  Timings     `json:"timings"`
+	Findings []string    `json:"findings,omitempty"`
 }
 
 // Polling is serendipd while simulated web-console tabs poll a Component
@@ -325,6 +327,10 @@ func renderSummary(r Result) string {
 		serving = append(serving, fmt.Sprintf("%.0fs", time.Duration(d).Seconds()))
 	}
 	fmt.Fprintf(&b, "- Component create → Serving: %s (includes the image pull; status is re-checked about 2, 6, 14, 22 and 30s after create)\n", strings.Join(serving, ", "))
+
+	if r.Package != nil {
+		writePackageSummary(&b, r)
+	}
 
 	if len(r.Findings) > 0 {
 		b.WriteString("\n### Findings\n\n")

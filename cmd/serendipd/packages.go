@@ -26,9 +26,9 @@ const buildsRemoval = "Build history stays, but run logs and the stored images b
 
 // packageCatalogue is the optional packages this build offers (specs/020
 // plan decision 5). builds installs the workflow plane (spec 022), or is
-// nil when there's no cluster to install it on. Its Requirements stay nil
-// until T013 measures them, so the catalogue refuses to install it until
-// then. Observability (spec 023) has no installer yet.
+// nil when there's no cluster to install it on. Its Requirements were
+// measured in T013; the catalogue refuses any package without them.
+// Observability (spec 023) has no installer yet.
 func packageCatalogue(builds reconcile.PackageInstaller) reconcile.Catalogue {
 	return reconcile.Catalogue{
 		"openchoreo-workflow-plane": {
@@ -66,7 +66,7 @@ func registerPackages(db *sql.DB, bus event.Bus, engine *reconcile.Engine, regis
 		log.Printf("serendipd: packages: report readiness at start: %v", err)
 	}
 	engine.Register(resource.KindProviderInstance, r, lister(instances, resource.KindProviderInstance))
-	return reconcile.UninstallCleanup(instances, c, report)
+	return r.UninstallCleanup()
 }
 
 // buildHandle sets builds to p while the build package is Ready, and

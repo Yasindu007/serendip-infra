@@ -180,7 +180,7 @@ func TestProviderInstanceReconciler_InstallsToReady(t *testing.T) {
 
 	// Its removal leaves the capability as the first instance has it, and
 	// doesn't uninstall the package the first instance still provides.
-	clean := reconcile.UninstallCleanup(insts, catalogue, log.report)
+	clean := reconcile.NewProviderInstanceReconciler(insts, catalogue, log.report).UninstallCleanup()
 	spec, _ := json.Marshal(dup.Spec)
 	approved := store.WithApproval(ctx, store.ApprovalIntent{Approval: resource.Approval{
 		Spec:   resource.ApprovalSpec{Action: resource.ApprovalAction{Verb: resource.ApprovalVerbDelete, Target: resource.Scope{Kind: resource.KindProviderInstance, ID: dup.Metadata.ID}}},
@@ -265,7 +265,7 @@ func TestUninstallCleanup(t *testing.T) {
 	log := readinessLog{"build": "ready Ready"}
 	s := newAppStores(t)
 	insts := sqlite.NewStore[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus](s.db, resource.KindProviderInstance)
-	clean := reconcile.UninstallCleanup(insts, catalogue, log.report)
+	clean := reconcile.NewProviderInstanceReconciler(insts, catalogue, log.report).UninstallCleanup()
 	spec, _ := json.Marshal(resource.ProviderInstanceSpec{CapabilityID: "build", ProviderID: "test-builder"})
 	if err := clean(context.Background(), resource.ApprovalRef{ID: "pi-1", LastSpec: spec}); err != nil {
 		t.Fatal(err)

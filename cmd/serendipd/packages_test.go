@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/reconcile"
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	buildplane "github.com/serendip-infra/serendip-infra/providers/build/openchoreo"
 )
 
 // The optional capabilities show in GET /v1/readiness from the start,
@@ -40,20 +40,22 @@ func TestPackagesReportReadiness(t *testing.T) {
 	}
 }
 
-// With its installer, the builds package is still refused until its cost
-// is measured (spec 022 T009), and it says what removing it loses.
-func TestBuildsPackageNotInstallableUntilMeasured(t *testing.T) {
+// The builds package carries its measured cost (T013), so it can be
+// installed, and the catalogue states the same numbers the package does.
+func TestBuildsPackageInstallableWithMeasuredCost(t *testing.T) {
 	c := packageCatalogue(installerStub{})
 	p := c["openchoreo-workflow-plane"]
 	if p.Installer == nil || p.Removal == "" || p.Capability != capBuild {
 		t.Fatalf("builds entry = %+v", p)
 	}
-	err := p.Installable()
-	if err == nil || !strings.Contains(err.Error(), "resource cost is measured") {
-		t.Fatalf("Installable() = %v, want the unmeasured refusal", err)
+	if err := p.Installable(); err != nil {
+		t.Fatalf("Installable() = %v, want nil", err)
 	}
-	if err := c.Validate(resource.ProviderInstanceSpec{ProviderID: p.Provider, CapabilityID: capBuild}); err == nil {
-		t.Fatal("Validate accepted an unmeasured package")
+	if p.Requirements == nil || *p.Requirements != *buildplane.Requirements {
+		t.Fatalf("Requirements = %+v, want the package's %+v", p.Requirements, buildplane.Requirements)
+	}
+	if err := c.Validate(resource.ProviderInstanceSpec{ProviderID: p.Provider, CapabilityID: capBuild}); err != nil {
+		t.Fatalf("Validate = %v", err)
 	}
 }
 

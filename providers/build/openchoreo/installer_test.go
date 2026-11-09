@@ -24,10 +24,19 @@ type fakeHelm struct {
 	calls [][]string
 	err   error
 	onRun func(args []string)
+	// respond, when set, answers each call instead of err.
+	respond func(args []string) ([]byte, error)
 }
 
 func (f *fakeHelm) run(_ context.Context, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, args)
+	if f.respond != nil {
+		out, err := f.respond(args)
+		if err == nil && f.onRun != nil {
+			f.onRun(args)
+		}
+		return out, err
+	}
 	if f.onRun != nil {
 		f.onRun(args)
 	}
@@ -235,7 +244,9 @@ func TestInstall_FirstInstallRunsHelmOnceAndAppliesEverything(t *testing.T) {
 		t.Fatalf("helm calls = %v, want 1", e.helm.calls)
 	}
 	want := []string{"upgrade", "--install", "openchoreo-workflow-plane", workflowPlaneChart, "--version", "1.3.1",
-		"--namespace", "openchoreo-workflow-plane", "--create-namespace", "--wait", "--timeout", "10m"}
+		"--namespace", "openchoreo-workflow-plane", "--create-namespace",
+		"--set", "argo-workflows.crds.full=false", "--set", "argo-workflows.crds.keep=true",
+		"--wait", "--timeout", "10m"}
 	if !slices.Equal(e.helm.calls[0], want) {
 		t.Errorf("helm args = %v\nwant %v", e.helm.calls[0], want)
 	}
@@ -579,5 +590,52 @@ func TestFingerprint_StableAndCoversWhatIsApplied(t *testing.T) {
 	a, b := Fingerprint(), Fingerprint()
 	if a != b || !strings.HasPrefix(a, "sha256:") || len(a) != len("sha256:")+64 {
 		t.Errorf("Fingerprint() = %q, %q", a, b)
+	}
+}
+
+// A release left locked by a Helm run that never finished (a process
+// killed mid-install, specs/022-builds T013) is recovered, then installed
+// again: a pending first install is uninstalled, a pending upgrade rolled
+// back.
+func TestInstall_RecoversAReleaseLeftPending(t *testing.T) {
+	for _, tc := range []struct{ status, recovery string }{
+		{"pending-install", "uninstall"},
+		{"pending-upgrade", "rollback"},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			e := newTestEnv(t)
+			locked := true
+			e.helm.respond = func(args []string) ([]byte, error) {
+				switch args[0] {
+				case "upgrade":
+					if locked {
+						return nil, errors.New("helm upgrade: exit status 1: Error: UPGRADE FAILED: " + helmBusy)
+					}
+				case "status":
+					return []byte(`WARNING: noise
+{"name":"openchoreo-workflow-plane","info":{"status":"` + tc.status + `"}}`), nil
+				case "uninstall", "rollback":
+					locked = false
+				}
+				return nil, nil
+			}
+			if _, err := e.inst.Install(context.Background(), instance("")); err != nil {
+				t.Fatalf("Install() = %v", err)
+			}
+			var got []string
+			for _, c := range e.helm.calls {
+				got = append(got, c[0])
+			}
+			if want := []string{"upgrade", "status", tc.recovery, "upgrade"}; !slices.Equal(got, want) {
+				t.Errorf("helm calls = %v, want %v", got, want)
+			}
+		})
+	}
+
+	// Anything else stays an error, with no recovery attempted.
+	e := newTestEnv(t)
+	e.helm.err = errors.New("helm upgrade: exit status 1: Error: chart not found")
+	if _, err := e.inst.Install(context.Background(), instance("")); err == nil || len(e.helm.calls) != 1 {
+		t.Errorf("Install() = %v after %d helm calls, want the error after 1", err, len(e.helm.calls))
 	}
 }

@@ -148,11 +148,17 @@ type ProviderInstanceReconciler struct {
 	store     store.Store[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus]
 	catalogue Catalogue
 	report    ReadinessFunc
+	// jobs runs installs and removals in the background (packagejob.go),
+	// shared with UninstallCleanup.
+	jobs *packageJobs
 }
 
 func NewProviderInstanceReconciler(s store.Store[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus], c Catalogue, report ReadinessFunc) *ProviderInstanceReconciler {
-	return &ProviderInstanceReconciler{store: s, catalogue: c, report: report}
+	return &ProviderInstanceReconciler{store: s, catalogue: c, report: report, jobs: newPackageJobs()}
 }
+
+// installingMessage is shown while an install runs in the background.
+const installingMessage = "installing; this can take several minutes"
 
 // ReportStart reports each optional capability at start-up, before any
 // instance is reconciled: "starting" where an instance exists (so an
@@ -238,7 +244,25 @@ func (r *ProviderInstanceReconciler) Reconcile(ctx context.Context, ref graph.Re
 			fmt.Sprintf("ProviderInstance %s already provides %s; remove this one", first.Metadata.ID, capability))
 	}
 	p := r.catalogue[inst.Spec.ProviderID]
-	state, err := p.Installer.Install(ctx, inst)
+	job, done, busy := r.jobs.run(ctx, p.Provider, opInstall, inst.Metadata.ID, inst.Spec,
+		func(ctx context.Context) (PackageState, error) { return p.Installer.Install(ctx, inst) })
+	if !done {
+		// Still running, or a removal is. An installed package keeps
+		// reading Ready while a slow resync check finishes.
+		if !busy && readyReason(inst) == ReasonInstalled {
+			return RequeueAfter{Delay: installPoll}
+		}
+		msg := installingMessage
+		if busy {
+			msg = "waiting for the package's removal to finish"
+		}
+		r.report(capability, false, ReasonInstalling, msg)
+		if err := r.setReady(ctx, inst, resource.ConditionFalse, ReasonInstalling, msg); err != nil {
+			return err
+		}
+		return RequeueAfter{Delay: installPoll}
+	}
+	state, err := job.state, job.err
 	if errors.Is(err, ErrProviderNotReady) {
 		r.report(capability, false, ReasonInstalling, "waiting for the platform")
 		if err := r.setReady(ctx, inst, resource.ConditionFalse, ReasonProviderNotReady, "waiting for the platform"); err != nil {
@@ -269,6 +293,16 @@ func (r *ProviderInstanceReconciler) Reconcile(ctx context.Context, ref graph.Re
 	}
 	r.report(capability, true, ReasonInstalled, state.Message)
 	return r.setStatus(ctx, inst, applied, resource.ConditionTrue, ReasonInstalled, state.Message)
+}
+
+// readyReason is the reason of inst's Ready condition, or "".
+func readyReason(inst resource.ProviderInstance) string {
+	for _, c := range inst.Status.Conditions {
+		if c.Type == "Ready" {
+			return c.Reason
+		}
+	}
+	return ""
 }
 
 // setReady writes the Ready condition, keeping what was applied.
@@ -306,7 +340,10 @@ func (r *ProviderInstanceReconciler) setStatus(ctx context.Context, inst resourc
 // remains, whose own reconcile reports it. A damaged LastSpec can't
 // strand it: Uninstall is idempotent, so every package nothing else
 // provides is asked to remove what this instance might have installed.
-func UninstallCleanup(s store.Store[resource.ProviderInstanceSpec, resource.ProviderInstanceStatus], c Catalogue, report ReadinessFunc) CleanupFunc {
+// The removal runs in the background like an install, and the clean-up
+// answers ErrPackageBusy, to be retried, until it has finished.
+func (r *ProviderInstanceReconciler) UninstallCleanup() CleanupFunc {
+	s, c, report := r.store, r.catalogue, r.report
 	uninstall := func(ctx context.Context, p Package, id string) error {
 		other, err := oldestFor(ctx, s, p.Capability, id)
 		if err != nil {
@@ -315,8 +352,15 @@ func UninstallCleanup(s store.Store[resource.ProviderInstanceSpec, resource.Prov
 		if other.Metadata.ID != "" {
 			return nil
 		}
-		if err := p.Installer.Uninstall(ctx, id); err != nil {
-			return err
+		job, done, busy := r.jobs.run(ctx, p.Provider, opUninstall, id, resource.ProviderInstanceSpec{},
+			func(ctx context.Context) (PackageState, error) { return PackageState{}, p.Installer.Uninstall(ctx, id) })
+		switch {
+		case busy:
+			return fmt.Errorf("%w: removing %s waits for its install to finish", ErrPackageBusy, p.Provider)
+		case !done:
+			return fmt.Errorf("%w: removing %s", ErrPackageBusy, p.Provider)
+		case job.err != nil:
+			return job.err
 		}
 		report(p.Capability, false, ReasonNotInstalled, "install the "+p.Provider+" package to use it")
 		return nil

@@ -502,7 +502,7 @@ Dependency sketch:
   - **Left to other tasks:** 2, 5, 9 and 12 (T013, T014 and the
     installer's and reconciler's own tests).
 
-## T013 — Footprint on the simulated T470, and the stated cost
+## T013 — Footprint on the simulated T470, and the stated cost ✅ 2026-11-09
 
 - **Do:**
   - **edge-1 without the package:** check for regression against spec
@@ -520,6 +520,33 @@ Dependency sketch:
   - `GET /v1/packages` returns the same numbers as the summary;
   - edge-1's idle footprint without the package is within noise of spec
     020's.
+- **Done as:**
+  - **Results:** `profiles/edge-1/bench/results/2026-11-06-spec022-simulated-t470/`
+    (`README.md`; `no-package/`, `package-full-crds/` and `package/`, each
+    with `result.json` and `summary.md`; and
+    `compare-no-package-vs-spec020.md`).
+  - **Without the package: PASS** against spec 020's run. `serendipd`
+    idled at 29.2 MiB.
+  - **The harness:** `bench-edge1 --package openchoreo-workflow-plane`
+    (`cmd/bench-edge1/package.go`). Fixed on the way:
+    - `sampleBuild` dropped its results;
+    - the package section never reached `summary.md`;
+    - process queries now retry;
+    - the stated cost is now the node's use beyond the platform, which
+      `render` recomputes.
+  - **Found and fixed:** the package couldn't be installed (RP-045, the
+    background package jobs). The full Argo CRDs held kube-apiserver
+    ~550 MiB higher (RP-046), so the installer now uses the minimal set.
+    Both are in plan.md's T013 amendments.
+  - **Stated cost** (`providers/build/openchoreo/requirements.go`): idle
+    453 MiB and 19 mcores, peak 1129 MiB and 1787 mcores, with the fit
+    note.
+    - The package's own pods: 34 MiB idle, 277 MiB peak.
+    - Builds took 2m16s–3m30s running, at the 2-CPU quota.
+    - The fingerprint resync costs +0.44 mcores, against a 5 s full Helm
+      run.
+  - **`GET /v1/packages`** on a `serendipd` built from the source returns
+    those numbers, with `installable: true`.
 
 ## T014 — Real-cluster verification on serendip-t018
 

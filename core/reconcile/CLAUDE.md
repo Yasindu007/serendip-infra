@@ -8,6 +8,11 @@
   resources, not thousands). Do not add worker pools/concurrent
   reconciliation speculatively — that's a later-scale concern (Phase 4
   small-3+), revisit only once it's a measured problem.
+  - The one measured exception: `packagejob.go` runs a package's
+    install/removal in a background goroutine (at most one per package),
+    because Helm outlives the 10 s reconcile (spec 022 T013, RP-045).
+    Dispatch itself stays sequential; the goroutine only runs the
+    installer.
 - Reuse `core/graph.ResourceRef` (Kind, ID) as the kind-agnostic resource
   identifier — do not invent a second one.
 - No vendor product names in identifiers/comments-as-behavior (constitution

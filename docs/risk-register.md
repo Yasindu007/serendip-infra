@@ -51,8 +51,10 @@ purpose), **Closed** (fixed).
 | RP-028 | Migration 0008 re-parents Applications and changes what Environment-scope assignments cover, without audit rows | Audit | Decided | Spec 020 T003 |
 | RP-029 | Release listing scans every release, and a component-type change re-releases every Component | Performance | Accepted | Spec 020 T005 review |
 | RP-038 | Build steps run privileged, without user namespaces | Security | Open | Spec 022 T001 |
-| RP-039 | The workflow plane's Argo CRDs outlive its removal, and every Helm run downloads them | Footprint, network | Decided | Spec 022 T001 |
+| RP-039 | The workflow plane's Argo CRDs outlive its removal (the per-run download ended in T013) | Footprint, network | Decided | Spec 022 T001 |
 | RP-044 | A credential's use is checked only when the Secret or the repository changes, which holds only while the build step can't see the credential | Security | Accepted | Spec 022 T008 review |
+| RP-045 | A package's Helm release left locked is recovered by undoing the unfinished operation | Operability | Accepted | Spec 022 T013 |
+| RP-046 | A package's cost hides outside its own pods: Argo's full CRDs held kube-apiserver ~550 MiB higher | Footprint | Mitigated | Spec 022 T013 |
 
 ---
 
@@ -818,6 +820,18 @@ purpose), **Closed** (fixed).
   download, only runs when something changed.
 - **Revisit:** if the chart starts owning its CRDs, or if offline installs
   become a goal (`crds.full=false` ships minimal CRDs inside the chart).
+- **Update, 2026-11-09 (T013, RP-046):** the installer now sets
+  `argo-workflows.crds.full=false` and `crds.keep=true`.
+  - **The CRDs are the chart's minimal set,** owned by Helm. No Job runs
+    and nothing downloads from GitHub, so a full Helm run fell from 23 s
+    to 5 s.
+  - **They still outlive removal** (`helm.sh/resource-policy: keep`), so
+    the decision above stands, and a reinstall adopts them.
+  - **New:** full CRDs left by an earlier install, or by a person's own
+    Argo, carry no Helm ownership, so the install refuses them
+    ("exists and cannot be imported"). Before, the Job would have
+    overwritten them. Delete them by hand when no Workflows are left
+    (`providers/build/openchoreo/VERSIONS.md`).
 
 ## RP-040 — A repository's own contents can't be checked before its build
 
@@ -940,3 +954,91 @@ purpose), **Closed** (fixed).
   it into the workspace. Also revisit if a build method other than
   the Dockerfile workflow is added. Then the check must cover every
   source field.
+
+## RP-045 — A package's Helm release left locked is recovered by undoing the unfinished operation
+
+- **Kind:** operability. **Status:** Accepted, 2026-11-06. **Found:** spec
+  022 T013 (the package footprint run).
+- **What T013 found:** the builds package couldn't be installed at all.
+  - **The cause:** the engine caps each reconcile at 10 s, and the
+    installer ran Helm (`--wait`, up to 10 min) inside it.
+  - **What happened:** Helm was killed after ~8 s, which left the release
+    `pending-install`. Every retry then failed with "another operation
+    (install/upgrade/rollback) is in progress": 163 failed runs in 20
+    minutes.
+  - **Why the tests missed it:** T012's acceptance tests use fake
+    installers.
+- **The fix:**
+  - **`core/reconcile` runs each package's install and removal as a
+    background job** (`packagejob.go`), at most one per package, with
+    its own 30-minute bound. A reconcile waits 3 s for the job and
+    otherwise reads Installing and comes back. A removal's clean-up
+    answers `ErrPackageBusy` until its job finishes.
+  - **The builds installer recovers a locked release:** a pending first
+    install is uninstalled, and a pending upgrade or rollback is rolled
+    back. Then it installs again.
+- **What's accepted:**
+  - **The lock it recovers is assumed not to be live.** Serendip runs one
+    job per package, so a lock it finds was left by a `serendipd` that
+    died mid-Helm. If a person runs `helm` on that release at the same
+    moment, their operation is undone.
+  - **A job doesn't survive a restart.** Its Helm process dies with
+    `serendipd`, and the next start recovers the release as above.
+  - **A job isn't cancelled when its instance is removed.** The removal
+    waits for the install to finish, up to its 30-minute bound.
+  - **An installed package keeps reading Ready while a job runs.** The
+    reconciler can't tell a resync's slow check from a reinstall after a
+    spec edit, so during a multi-minute reinstall Ready=True and
+    `Applied` are the previous install's until the job finishes.
+  - **A locked release is recognised by Helm's English error text**
+    ("another operation ... is in progress"). If a Helm version rewords
+    it, the error is returned as-is and the package stays failed until
+    someone recovers the release by hand. Check the text when bumping
+    Helm.
+- **Revisit:**
+  - when a second package ships an installer (spec 023);
+  - if people report managing these releases with `helm` themselves;
+  - if one of the engine's reconcile goroutines is ever allowed to run
+    longer than its timeout.
+
+## RP-046 — A package's cost hides outside its own pods: Argo's full CRDs held kube-apiserver ~550 MiB higher
+
+- **Kind:** footprint. **Status:** Mitigated, 2026-11-09. **Found:** spec
+  022 T013 (the package footprint run).
+- **What T013 found:** the first package run counted only the package's
+  namespaces, and stated 34 MiB idle. But the node grew ~950 MiB.
+  - **kube-apiserver:** 544 → 1125 MiB, and it stayed there.
+  - **cert-manager's cainjector:** 25 → 83 MiB.
+  - **The cause:** Argo's eight CRDs with the chart's default
+    `crds.full=true` are 4.66 MiB of OpenAPI schema. That's more than every
+    other API group in the cluster combined (kgateway 0.9 MiB, OpenChoreo's
+    36 CRDs 0.36 MiB). The apiserver builds models from them; the
+    cainjector watches every CRD.
+- **The fix:**
+  - **The builds installer uses the minimal CRDs** (`crds.full=false`,
+    852 KB, with `x-kubernetes-preserve-unknown-fields`). kube-apiserver
+    then idled at 637 MiB (586 without the package), and the cainjector
+    at 30 MiB. The stated idle cost fell from 954 to 453 MiB.
+  - **The harness states cost at the node level:** the node's use beyond
+    the same run's platform phase, never below the package's own pods. So
+    a cost like this can't hide again. The pods' own figure is kept as a
+    breakdown.
+- **What's accepted:**
+  - **No server-side validation of Argo objects.** The minimal CRDs
+    accept any `Workflow` body. Serendip writes every Workflow itself
+    (through OpenChoreo's `WorkflowRun`), and Argo's controller still
+    rejects a malformed one when it runs it.
+  - **The node-level figure includes noise.** It takes in whatever else
+    the node did during the run, plus ~320 MiB of runtime memory and file
+    cache after builds pull their images, part of which the kernel can
+    reclaim. It's stated anyway, rounded up, because that's what the node
+    held.
+  - **A build saturates the T470's two cores** for 2–4 minutes
+    (~2000 mcores, the quota). The stated peak CPU says so. Nothing
+    throttles builds below that yet.
+- **Revisit:**
+  - when the next package ships an installer (spec 023): check its CRD
+    sizes, and measure it the same way;
+  - if a build's CPU starves workloads in real use (a CPU limit on the
+    build step);
+  - on a real T470 (RP-008).

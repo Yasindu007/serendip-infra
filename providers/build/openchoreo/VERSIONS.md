@@ -8,7 +8,7 @@ names files T005 and T006 create.
 |---|---|---|
 | OpenChoreo workflow-plane chart | 1.3.1, `oci://ghcr.io/openchoreo/helm-charts/openchoreo-workflow-plane` (digest `sha256:5f570ab14e853779b2ed2b58cb71eaa99d5f6ca39025154fea33513f083c9a2d`) | `installer.go` |
 | Argo Workflows (subchart) | chart 1.0.23, app `v4.0.8` (`quay.io/argoproj/argoexec:v4.0.8` runs in every build pod) | brought by the chart |
-| Argo CRD install Job | `registry.k8s.io/kubectl:v1.36.3`, downloads the CRDs from GitHub on every install/upgrade | brought by the chart |
+| Argo CRDs | the chart's minimal set (`argo-workflows.crds.full=false`, `crds.keep=true`), 8 Helm-owned CRDs, 852 KB; no CRD install Job, no GitHub download (T013, RP-046) | `installer.go` |
 | Cluster agent | `ghcr.io/openchoreo/cluster-agent`, the chart's appVersion (`v1.3.1`) | brought by the chart |
 | Registry | `registry:2.8.3` (distribution), `hostNetwork`, port 5000 | `registry.go` |
 | Checkout step | `alpine/git:v2.52.0` | `workflow.go` |
@@ -39,6 +39,13 @@ Notes (spec 022 T001, verified on 1.3.1, 2026-10-24; details in
   without it. Recheck on K3s.
 - **CRDs on uninstall:** the Argo CRDs are installed by a hook Job, not
   owned by Helm, so they survive uninstall. Serendip leaves them.
+  - **Since T013** Serendip installs the minimal CRDs instead: Helm owns
+    them, and `crds.keep=true` adds `helm.sh/resource-policy: keep`, so
+    they still survive uninstall and a reinstall adopts them.
+  - **Full CRDs left by an earlier install** (or a person's own Argo)
+    carry no Helm ownership, so `helm upgrade --install` refuses them
+    ("exists and cannot be imported"). Delete them first when no
+    Workflows are left.
 - **Images built from source** are pulled by workloads as
   `localhost:5000/...`. containerd uses plain HTTP for `localhost` with no
   node configuration. That's single-node only.

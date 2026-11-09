@@ -298,7 +298,7 @@ func newWorld022(t *testing.T) *world022 {
 		return sqlite.ResourceExists(ctx, d.db, kind, id)
 	}
 	w.approvalRecon = reconcile.NewApprovalReconciler(approvals, del, map[resource.Kind]reconcile.CleanupFunc{
-		resource.KindProviderInstance: reconcile.UninstallCleanup(w.instances, cat, report),
+		resource.KindProviderInstance: w.instRecon.UninstallCleanup(),
 		resource.KindBuild:            reconcile.BuildCleanup(b),
 	}, exists, time.Now)
 
