@@ -306,6 +306,7 @@ func TestComponentReconciler_SourceChangeStartsABuild(t *testing.T) {
 
 	comp = f.component()
 	comp.Spec.Source.Branch = "release"
+	comp.Spec.Source.CredentialSecret = "" // the fixture has no such Secret: builds would fail to start
 	if _, err := f.s.components.Update(f.ctx, comp); err != nil {
 		t.Fatal(err)
 	}
@@ -313,9 +314,63 @@ func TestComponentReconciler_SourceChangeStartsABuild(t *testing.T) {
 	if n := len(f.listBuilds()); n != 2 {
 		t.Fatalf("changing the branch made %d builds in all, want 2", n)
 	}
-	// Until the new source builds, the Component waits for it.
-	if c := readyOf(f.component().Status.Conditions, "Ready"); c.Reason != reconcile.ReasonWaitingForBuild {
-		t.Errorf("after a source change, Ready = %+v, want WaitingForBuild", c)
+	// Until the new source builds, the Component keeps running the earlier
+	// source's image and says so (T014 F2), rather than claim nothing runs.
+	got := f.component()
+	if got.Status.Image != "localhost:5000/web@sha256:1" {
+		t.Errorf("after a source change, image = %q, want the earlier build's", got.Status.Image)
+	}
+	if c := readyOf(got.Status.Conditions, "Ready"); c.Status != resource.ConditionTrue {
+		t.Errorf("after a source change, Ready = %+v, want True: the earlier image still runs", c)
+	}
+	if c := readyOf(got.Status.Conditions, "Built"); c.Status != resource.ConditionFalse || c.Reason != reconcile.ReasonWaitingForBuild ||
+		!strings.Contains(c.Message, "still running build "+b.Metadata.ID) {
+		t.Errorf("after a source change, Built = %+v, want WaitingForBuild naming %s", c, b.Metadata.ID)
+	}
+
+	// That build fails: still the earlier image, and Built says why.
+	nb := f.listBuilds()
+	var second string
+	for _, x := range nb {
+		if x.Metadata.ID != b.Metadata.ID {
+			second = x.Metadata.ID
+		}
+	}
+	f.mustReconcileBuild(second)
+	f.provider.runs[second] = reconcile.BuildObservation{Phase: resource.BuildFailed, Message: "build-push: exit status 1", FinishedAt: f.now}
+	f.mustReconcileBuild(second)
+	f.mustReconcileComp()
+	got = f.component()
+	if got.Status.Image != "localhost:5000/web@sha256:1" {
+		t.Errorf("after the new source's build failed, image = %q, want the earlier build's", got.Status.Image)
+	}
+	if c := readyOf(got.Status.Conditions, "Built"); c.Status != resource.ConditionFalse || !strings.Contains(c.Message, "failed") {
+		t.Errorf("after the new source's build failed, Built = %+v", c)
+	}
+
+	// Built reads True once the current source has a successful build.
+	f.provider.runs[second] = reconcile.BuildObservation{}
+	third := f.trigger(commitB)
+	f.mustReconcileBuild(third.Metadata.ID)
+	f.succeed(third.Metadata.ID, commitB, "localhost:5000/web@sha256:2")
+	f.mustReconcileBuild(third.Metadata.ID)
+	f.mustReconcileComp()
+	got = f.component()
+	if got.Status.Image != "localhost:5000/web@sha256:2" || readyOf(got.Status.Conditions, "Built").Reason != reconcile.ReasonBuilt {
+		t.Errorf("after the new source built, image = %q, Built = %+v", got.Status.Image, readyOf(got.Status.Conditions, "Built"))
+	}
+}
+
+// With no successful build at all, a source Component reads
+// WaitingForBuild and runs nothing.
+func TestComponentReconciler_NoBuildYetWaits(t *testing.T) {
+	f := newBuildFixture(t, publicSource())
+	f.firstBuild()
+	f.mustReconcileComp()
+	got := f.component()
+	if got.Status.Image != "" || readyOf(got.Status.Conditions, "Ready").Reason != reconcile.ReasonWaitingForBuild ||
+		readyOf(got.Status.Conditions, "Built").Reason != reconcile.ReasonWaitingForBuild {
+		t.Errorf("status = %+v, want waiting for the first build", got.Status)
 	}
 }
 
@@ -897,5 +952,28 @@ func TestDeploymentReconciler_ReleasesTheBuiltImage(t *testing.T) {
 	got, _ := s.deployments.Get(ctx, d.Metadata.ID)
 	if cond := readyOf(got.Status.Conditions, "Ready"); len(fake.ran) != 1 || cond.Reason != reconcile.ReasonWaitingForComponent {
 		t.Errorf("without an image: released %d times, Ready %+v", len(fake.ran), cond)
+	}
+}
+
+// A cancelled build's unfinished steps read Cancelled, not the Running
+// last seen (specs/022-builds T014 U2); a finished step keeps its phase.
+func TestBuildReconciler_CancelEndsUnfinishedSteps(t *testing.T) {
+	f := newBuildFixture(t, publicSource())
+	b := f.firstBuild()
+	f.mustReconcileBuild(b.Metadata.ID)
+	f.provider.runs[b.Metadata.ID] = reconcile.BuildObservation{Phase: resource.BuildRunning, Steps: []resource.BuildStep{
+		{Name: "checkout", Phase: resource.BuildSucceeded},
+		{Name: "build-push", Phase: resource.BuildRunning},
+	}}
+	f.mustReconcileBuild(b.Metadata.ID)
+	got := f.build(b.Metadata.ID)
+	got.Spec.Cancel = true
+	if _, err := f.builds.Update(f.ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	f.mustReconcileBuild(b.Metadata.ID)
+	steps := f.build(b.Metadata.ID).Status.Steps
+	if len(steps) != 2 || steps[0].Phase != resource.BuildSucceeded || steps[1].Phase != resource.BuildCancelled || steps[1].FinishedAt.IsZero() {
+		t.Errorf("steps = %+v, want checkout Succeeded and build-push Cancelled", steps)
 	}
 }

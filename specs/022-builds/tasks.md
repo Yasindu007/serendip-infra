@@ -575,7 +575,7 @@ Dependency sketch:
   - **Ticked once** T015 has fixed F4 and F1 and a removal after a build
     leaves the cluster clean.
 
-## T015 — Reviews and fixes
+## T015 — Reviews and fixes ✅ 2026-11-09
 
 - **Do:** `contract-guardian` (core and providers), `go-reviewer`, a
   security review (the privileged pods, the credential copy, the
@@ -584,6 +584,63 @@ Dependency sketch:
 - **Files:** wherever the findings land; `docs/risk-register.md`.
 - **Verify:** every finding is fixed or has a risk-register entry, and
   `go test ./...` and `npm test` pass after the fixes.
+- **Done as** (2026-11-09):
+  - **T014's findings, all fixed:**
+    - **F4:** `Uninstall` deletes `workflows-serendip-builds`' Argo
+      Workflows after the runs, and waits for them before removing the
+      plane (`ErrWorkflowsRemaining`). Once they're gone it deletes the
+      namespace's pods and PVCs. `RemoveBuild` deletes the Build's
+      Workflow too; a cancel keeps it, so the logs up to the cancel stay
+      readable.
+    - **F1:** `Uninstall` deletes `cluster-agent-tls`.
+    - **F3:** `ObserveBuild` deletes the credential copy once the run
+      ends or expires. It's best-effort, and only for a Build not yet
+      recorded as finished, so the API's reads send no DELETE.
+    - **F2:** a source Component keeps running the newest successful
+      build of an earlier source until its current source builds. A new
+      `Built` condition says which build runs and why the current source
+      isn't built (RP-048, a decision).
+    - **U1:** the console reloads a build's recent logs when its phase
+      changes, unless they were followed.
+    - **U2:** a cancel marks unfinished steps Cancelled.
+    - **U3:** a recent read asks for `tailLines + 20` and keeps
+      `tailLines` of the step's own lines. A follow can't be trimmed
+      that way (RP-047).
+    - **U4:** a read that finds the capability not ready answers 503
+      with its readiness ("… installed and ready; it's NotInstalled").
+  - **Reviews:**
+    - **contract-guardian:** passed (imports clean, no product names in
+      core), with one note, RP-047 missing, now written.
+    - **go-reviewer:** no blockers; four nits. The `Built` write count is
+      in RP-048, the error is `ErrWorkflowsRemaining`, and the comments
+      are corrected. The log tail's buffer is bounded by Kubernetes' tail
+      (≤ 1020 lines), so it's kept as it is.
+    - **Security review** (privileged pods, the credential copy, the
+      registry, the poller): the inputs and the credential handling hold.
+      Recorded:
+      - RP-041 extended: in-cluster pods and builds can push, and
+        overwriting a tag is possible; the fix is digest deploys, then
+        registry auth.
+      - RP-043 re-classed as availability too.
+      - New: RP-049 (build network reach), RP-050 (the copy), RP-051
+        (the poller's outbound reads) and RP-052 (no step limits).
+      - `automountServiceAccountToken: false` wasn't applied: Argo's
+        executor reports outputs through the API, so it needs a live
+        check (RP-038's follow-up).
+    - **`/code-review`:** 8 findings, all fixed:
+      - the credential release can no longer fail an observation;
+      - a cancel keeps the Workflow;
+      - a followed log isn't replaced when its phase changes;
+      - pods and PVCs are deleted only once no Workflow is finalizing;
+      - Workflows have their own error;
+      - one list helper;
+      - no DELETE on finished reads;
+      - the order test checks both deletes happened.
+  - **The register's table** gained the RP-040–043 rows it lacked.
+  - **Checked:** `go vet ./...` and `go test ./...` pass, and so do
+    `pnpm typecheck` and `pnpm test` (134 tests).
+  - **Still for T014's tick:** re-run a removal after a build on
+    `serendip-t018`, which must end clean.
 
 ## T016 [A] — Docs and close-out
 

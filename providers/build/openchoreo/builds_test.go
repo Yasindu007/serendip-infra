@@ -470,9 +470,35 @@ func TestBuildLogs_RecentInStepOrderWithoutArgoLines(t *testing.T) {
 		t.Error("timestamp not parsed")
 	}
 	for _, q := range e.logReqs {
-		if !strings.Contains(q, "container=main") || !strings.Contains(q, "limitBytes=") || !strings.Contains(q, "tailLines=100") {
-			t.Errorf("log request %s", q)
+		if !strings.Contains(q, "container=main") || !strings.Contains(q, "limitBytes=") || !strings.Contains(q, "tailLines=120") {
+			t.Errorf("log request %s: want the tail plus Argo's slack", q)
 		}
+	}
+}
+
+// A recent read keeps tailLines of the step's own lines, Argo's not
+// counted (T014 U3: with tailLines=5, 3 of the pod's last 5 were Argo's).
+func TestBuildLogs_TailCountsOnlyTheStepsOwnLines(t *testing.T) {
+	e := newBuildsEnv(t)
+	e.api.put(testRunPath, kubernetes.Object{Kind: "WorkflowRun"})
+	build := testRun + "-build-push-2"
+	e.addPod(build, "2026-10-24T10:00:30Z")
+	var log strings.Builder
+	for i := range 6 {
+		fmt.Fprintf(&log, "2026-10-24T10:00:3%dZ line %d\n", i, i)
+	}
+	e.logs[build] = log.String() + argoNoise + argoNoise + argoNoise
+	s, err := e.b.BuildLogs(context.Background(), testBuild(), reconcile.LogOptions{TailLines: 5})
+	if err != nil {
+		t.Fatalf("BuildLogs() = %v", err)
+	}
+	defer s.Close()
+	lines, err := readAll(t, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 5 || lines[0].Line != "line 1" || lines[4].Line != "line 5" {
+		t.Errorf("lines = %v, want lines 1 to 5", lines)
 	}
 }
 
@@ -696,5 +722,77 @@ func TestHeadError_MapsToCoreErrors(t *testing.T) {
 	plain := errors.New("dial tcp: timeout")
 	if got := headError(plain); got != plain {
 		t.Errorf("headError(plain) = %v; want it unchanged", got)
+	}
+}
+
+// A run's credential copy goes once the run has ended, whatever the
+// outcome, or once it has expired unseen (T014 F3); a running build's
+// stays.
+func TestObserveBuild_ReleasesTheCredentialOnceTheRunEnds(t *testing.T) {
+	for _, tt := range []struct {
+		name, run  string
+		gone, kept bool
+	}{
+		{name: "running", run: runJSON(condRunning, task(CheckoutStep, "Running", "")), kept: true},
+		{name: "failed", run: runJSON(condRunDone+","+condFailed, task(CheckoutStep, "Failed", "exit code 128"))},
+		{name: "expired", gone: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newBuildsEnv(t)
+			if !tt.gone {
+				e.api.put(testRunPath, kubernetes.Object{Kind: "WorkflowRun", Status: json.RawMessage(tt.run)})
+			}
+			e.api.put(gitSecretPath(testRun), kubernetes.Object{Kind: "Secret"})
+			if _, err := e.b.ObserveBuild(context.Background(), testBuild()); err != nil {
+				t.Fatalf("ObserveBuild() = %v", err)
+			}
+			if got := e.api.has(gitSecretPath(testRun)); got != tt.kept {
+				t.Errorf("credential copy kept = %v, want %v", got, tt.kept)
+			}
+		})
+	}
+}
+
+// Removing a Build removes its Argo Workflow too: a finished run's
+// outlives the run, with its pods and workspace (T014 F4).
+func TestRemoveBuild_DeletesTheArgoWorkflow(t *testing.T) {
+	e := newBuildsEnv(t)
+	e.api.put(testRunPath, kubernetes.Object{Kind: "WorkflowRun"})
+	e.api.put(argoWorkflowPath(testRun), kubernetes.Object{Kind: "Workflow"})
+	if err := e.b.RemoveBuild(context.Background(), testBuild()); err != nil {
+		t.Fatalf("RemoveBuild() = %v", err)
+	}
+	if e.api.has(argoWorkflowPath(testRun)) {
+		t.Error("the Argo Workflow was left behind")
+	}
+}
+
+// A cancel keeps the Argo Workflow, and with it the step pods' logs up
+// to the cancel; the Build's removal takes it.
+func TestCancelBuild_KeepsTheArgoWorkflow(t *testing.T) {
+	e := newBuildsEnv(t)
+	e.api.put(testRunPath, kubernetes.Object{Kind: "WorkflowRun"})
+	e.api.put(argoWorkflowPath(testRun), kubernetes.Object{Kind: "Workflow"})
+	if err := e.b.CancelBuild(context.Background(), testBuild()); err != nil {
+		t.Fatalf("CancelBuild() = %v", err)
+	}
+	if e.api.has(testRunPath) || !e.api.has(argoWorkflowPath(testRun)) {
+		t.Errorf("after cancel: run left = %v, workflow kept = %v", e.api.has(testRunPath), e.api.has(argoWorkflowPath(testRun)))
+	}
+}
+
+// Reading a Build already recorded as finished (the API's logs and
+// events reads) sends no credential DELETE: the reconciler's last
+// observation did.
+func TestObserveBuild_FinishedBuildSendsNoDelete(t *testing.T) {
+	e := newBuildsEnv(t)
+	e.api.put(testRunPath, kubernetes.Object{Kind: "WorkflowRun", Status: json.RawMessage(runJSON(condRunDone+","+condFailed, ""))})
+	b := testBuild()
+	b.Status.Phase = resource.BuildFailed
+	if _, err := e.b.ObserveBuild(context.Background(), b); err != nil {
+		t.Fatalf("ObserveBuild() = %v", err)
+	}
+	if n := e.api.count("DELETE "); n != 0 {
+		t.Errorf("%d DELETEs for a finished Build's read", n)
 	}
 }

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { formatRequest } from "../components/ApiEquivalent";
@@ -362,6 +362,25 @@ describe("builds tab", () => {
     expect(rows[1]!.textContent).toContain("1 min 20 s");
     expect(await screen.findByText("Started container")).toBeTruthy();
     expect(screen.getByText(/auto-build can't reach the repository/)).toBeTruthy();
+  });
+
+  it("reads the logs again when the build's phase changes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      goTo("/applications/app1/components/c1?tab=builds");
+      const r: Record<string, unknown> = routes([running]);
+      mockFetch(r, () => owner, readyBuild);
+      render(<App />);
+      expect(await screen.findByText("STEP 1/3: FROM alpine")).toBeTruthy();
+      r["/v1/components/c1/builds"] = [{ ...running, status: { ...running.status, phase: "Succeeded", finishedAt: at } }];
+      r["/v1/builds/b2/logs?tailLines=100"] = { lines: [{ time: at, instance: "build", line: "pushed the image" }], truncated: false };
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_500);
+      });
+      expect(await screen.findByText("pushed the image")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("starts a build at a commit with exactly the request it shows, and refuses a short one", async () => {

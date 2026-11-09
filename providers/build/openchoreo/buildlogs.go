@@ -29,6 +29,10 @@ const (
 	maxEvents        = 200
 	recentLogBytes   = 4 << 20
 	openTimeout      = 30 * time.Second
+	// argoSlack is how many more lines a recent read asks for than it
+	// returns, so that Argo's own lines, filtered out after Kubernetes has
+	// cut the tail, don't shorten it (T014 U3). Argo writes a few per pod.
+	argoSlack = 20
 )
 
 // argoLineRE matches the lines Argo's emissary writes into the main
@@ -186,7 +190,11 @@ func (s *buildLogStream) streamPod(ctx context.Context, p *Builds, b resource.Bu
 			return fmt.Errorf("logs of %s: %w", step, errOpenTimeout)
 		}
 		if err == nil {
-			err = s.copy(ctx, body, step)
+			keep := 0 // a follow passes every line on as it comes
+			if !opts.Follow {
+				keep = tailLines(opts)
+			}
+			err = s.copy(ctx, body, step, keep)
 			body.Close()
 			stop(nil)
 			return err
@@ -212,34 +220,68 @@ func (s *buildLogStream) streamPod(ctx context.Context, p *Builds, b resource.Bu
 	}
 }
 
-// copy passes on body's lines, without Argo's own, until it ends.
-func (s *buildLogStream) copy(ctx context.Context, body io.Reader, step string) error {
+// copy passes on body's lines, without Argo's own, until it ends. With
+// keep > 0 only the last keep of them are passed on, once body ends.
+func (s *buildLogStream) copy(ctx context.Context, body io.Reader, step string, keep int) error {
 	r := bufio.NewReaderSize(body, 4096)
+	var held []reconcile.LogLine
+	send := func(l reconcile.LogLine) error {
+		select {
+		case s.lines <- l:
+			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("logs of %s: %w", step, ctx.Err())
+		}
+	}
 	for {
 		line, err := readCapped(r, maxLogLine)
 		if (len(line) > 0 || err == nil) && !argoLineRE.MatchString(line) {
-			select {
-			case s.lines <- parseLogLine(step, line):
-			case <-ctx.Done():
-				return fmt.Errorf("logs of %s: %w", step, ctx.Err())
+			l := parseLogLine(step, line)
+			if keep <= 0 {
+				if serr := send(l); serr != nil {
+					return serr
+				}
+			} else {
+				if len(held) == keep {
+					held = held[1:]
+				}
+				held = append(held, l)
 			}
 		}
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
 		if err != nil {
+			// The lines read so far are passed on even when the read failed,
+			// so the error ends a partial answer, as it would unheld.
+			for _, l := range held {
+				if serr := send(l); serr != nil {
+					return serr
+				}
+			}
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
 			return fmt.Errorf("logs of %s: %w", step, err)
 		}
 	}
+}
+
+// tailLines is how many recent lines opts asks of each step.
+func tailLines(opts reconcile.LogOptions) int {
+	if opts.TailLines > 0 {
+		return opts.TailLines
+	}
+	return defaultTailLines
 }
 
 // buildLogPath is a step pod's log request: its main container, where
 // the step's own output is, with timestamps.
 func buildLogPath(pod string, opts reconcile.LogOptions) string {
 	q := url.Values{"timestamps": {"true"}, "container": {"main"}}
-	tail := opts.TailLines
-	if tail <= 0 {
-		tail = defaultTailLines
+	tail := tailLines(opts)
+	if !opts.Follow {
+		// copy trims the answer back to tail once Argo's lines are out. A
+		// follow's backlog isn't trimmed, so it asks for exactly tail and
+		// may show a few fewer (RP-047).
+		tail += argoSlack
 	}
 	q.Set("tailLines", strconv.Itoa(tail))
 	if opts.Since > 0 {

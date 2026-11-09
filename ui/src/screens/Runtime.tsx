@@ -216,6 +216,7 @@ function Logs({
   endWords,
   canFollow = true,
   explain,
+  reloadKey,
 }: {
   idPrefix: string;
   path: string;
@@ -224,6 +225,8 @@ function Logs({
   endWords: Record<string, string>;
   canFollow?: boolean;
   explain?: (err: ApiError | NetworkError) => ReactNode | undefined;
+  /** When it changes (a build's phase), the recent lines are read again, unless they're being followed. */
+  reloadKey?: string | undefined;
 }) {
   const [lines, setLines] = useState<LogLine[]>();
   const [truncated, setTruncated] = useState(false);
@@ -260,7 +263,19 @@ function Logs({
     };
   }, [base, allowed]);
 
+  // A build that moved on has new lines (spec 022 T014 U1). Lines a
+  // follow showed, even one that has ended, already include them and can
+  // be more than a recent read's, so they're left alone.
+  const firstKey = useRef(reloadKey);
+  const followed = useRef(false);
+  useEffect(() => {
+    if (!allowed || reloadKey === firstKey.current) return;
+    firstKey.current = reloadKey;
+    if (!followed.current) void loadRecent();
+  }, [reloadKey]);
+
   async function follow() {
+    followed.current = true;
     recent.current?.abort();
     stream.current?.abort();
     const ctrl = new AbortController();
@@ -640,6 +655,7 @@ function BuildDetail({ b, compId, canWrite, onChanged }: { b: Build; compId: str
           endWords={buildEndWords}
           canFollow={!done(b)}
           explain={explainBuildRead}
+          reloadKey={b.status.phase}
         />
       )}
 

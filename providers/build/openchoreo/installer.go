@@ -73,9 +73,15 @@ const readyMessage = "builds are ready; images are stored in the package's regis
 // managedBy labels the objects Serendip hand-builds here.
 var managedBy = map[string]string{"app.kubernetes.io/managed-by": "serendip"}
 
-// ErrRunsRemaining is Uninstall's answer while build runs are still being
-// removed. The clean-up retries until they're gone.
+// ErrRunsRemaining is Uninstall's answer while build runs, or the Argo
+// Workflows they ran, are still being removed. The clean-up retries until
+// they're gone.
 var ErrRunsRemaining = errors.New("build runs are still being removed")
+
+// ErrWorkflowsRemaining is ErrRunsRemaining once the runs are gone but
+// their Argo Workflows (in RunNamespace) are still finalizing, so whoever
+// looks knows where.
+var ErrWorkflowsRemaining = fmt.Errorf("%w: their Argo Workflows in %s are still finalizing", ErrRunsRemaining, RunNamespace)
 
 // Installer installs and removes the openchoreo-workflow-plane package
 // (plan decision 2). It's a reconcile.PackageInstaller. There's one
@@ -394,8 +400,10 @@ func (i *Installer) check(ctx context.Context) (*problem, error) {
 }
 
 // Uninstall removes the package in plan decision 12's order: the
-// workflow, any runs, the ClusterWorkflowPlane, the chart, then the
-// registry with its PVC, and last the credential copies and the CA copy.
+// workflow, any runs, their Argo Workflows with the pods and volumes they
+// owned, the ClusterWorkflowPlane, the chart, then the registry with its
+// PVC, and last the credential copies, the CA copy and the agent's TLS
+// Secret.
 // Every step treats "already gone" as done, so it's idempotent, and safe
 // for an instance that never installed anything. The namespaces stay,
 // empty, as Helm's --create-namespace leaves them, and so do the Argo
@@ -412,6 +420,16 @@ func (i *Installer) Uninstall(ctx context.Context, instanceID string) error {
 	}
 	if left > 0 {
 		return fmt.Errorf("openchoreo builds: %w (%d left)", ErrRunsRemaining, left)
+	}
+	// Finished runs' Argo Workflows outlive their runs (specs/022-builds
+	// T014 F4), and own the step pods and workspace volumes, so they go
+	// while the workflow controller is still there to finalize them.
+	left, err = i.removeWorkflows(ctx)
+	if err != nil {
+		return fmt.Errorf("openchoreo builds: %w", err)
+	}
+	if left > 0 {
+		return fmt.Errorf("openchoreo builds: %w (%d left)", ErrWorkflowsRemaining, left)
 	}
 	if err := deleteIfExists(ctx, i.client, clusterWorkflowPlanesPath+"/"+WorkflowPlaneName); err != nil {
 		return fmt.Errorf("openchoreo builds: %w", err)
@@ -432,7 +450,39 @@ func (i *Installer) Uninstall(ctx context.Context, instanceID string) error {
 	if err := deleteIfExists(ctx, i.client, fmt.Sprintf("/api/v1/namespaces/%s/configmaps/%s", PlaneNamespace, clusterGatewayCAName)); err != nil {
 		return fmt.Errorf("openchoreo builds: %w", err)
 	}
+	// cert-manager leaves a Certificate's Secret behind when the chart
+	// removes the Certificate: the agent's private key (T014 F1).
+	if err := deleteIfExists(ctx, i.client, fmt.Sprintf("/api/v1/namespaces/%s/secrets/%s", PlaneNamespace, agentTLSSecretName)); err != nil {
+		return fmt.Errorf("openchoreo builds: %w", err)
+	}
 	return nil
+}
+
+// runNamespaceCollections are what a build leaves in RunNamespace besides
+// its Workflow: the step pods and the workspace volumes. Every one there
+// is a build's, and once the runs are gone none is in use.
+var runNamespaceCollections = []string{"pods", "persistentvolumeclaims"}
+
+// removeWorkflows deletes every Argo Workflow in RunNamespace and
+// returns how many are still there afterwards, finalizing. Once none
+// are, it deletes what's left of them: their pods and volumes. The
+// garbage collector would get to those in its own time; the deletes are
+// issued now, and Kubernetes finishes them. No Workflow type (the CRDs
+// never installed) is none.
+func (i *Installer) removeWorkflows(ctx context.Context) (int, error) {
+	if err := deleteIfExists(ctx, i.client, argoWorkflowsPath); err != nil {
+		return 0, fmt.Errorf("delete build workflows: %w", err)
+	}
+	left, err := listItems(ctx, i.client, argoWorkflowsPath, "build workflows")
+	if err != nil || len(left) > 0 {
+		return len(left), err
+	}
+	for _, c := range runNamespaceCollections {
+		if err := deleteIfExists(ctx, i.client, "/api/v1/namespaces/"+RunNamespace+"/"+c); err != nil {
+			return 0, fmt.Errorf("delete build %s: %w", c, err)
+		}
+	}
+	return 0, nil
 }
 
 // removeRuns deletes every run in BuildsNamespace and returns how many
@@ -455,18 +505,24 @@ func (i *Installer) removeRuns(ctx context.Context) (int, error) {
 // listRuns lists the runs in BuildsNamespace. No run type at all (the
 // platform isn't installed) is none.
 func (i *Installer) listRuns(ctx context.Context) ([]kubernetes.Object, error) {
-	raw, err := i.client.GetRaw(ctx, workflowRunsPath)
+	return listItems(ctx, i.client, workflowRunsPath, "build runs")
+}
+
+// listItems lists the collection at path, what naming it in errors. No
+// such type at all (its CRDs aren't installed) is none.
+func listItems(ctx context.Context, client *kubernetes.Client, path, what string) ([]kubernetes.Object, error) {
+	raw, err := client.GetRaw(ctx, path)
 	if errors.Is(err, kubernetes.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("list build runs: %w", err)
+		return nil, fmt.Errorf("list %s: %w", what, err)
 	}
 	var list struct {
 		Items []kubernetes.Object `json:"items"`
 	}
 	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, fmt.Errorf("decode build runs: %w", err)
+		return nil, fmt.Errorf("decode %s: %w", what, err)
 	}
 	return list.Items, nil
 }

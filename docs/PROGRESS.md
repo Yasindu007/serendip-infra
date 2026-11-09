@@ -17,8 +17,9 @@ Last updated: 2026-11-09
 ## Current phase
 
 **Spec 022 (builds, the workflow-plane package): IN PROGRESS. T001–T013
-are done; T014 (real-cluster verification) has been run, and is ticked
-once T015 fixes F4 and F1 (see "T014 was run live" below).**
+and T015 are done. T014 (real-cluster verification) has been run, and is
+ticked once a removal after a build on `serendip-t018` ends clean with
+T015's fixes (see "Next" below). Then T016.**
 - **Plan approved** 2026-10-24.
 - **T001 (the spike) is done** (2026-10-24), recorded in plan.md's "Spike
   findings":
@@ -243,9 +244,22 @@ once T015 fixes F4 and F1 (see "T014 was run live" below).**
     - **U1–U4:** console logs go stale; a cancelled step reads Running;
       `tailLines` is taken before the Argo filter; a 503 says "being set
       up" when the package isn't installed.
-- **Next: T015,** the reviews plus F1–F4 and U1–U4. Then re-run a
-  removal after a build on `serendip-t018`, which must end clean. That
-  ticks T014.
+- **T015 is done** (2026-11-09): F1–F4 and U1–U4 are fixed. The four
+  reviews ran, and every finding is fixed or recorded (RP-041 and RP-043
+  updated; RP-047–RP-052 new). `tasks.md` T015 has the detail.
+  - **F2 is a decision (RP-048):** a source Component keeps running an
+    earlier source's newest successful build until its current source
+    builds, and the new `Built` condition says so.
+  - **Deferred to a builds-hardening follow-up:** digest deploys and
+    registry auth (RP-041), a build NetworkPolicy (RP-049), step limits
+    (RP-052), and `hostUsers: false` / no service-account token
+    (RP-038).
+- **Next: the live re-run, for T014's tick.** Rebuild `serendipd`, then
+  on `serendip-t018`: install the package, run a build, and remove the
+  package. It must end with no Workflows, pods, PVCs or credential
+  copies in `workflows-serendip-builds`, and no `cluster-agent-tls`.
+  T014's leftovers are still there, so this removal must clear them too.
+  Empty namespaces and the Argo CRDs stay, by design. Then T016.
   - **OpenBao on `serendip-t018` was re-initialised** (the spec 018 unseal
     file was lost from temp). Its credentials are now in
     `C:\Users\malit\.serendip-t018\openbao-init.json`. Pass it with

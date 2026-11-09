@@ -306,7 +306,8 @@ func (r *ComponentReconciler) setState(ctx context.Context, comp resource.Compon
 	if conditionUnchanged(comp.Status.Conditions, ready) &&
 		reachableUnchanged(comp.Status.Conditions, reach) &&
 		endpointsEqual(comp.Status.Endpoints, endpoints) &&
-		autoBuildUnchanged(comp.Status.Conditions, src.autoBuild) &&
+		optionalConditionUnchanged(comp.Status.Conditions, src.autoBuild, conditionAutoBuild) &&
+		optionalConditionUnchanged(comp.Status.Conditions, src.built, conditionBuilt) &&
 		comp.Status.Image == src.image {
 		return nil
 	}
@@ -322,16 +323,22 @@ func (r *ComponentReconciler) setState(ctx context.Context, comp resource.Compon
 	} else {
 		comp.Status.Conditions = removeCondition(comp.Status.Conditions, conditionAutoBuild)
 	}
+	if src.built != nil {
+		comp.Status.Conditions = upsertCondition(comp.Status.Conditions, *src.built)
+	} else {
+		comp.Status.Conditions = removeCondition(comp.Status.Conditions, conditionBuilt)
+	}
 	comp.Status.Endpoints = endpoints
 	comp.Status.Image = src.image
 	_, err := r.components.Update(ctx, comp)
 	return err
 }
 
-// autoBuildUnchanged compares the AutoBuild condition, message included:
-// its messages are Serendip's own, and each says something different.
-func autoBuildUnchanged(conditions []resource.Condition, want *resource.Condition) bool {
-	existing := findCondition(conditions, conditionAutoBuild)
+// optionalConditionUnchanged compares an optional condition of type typ (AutoBuild
+// or Built), message included: their messages are Serendip's own, and
+// each says something different.
+func optionalConditionUnchanged(conditions []resource.Condition, want *resource.Condition, typ string) bool {
+	existing := findCondition(conditions, typ)
 	if want == nil || existing == nil {
 		return want == nil && existing == nil
 	}

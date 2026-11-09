@@ -230,7 +230,7 @@ func (h *BuildHandler) run(w http.ResponseWriter, r *http.Request) (resource.Bui
 	// own), so the observation says whether the run is still there.
 	obs, err := h.provider.ObserveBuild(r.Context(), b)
 	if err != nil {
-		buildReadFailed(w, r, err)
+		h.buildReadFailed(w, r, err)
 		return resource.Build{}, false
 	}
 	if obs.Gone {
@@ -253,15 +253,22 @@ func (h *BuildHandler) readFailed(b resource.Build) func(http.ResponseWriter, *h
 			writeExpired(w, r, b)
 			return
 		}
-		buildReadFailed(w, r, err)
+		h.buildReadFailed(w, r, err)
 	}
 }
 
-// buildReadFailed is platformFailed in the builds package's words.
-func buildReadFailed(w http.ResponseWriter, r *http.Request, err error) {
+// buildReadFailed is platformFailed in the builds package's words. Not
+// ready is said as the capability's readiness has it: a package that
+// isn't installed isn't "being set up" (specs/022-builds T014 U4).
+func (h *BuildHandler) buildReadFailed(w http.ResponseWriter, r *http.Request, err error) {
 	reqID := audit.RequestIDFrom(r.Context())
 	if errors.Is(err, reconcile.ErrProviderNotReady) {
-		WriteProblem(w, http.StatusServiceUnavailable, "service unavailable", "the builds package is still being set up; retry shortly", reqID)
+		detail := "the builds package is still being set up; retry shortly"
+		var rf *deployRefusal
+		if h.ready != nil && errors.As(h.ready(), &rf) {
+			detail = "the build's logs and events can't be read now: " + rf.detail
+		}
+		WriteProblem(w, http.StatusServiceUnavailable, "service unavailable", detail, reqID)
 		return
 	}
 	log.Printf("api: %s %s: build read failed (request %s): %v", r.Method, r.URL.Path, reqID, err)

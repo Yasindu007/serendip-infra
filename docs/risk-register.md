@@ -52,9 +52,19 @@ purpose), **Closed** (fixed).
 | RP-029 | Release listing scans every release, and a component-type change re-releases every Component | Performance | Accepted | Spec 020 T005 review |
 | RP-038 | Build steps run privileged, without user namespaces | Security | Open | Spec 022 T001 |
 | RP-039 | The workflow plane's Argo CRDs outlive its removal (the per-run download ended in T013) | Footprint, network | Decided | Spec 022 T001 |
+| RP-040 | A repository's own contents can't be checked before its build | Security | Open | Spec 022 T002 |
+| RP-041 | The build registry listens on the node's network without authentication, and its tags can be overwritten | Security (medium) | Open | Spec 022 T005, T015 |
+| RP-042 | A followed build log polls the cluster while it waits for a step | Performance | Accepted | Spec 022 |
+| RP-043 | Auto-build's head read runs on the reconcile loop, so slow repositories can stall it | Performance, availability | Accepted | Spec 022 T007, T015 |
 | RP-044 | A credential's use is checked only when the Secret or the repository changes, which holds only while the build step can't see the credential | Security | Accepted | Spec 022 T008 review |
 | RP-045 | A package's Helm release left locked is recovered by undoing the unfinished operation | Operability | Accepted | Spec 022 T013 |
 | RP-046 | A package's cost hides outside its own pods: Argo's full CRDs held kube-apiserver ~550 MiB higher | Footprint | Mitigated | Spec 022 T013 |
+| RP-047 | A followed build log's first lines can be a few short of `tailLines` | Correctness (low) | Accepted | Spec 022 T015 |
+| RP-048 | A source Component keeps running an earlier source's image until its current source builds | Correctness | Decided | Spec 022 T015 |
+| RP-049 | A build's own steps reach the whole cluster network | Security (medium) | Open | Spec 022 T015 |
+| RP-050 | A build's credential copy is a plain Secret on the node while its run lasts | Security (low) | Accepted | Spec 022 T015 |
+| RP-051 | Auto-build reads any HTTPS address a Component names, internal ones included | Security (low) | Accepted | Spec 022 T015 |
+| RP-052 | Build steps have no CPU or memory limits | Footprint, availability | Open | Spec 022 T015 |
 
 ---
 
@@ -876,6 +886,24 @@ purpose), **Closed** (fixed).
   NetworkPolicy can't cover `hostNetwork` pods, so registry `htpasswd`
   auth with a pull Secret, or the containerd mirror (multi-node) with the
   registry back on the pod network.
+- **Update, 2026-11-09 (T015 security review): wider than the LAN, and
+  tags can be overwritten.**
+  - **Who can push:** not only the LAN. Any pod in the cluster, and any
+    build's own `RUN` steps (RP-049), reach the node's port 5000.
+  - **What they can replace:** image names are predictable
+    (`serendip/cmp-` and 10 hex characters of the Component ID's hash),
+    and tags are the commit's first 12 characters, public for a public
+    repository. Workloads pull by tag. A push over an existing tag runs
+    the attacker's image at the victim's next pull (a new node, image
+    garbage collection, an eviction).
+  - **Fixes, in order:** record the pushed digest (`podman push
+    --digestfile`) and deploy `repository@sha256:...`, which ends the
+    overwrite; then registry `htpasswd` auth with a pull Secret, which
+    ends anonymous push and pull. Both change the build workflow and the
+    deploy path, and need a live run: a follow-up spec, not T015.
+  - **Until then:** a host firewall closing port 5000 to the LAN; nothing
+    yet stops an in-cluster pod. A single-team laptop (the target) is the
+    case where that's tolerable.
 
 ## RP-042 — A followed build log polls the cluster while it waits for a step
 
@@ -916,6 +944,14 @@ purpose), **Closed** (fixed).
   as resync lag. Candidates: a shorter head-read timeout than the
   reconcile's, or one background poller that enqueues the Component when
   the head moves.
+- **Update, 2026-11-09 (T015 security review): it's also an
+  availability risk.** Someone with Component write can point many
+  auto-build Components at an address that never answers. Each holds the
+  one engine goroutine for the 10 s reconcile timeout every 5 minutes, so
+  about 30 of them keep it blocked all the time. **Fix, for the
+  follow-up:** a 2-3 s head-read timeout, and the background poller
+  above. Accepted for now: writing Components already needs a role at
+  their Application, and an install is one team's.
 
 ## RP-044 — A credential's use is checked only when the Secret or repository changes
 
@@ -1042,3 +1078,118 @@ purpose), **Closed** (fixed).
   - if a build's CPU starves workloads in real use (a CPU limit on the
     build step);
   - on a real T470 (RP-008).
+
+## RP-047 — A followed build log's first lines can be a few short of `tailLines`
+
+- **Kind:** correctness (low). **Status:** Accepted, 2026-11-09.
+  **Found:** spec 022 T014 (U3), fixed in part in T015.
+- **What:** Argo writes a few lines of its own (`argo=true`) into a
+  build step's main container. Serendip filters them out, but Kubernetes
+  has already cut the tail. With `tailLines=5`, a step returned 2 lines.
+- **The fix (T015):** a recent read asks Kubernetes for `tailLines + 20`
+  and keeps the last `tailLines` of the step's own lines, so it returns
+  the number asked for.
+- **What's accepted:** a follow can't be trimmed the same way: it can't
+  know where the backlog ends and the live lines begin. It asks for
+  exactly `tailLines`, so its first lines can be a few short. New lines
+  are all passed on.
+- **Revisit:** if a client relies on an exact backlog when following.
+
+## RP-048 — A source Component keeps running an earlier source's image until its current source builds
+
+- **Kind:** correctness. **Status:** Decided, 2026-11-09 (spec 022 T015;
+  T014 finding F2).
+- **What T014 found:** a source Component ran only the newest successful
+  build of its *current* source (plan decision 7). Once `source` changed
+  and that build failed, its `status.image` emptied, it read "workload is
+  not deployed", and its Deployments read `WaitingForComponent`. Yet the
+  platform kept serving the earlier release.
+- **The decision:** until the current source has a successful build, the
+  Component runs the newest successful build of any earlier source, and
+  says so. A new `Built` condition is on every source Component: True
+  (`Built`) for a build of the current source, else False
+  (`WaitingForBuild`), naming the build still running and why the
+  current source isn't built. With no successful build at all, it reads
+  `WaitingForBuild` and runs nothing, as before.
+- **The cost:** Ready can read True while the current source isn't built;
+  `Built` is where that shows. And a change to other fields in the same
+  edit as the source (a port, an environment variable) rolls out with the
+  earlier image, as it would on an image Component. `Built`'s message
+  names the latest build's phase, so the Component is written once per
+  phase change of that build (a few writes per build), not only when the
+  image changes.
+- **Revisit:** if people want a source change to stop the Component until
+  it builds; that would be an opt-in, not the default.
+
+## RP-049 — A build's own steps reach the whole cluster network
+
+- **Kind:** security (medium). **Status:** Open, 2026-11-09. **Found:**
+  spec 022 T015 security review.
+- **What:** nothing limits where build pods in
+  `workflows-serendip-builds` connect. A Dockerfile's `RUN curl ...` can
+  reach in-cluster Services (PostgreSQL, OpenBao, internal APIs), the
+  node's own ports, and the registry (RP-041).
+- **Why not fixed in T015:** a policy that allows DNS, the registry and
+  the internet but not the pod and Service ranges needs those ranges per
+  install, and has to be checked live against Cilium. RP-038's escape is
+  the larger risk on the same pods.
+- **Fix:** a NetworkPolicy (or CiliumNetworkPolicy) on the build pods,
+  applied by the installer.
+- **Revisit:** with RP-038 and RP-041, in a follow-up builds-hardening
+  spec.
+
+## RP-050 — A build's credential copy is a plain Secret on the node while its run lasts
+
+- **Kind:** security (low). **Status:** Accepted, 2026-11-09. **Found:**
+  spec 022 T015 security review (plan decision 3 said it would be
+  recorded; it wasn't until now).
+- **What:** a private repository's credential is copied into Secret
+  `<run>-git` in `workflows-serendip-builds` before its run starts, for
+  the checkout to mount. While it exists, cluster admins, controllers
+  with Secret read (Argo, OpenChoreo), anyone who can create pods in that
+  namespace, and a build that escapes its pod (RP-038) can read it.
+- **What holds:** it's never in a status, a log or the audit log (T014
+  searched for it), and the build step doesn't mount it (RP-044's
+  condition). Since T015 it's deleted as soon as the build reconciler
+  sees the run end or expire, as well as with the Build, a cancel and the
+  package's removal (T014 F3). Before, it lasted until the Build or the
+  package was removed. That first delete is best-effort: if it fails, the
+  build is still recorded as finished (it's logged), and the copy then
+  lasts until the Build or the package goes, as before.
+- **Revisit:** if builds move to short-lived per-run tokens (a Git host's
+  app tokens), or the secrets capability can mount values itself.
+
+## RP-051 — Auto-build reads any HTTPS address a Component names, internal ones included
+
+- **Kind:** security (low). **Status:** Accepted, 2026-11-09. **Found:**
+  spec 022 T015 security review.
+- **What:** a Component's repository may be an IP address, `localhost`
+  or any port, so whoever writes Components can make `serendipd` send a
+  `GET` to an internal address.
+- **What contains it:** HTTPS only, with certificates checked against the
+  system's roots (self-signed internal endpoints, the kube-apiserver
+  included, fail); a fixed path (`/info/refs?service=git-upload-pack`);
+  the answer capped at 8 MiB, under a 30 s timeout and the reconcile's
+  10 s; errors only in `serendipd`'s log, with the status saying only
+  that it couldn't reach. Redirects stay HTTPS, and Go drops the
+  credential on a redirect to another host.
+- **Fix if wanted:** a dialer hook refusing loopback, link-local and
+  private addresses unless an admin allows them. A self-hosted Git server
+  on the LAN is a real case, so they can't simply be refused.
+- **Revisit:** if Component write is ever given to people who shouldn't
+  probe the network `serendipd` sits on.
+
+## RP-052 — Build steps have no CPU or memory limits
+
+- **Kind:** footprint, availability. **Status:** Open, 2026-11-09.
+  **Found:** spec 022 T015 security review (T013 saw the CPU side: a
+  build saturates the T470's two cores, RP-046).
+- **What:** the `serendip-dockerfile` workflow sets only the workspace's
+  storage. A Dockerfile can use all of the node's memory and CPU, and on
+  one laptop that's the control plane's too.
+- **Why not fixed in T015:** a limit has to be measured. Too low, and
+  ordinary builds (a `go build`, an `npm install`) fail or crawl.
+- **Fix:** requests and limits on both steps, sized from a measured run on
+  the simulated T470, and stated in the package's cost.
+- **Revisit:** in a follow-up builds-hardening spec, or as soon as a build
+  starves a workload.

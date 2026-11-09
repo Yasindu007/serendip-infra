@@ -30,6 +30,9 @@ type fakeBuilds struct {
 	expireOnRead bool
 	// failRead fails the next read with the run still there.
 	failRead bool
+	// notReady fails every read as the capability does when its package
+	// is gone.
+	notReady bool
 }
 
 // read fails the read and expires the run when expireOnRead is set.
@@ -39,6 +42,9 @@ func (f *fakeBuilds) read(b resource.Build) error {
 	if f.failRead {
 		f.failRead = false
 		return errors.New("connection refused")
+	}
+	if f.notReady {
+		return reconcile.ErrProviderNotReady
 	}
 	if !f.expireOnRead {
 		return nil
@@ -297,6 +303,24 @@ func TestBuildLogsExpired(t *testing.T) {
 		t.Errorf("expired build's record: %+v", got.Status)
 	}
 	w.call(t, "tok-logreader", http.MethodGet, logs+"?tailLines=0", nil, http.StatusBadRequest)
+}
+
+// TestBuildLogsPackageRemoved: with the package removed, a build's logs
+// say it isn't installed, not that it's being set up (T014 U4).
+func TestBuildLogsPackageRemoved(t *testing.T) {
+	w := newBuildWorld(t)
+	b := decodeBuild(t, w.call(t, "tok-devops", http.MethodPost, "/v1/components/"+w.src+"/builds", nil, http.StatusCreated))
+	w.setStatus(t, b.Metadata.ID, resource.BuildSucceeded, true)
+	w.registry.SetReadiness("build", provider.Readiness{Ready: false, Reason: "NotInstalled"})
+	w.builds.mu.Lock()
+	w.builds.notReady = true
+	w.builds.mu.Unlock()
+	for _, path := range []string{"/logs", "/events"} {
+		body := string(w.call(t, "tok-logreader", http.MethodGet, "/v1/builds/"+b.Metadata.ID+path, nil, http.StatusServiceUnavailable))
+		if !strings.Contains(body, "NotInstalled") || !strings.Contains(body, buildPackage) || strings.Contains(body, "being set up") {
+			t.Errorf("%s without the package: %s", path, body)
+		}
+	}
 }
 
 // TestBuildLogsWithoutPackage: runs are records, so they read without the

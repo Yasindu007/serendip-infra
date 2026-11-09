@@ -15,7 +15,9 @@ import (
 
 // A source Component's image comes from its builds (specs/022-builds plan
 // decisions 6 and 7): the newest successful build of its current source.
-// Until there is one it reads WaitingForBuild. Creating a source
+// Until there is one it keeps running the newest successful build of an
+// earlier source, if any (T014 F2: what the platform still runs), and
+// reads Built False; with none at all it reads WaitingForBuild. Creating a source
 // Component, or changing what it builds, starts a build by itself; with
 // auto-build on, the branch's head is read every autoBuildPollEvery and a
 // new commit starts one.
@@ -27,6 +29,14 @@ const ReasonWaitingForBuild = "WaitingForBuild"
 // conditionAutoBuild says whether auto-build can see new commits. It's
 // set only while auto-build is on.
 const conditionAutoBuild = "AutoBuild"
+
+// conditionBuilt says whether a source Component's current source has a
+// successful build: True with ReasonBuilt, else False with
+// ReasonWaitingForBuild. It's set only on a source Component.
+const conditionBuilt = "Built"
+
+// ReasonBuilt: the image running is a build of the current source.
+const ReasonBuilt = "Built"
 
 // Reasons for the AutoBuild condition.
 const (
@@ -68,6 +78,9 @@ type sourceState struct {
 	waiting string
 	// autoBuild is the AutoBuild condition to hold, nil for none.
 	autoBuild *resource.Condition
+	// built is the Built condition to hold, nil for none (an image
+	// Component).
+	built *resource.Condition
 }
 
 // source works out comp's image from its builds, starting the first build
@@ -94,7 +107,7 @@ func (r *ComponentReconciler) source(ctx context.Context, comp resource.Componen
 	}
 
 	var st sourceState
-	var newest, latest *resource.Build
+	var latest *resource.Build
 	unfinished := false
 	for i := range forSource {
 		b := &forSource[i]
@@ -104,16 +117,27 @@ func (r *ComponentReconciler) source(ctx context.Context, comp resource.Componen
 		if latest == nil || buildBefore(*latest, *b) {
 			latest = b
 		}
-		if b.Status.Phase == resource.BuildSucceeded && b.Status.Image != "" &&
-			(newest == nil || b.Status.FinishedAt.After(newest.Status.FinishedAt) ||
-				(b.Status.FinishedAt.Equal(newest.Status.FinishedAt) && buildBefore(*newest, *b))) {
-			newest = b
-		}
 	}
-	if newest != nil {
+	newest := newestSucceeded(forSource)
+	now := r.now().UTC()
+	built := func(status resource.ConditionStatus, reason, message string) *resource.Condition {
+		c := keepTransitionTime(comp.Status.Conditions, resource.Condition{
+			Type: conditionBuilt, Status: status, Reason: reason, Message: message, LastTransitionTime: now,
+		})
+		return &c
+	}
+	switch earlier := newestSucceeded(all); {
+	case newest != nil:
 		st.image = newest.Status.Image
-	} else {
+		st.built = built(resource.ConditionTrue, ReasonBuilt, fmt.Sprintf("running build %s's image of the current source", newest.Metadata.ID))
+	case earlier != nil:
+		// The current source isn't built yet, or its builds failed: what
+		// runs is still the earlier source's image, so that's what's said.
+		st.image = earlier.Status.Image
+		st.built = built(resource.ConditionFalse, ReasonWaitingForBuild, fmt.Sprintf("%s; still running build %s's image, of an earlier source", waitingMessage(*latest), earlier.Metadata.ID))
+	default:
 		st.waiting = waitingMessage(*latest)
+		st.built = built(resource.ConditionFalse, ReasonWaitingForBuild, st.waiting)
 	}
 
 	if cur.AutoBuild {
@@ -126,6 +150,21 @@ func (r *ComponentReconciler) source(ctx context.Context, comp resource.Componen
 		delete(r.lastPoll, comp.Metadata.ID)
 	}
 	return st, nil
+}
+
+// newestSucceeded is the newest successful build with an image among
+// builds, by when it finished, or nil.
+func newestSucceeded(builds []resource.Build) *resource.Build {
+	var newest *resource.Build
+	for i := range builds {
+		b := &builds[i]
+		if b.Status.Phase == resource.BuildSucceeded && b.Status.Image != "" &&
+			(newest == nil || b.Status.FinishedAt.After(newest.Status.FinishedAt) ||
+				(b.Status.FinishedAt.Equal(newest.Status.FinishedAt) && buildBefore(*newest, *b))) {
+			newest = b
+		}
+	}
+	return newest
 }
 
 // buildsSource reports whether b builds cur: it recorded the same source,

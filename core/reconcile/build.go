@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/graph"
@@ -231,6 +232,15 @@ func (r *BuildReconciler) step(ctx context.Context, b resource.Build, st *buildS
 			return fmt.Errorf("cancel build: %w", err)
 		}
 		st.finish(resource.BuildCancelled, "cancelled")
+		// The run is gone, so no later read moves its steps on: one that
+		// hadn't finished was cancelled with it (specs/022-builds T014 U2).
+		// A copy: st.s.Steps still shares b.Status's array.
+		st.s.Steps = slices.Clone(st.s.Steps)
+		for i, s := range st.s.Steps {
+			if !s.Phase.Done() {
+				st.s.Steps[i].Phase, st.s.Steps[i].FinishedAt = resource.BuildCancelled, st.s.FinishedAt
+			}
+		}
 		return nil
 	}
 

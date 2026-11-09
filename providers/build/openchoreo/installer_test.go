@@ -140,7 +140,19 @@ func (f *fakeAPI) handler(t *testing.T) http.HandlerFunc {
 				return
 			}
 			if _, ok := f.objects[path]; !ok {
-				http.NotFound(w, r)
+				// A collection's delete removes what's directly under it.
+				found := false
+				for p := range f.objects {
+					if rest, ok := strings.CutPrefix(p, path+"/"); ok && !strings.Contains(rest, "/") {
+						found = true
+						if !f.finalizing[p] {
+							delete(f.objects, p)
+						}
+					}
+				}
+				if !found {
+					http.NotFound(w, r)
+				}
 				return
 			}
 			if !f.finalizing[path] {
@@ -637,5 +649,55 @@ func TestInstall_RecoversAReleaseLeftPending(t *testing.T) {
 	e.helm.err = errors.New("helm upgrade: exit status 1: Error: chart not found")
 	if _, err := e.inst.Install(context.Background(), instance("")); err == nil || len(e.helm.calls) != 1 {
 		t.Errorf("Install() = %v after %d helm calls, want the error after 1", err, len(e.helm.calls))
+	}
+}
+
+// Removal leaves no finished build behind (T014 F4): the run namespace's
+// Argo Workflows, step pods and workspace volumes go, before the plane
+// does, and so does the agent's TLS Secret, which cert-manager leaves
+// (F1).
+func TestUninstall_RemovesFinishedBuildsAndTheAgentKey(t *testing.T) {
+	e := newTestEnv(t)
+	e.healthy()
+	wf := argoWorkflowPath("build-1")
+	pod := "/api/v1/namespaces/" + RunNamespace + "/pods/build-1-checkout-1"
+	pvc := "/api/v1/namespaces/" + RunNamespace + "/persistentvolumeclaims/build-1-workspace"
+	tls := "/api/v1/namespaces/" + PlaneNamespace + "/secrets/" + agentTLSSecretName
+	for _, p := range []string{wf, pod, pvc, tls} {
+		e.api.put(p, kubernetes.Object{})
+	}
+	if err := e.inst.Uninstall(context.Background(), "pi-1"); err != nil {
+		t.Fatalf("Uninstall() = %v", err)
+	}
+	for _, p := range []string{wf, pod, pvc, tls} {
+		if e.api.has(p) {
+			t.Errorf("%s left behind", p)
+		}
+	}
+	calls := e.api.calls
+	wfAt, planeAt := slices.Index(calls, "DELETE "+argoWorkflowsPath), slices.Index(calls, "DELETE "+planePath)
+	if wfAt < 0 || planeAt < 0 || wfAt > planeAt {
+		t.Errorf("the workflows weren't removed before the plane: %v", calls)
+	}
+}
+
+// A Workflow still finalizing holds the removal, as a run does, so the
+// controller that finalizes it isn't removed first.
+func TestUninstall_WaitsForWorkflowsBeforeRemovingThePlane(t *testing.T) {
+	e := newTestEnv(t)
+	e.healthy()
+	wf := argoWorkflowPath("build-1")
+	e.api.put(wf, kubernetes.Object{})
+	e.api.finalizing[wf] = true
+	err := e.inst.Uninstall(context.Background(), "pi-1")
+	if !errors.Is(err, ErrWorkflowsRemaining) || !errors.Is(err, ErrRunsRemaining) || !strings.Contains(err.Error(), "(1 left)") {
+		t.Fatalf("Uninstall() = %v, want ErrWorkflowsRemaining", err)
+	}
+	if !e.api.has(planePath) || len(e.helm.calls) != 0 {
+		t.Error("the plane was removed while a workflow was still finalizing")
+	}
+	// Its pods and volumes are left to the controller finalizing it.
+	if n := e.api.count("DELETE /api/v1/namespaces/" + RunNamespace + "/pods"); n != 0 {
+		t.Errorf("pods were deleted while a workflow was finalizing (%d deletes)", n)
 	}
 }

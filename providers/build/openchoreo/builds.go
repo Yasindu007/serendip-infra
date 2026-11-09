@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -75,9 +76,10 @@ func gitSecretPath(run string) string {
 	return "/api/v1/namespaces/" + RunNamespace + "/secrets/" + run + GitSecretSuffix
 }
 
-func argoWorkflowPath(name string) string {
-	return "/apis/" + argoAPIVersion + "/namespaces/" + RunNamespace + "/workflows/" + name
-}
+// argoWorkflowsPath is RunNamespace's Argo Workflows.
+const argoWorkflowsPath = "/apis/" + argoAPIVersion + "/namespaces/" + RunNamespace + "/workflows"
+
+func argoWorkflowPath(name string) string { return argoWorkflowsPath + "/" + name }
 
 // basicAuth reads a repository credential from a Secret's value: a
 // password or token, and an optional user name ("git" if none; hosts
@@ -168,22 +170,48 @@ func (p *Builds) StartBuild(ctx context.Context, app resource.Application, comp 
 }
 
 // CancelBuild deletes b's run, which stops it within seconds (T001 item
-// 5), and its credential copy, which nothing needs any more.
+// 5), and its credential copy, which nothing needs any more. Its Argo
+// Workflow is kept, with the step pods it owns, so the logs up to the
+// cancel can still be read; it goes with the Build, or the package.
 func (p *Builds) CancelBuild(ctx context.Context, b resource.Build) error {
-	return p.RemoveBuild(ctx, b)
-}
-
-// RemoveBuild deletes b's run and its credential copy. The run's
-// finalizer removes its Workflow, pods and workspace.
-func (p *Builds) RemoveBuild(ctx context.Context, b resource.Build) error {
 	name := runName(b.Metadata.ID)
-	if err := deleteIfExists(ctx, p.client, runPath(name)); err != nil {
-		return fmt.Errorf("openchoreo builds: %w", err)
-	}
-	if err := deleteIfExists(ctx, p.client, gitSecretPath(name)); err != nil {
-		return fmt.Errorf("openchoreo builds: %w", err)
+	for _, path := range []string{runPath(name), gitSecretPath(name)} {
+		if err := deleteIfExists(ctx, p.client, path); err != nil {
+			return fmt.Errorf("openchoreo builds: %w", err)
+		}
 	}
 	return nil
+}
+
+// RemoveBuild deletes b's run, its Argo Workflow and its credential copy.
+// A finished run's Workflow outlives the run (specs/022-builds T014 F4),
+// so it's deleted here too; it owns the step pods and the workspace,
+// which go with it.
+func (p *Builds) RemoveBuild(ctx context.Context, b resource.Build) error {
+	name := runName(b.Metadata.ID)
+	for _, path := range []string{runPath(name), argoWorkflowPath(name), gitSecretPath(name)} {
+		if err := deleteIfExists(ctx, p.client, path); err != nil {
+			return fmt.Errorf("openchoreo builds: %w", err)
+		}
+	}
+	return nil
+}
+
+// releaseCredential deletes b's credential copy once its run has ended
+// (plan decision 3; T014 F3): nothing reads it after the checkout, and
+// nothing else would delete it before the Build or the package goes. It
+// runs only while b isn't yet recorded as finished, so it's the build
+// reconciler's last observations that release it, not the API's reads
+// of a finished build. It's best-effort: a failed delete mustn't keep a
+// finished build from being recorded, and the copy still goes with the
+// Build or the package (RP-050).
+func (p *Builds) releaseCredential(ctx context.Context, b resource.Build, run string) {
+	if b.Status.Phase.Done() {
+		return
+	}
+	if err := deleteIfExists(ctx, p.client, gitSecretPath(run)); err != nil {
+		log.Printf("openchoreo builds: build %s: release its credential copy: %v", b.Metadata.ID, err)
+	}
 }
 
 // HeadCommit reads the head of src's branch over smart HTTP.
@@ -310,6 +338,9 @@ func (p *Builds) ObserveBuild(ctx context.Context, b resource.Build) (reconcile.
 	name := runName(b.Metadata.ID)
 	run, err := p.client.Get(ctx, runPath(name))
 	if errors.Is(err, kubernetes.ErrNotFound) {
+		// Expired before it was seen to end (serendipd was down): its copy
+		// is released here instead.
+		p.releaseCredential(ctx, b, name)
 		return reconcile.BuildObservation{Gone: true}, nil
 	}
 	if err != nil {
@@ -339,7 +370,12 @@ func (p *Builds) ObserveBuild(ctx context.Context, b resource.Build) (reconcile.
 			}
 		}
 	}
-	return observe(rs, wf), nil
+	obs := observe(rs, wf)
+	if obs.Phase.Done() {
+		// The build reconciler observes a run until it records it Done.
+		p.releaseCredential(ctx, b, name)
+	}
+	return obs, nil
 }
 
 // observe combines a run's status and its Workflow's, nil if there's
