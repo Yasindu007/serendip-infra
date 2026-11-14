@@ -1,0 +1,35 @@
+name: Epic (a spec)
+description: One spec in specs/NNN-name/. Its tasks are sub-issues.
+title: "Spec NNN: "
+type: Epic
+labels: [epic]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An epic is one spec. Open it when the spec is approved; add each `T###` from `tasks.md` as a **sub-issue** (a Task). The spec's PR says `Closes #<this issue>`.
+  - type: input
+    id: spec
+    attributes:
+      label: Spec folder
+      placeholder: specs/024-traces-and-alerts/
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: The spec's problem and goal, in a few lines.
+    validations:
+      required: true
+  - type: textarea
+    id: out
+    attributes:
+      label: Explicitly out of scope
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: From spec.md, as a checklist.
+      value: |
+        - [ ]

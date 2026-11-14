@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"regexp"
@@ -75,15 +77,7 @@ func Discover(ctx context.Context) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	sizeStr, err := os.ReadFile(fmt.Sprintf("/sys/block/%s/size", device))
-	if err != nil {
-		return Result{}, fmt.Errorf("discover: read /sys/block/%s/size: %w", device, err)
-	}
-	rotationalStr, err := os.ReadFile(fmt.Sprintf("/sys/block/%s/queue/rotational", device))
-	if err != nil {
-		return Result{}, fmt.Errorf("discover: read /sys/block/%s/queue/rotational: %w", device, err)
-	}
-	if res.DiskBytes, res.DiskType, err = parseDiskStats(string(sizeStr), string(rotationalStr), device); err != nil {
+	if res.DiskBytes, res.DiskType, err = discoverDisk(device); err != nil {
 		return Result{}, err
 	}
 
@@ -292,6 +286,27 @@ func rootBlockDevice(mounts []byte) (string, error) {
 		return "", fmt.Errorf("discover: scan mounts: %w", err)
 	}
 	return "", fmt.Errorf("discover: no mount entry for /")
+}
+
+// discoverDisk reads device's size and type from /sys/block. A root
+// filesystem that isn't on a block device (a container's overlay, tmpfs,
+// a ZFS dataset) has no entry there: the disk is then reported as unknown
+// (0 and ""), the same best-effort treatment as the network speed, rather
+// than failing all of discovery. Found running the tests in a Linux
+// container (spec 023, adding CI).
+func discoverDisk(device string) (int64, string, error) {
+	sizeStr, err := os.ReadFile(fmt.Sprintf("/sys/block/%s/size", device))
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, "", nil
+	}
+	if err != nil {
+		return 0, "", fmt.Errorf("discover: read /sys/block/%s/size: %w", device, err)
+	}
+	rotationalStr, err := os.ReadFile(fmt.Sprintf("/sys/block/%s/queue/rotational", device))
+	if err != nil {
+		return 0, "", fmt.Errorf("discover: read /sys/block/%s/queue/rotational: %w", device, err)
+	}
+	return parseDiskStats(string(sizeStr), string(rotationalStr), device)
 }
 
 // parseDiskStats interprets /sys/block/<device>/size (always reported in

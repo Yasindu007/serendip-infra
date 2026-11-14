@@ -61,9 +61,18 @@ costs nothing.
 GitHub flagged this account once for bulk API writes. Track everything,
 but with few, paced writes:
 
-- **One epic issue per spec** (label `epic`), opened when its spec is
-  approved, with the tasks as a checklist. No task-level issues. Update
-  the ticks at PROGRESS.md checkpoints, as one edit.
+- **Epic → Task → Sub-task**, as GitHub issue types and sub-issues
+  (`.github/ISSUE_TEMPLATE/`):
+  - **Epic:** one per spec (label `epic`), opened when its spec is
+    approved.
+  - **Task:** one per `T###`, a sub-issue of its epic, opened when
+    `tasks.md` is approved (as one paced batch), closed in the commit that
+    finishes it (`closes #N` in the commit body, or at the checkpoint).
+  - **Sub-task:** a sub-issue of a task, only when a task splits (review
+    findings carried, a live check's items).
+  - Specs closed before 2026-11-14 keep a task checklist in their epic
+    instead of task issues: back-filling ~270 closed issues is exactly the
+    burst that got the account flagged.
 - **One PR per spec** when it closes: branch `spec-NNN` on the Yasindu007
   fork, opened by Yasindu007, merged by `serendipinfra` with a merge
   commit, its body saying `Closes #<epic>` so the merge closes the epic.

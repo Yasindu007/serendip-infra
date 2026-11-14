@@ -1,0 +1,57 @@
+name: CI
+
+# Runs on every PR and on main. Read-only: it builds and tests, and never
+# sees a secret. Cluster tests (live_test.go, BENCH_KUBECONFIG) skip
+# themselves without a kubeconfig.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (build, vet, fmt, imports, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Not gofmt'd:"; echo "$unformatted"; exit 1; fi
+      - run: go vet ./...
+      - run: go build ./...
+      - name: Import boundaries (constitution rule 2)
+        run: bash .claude/scripts/check-imports.sh
+      - run: go test -race -count=1 ./...
+
+  ui:
+    name: Console (typecheck, test, build)
+    runs-on: ubuntu-latest
+    # From ui/, so corepack reads ui/package.json's packageManager and runs
+    # the pinned pnpm (from the repo root it fetches the latest one).
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      # ADR 0012: the lockfile is frozen and pnpm's own settings (release
+      # age, no dependency build scripts) apply.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build

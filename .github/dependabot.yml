@@ -1,0 +1,25 @@
+# Version updates for Go modules and GitHub Actions, monthly, two at a time,
+# for releases at least a week old. The console's npm packages are left
+# out: ADR 0012 records every one of them and how they're pinned, so their
+# updates go through that ADR. Turn on Dependabot *security* alerts in the
+# repository settings for all three.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(ci)"

@@ -1,0 +1,7 @@
+# Review is requested from these owners on every PR touching their paths.
+* @Yasindu007
+
+# The rules every change answers to.
+/docs/constitution.md @Yasindu007
+/docs/decisions/ @Yasindu007
+/core/ @Yasindu007

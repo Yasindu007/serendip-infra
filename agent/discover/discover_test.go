@@ -226,3 +226,12 @@ func TestParseDiskStats(t *testing.T) {
 		})
 	}
 }
+
+// A root filesystem not on a block device (a container's overlay, tmpfs)
+// has no /sys/block entry: the disk is unknown, not a failure.
+func TestDiscoverDisk_NoBlockDeviceIsUnknown(t *testing.T) {
+	size, kind, err := discoverDisk("serendip-test-no-such-device")
+	if err != nil || size != 0 || kind != "" {
+		t.Errorf("discoverDisk() = %d, %q, %v; want 0, \"\", nil", size, kind, err)
+	}
+}

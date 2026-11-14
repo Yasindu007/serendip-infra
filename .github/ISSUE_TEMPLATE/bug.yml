@@ -1,0 +1,71 @@
+name: Bug report
+description: Something doesn't work as documented.
+title: "bug: "
+type: Bug
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems go to a private advisory instead** (see SECURITY.md), not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      description: The smallest steps, request or command that shows it.
+      placeholder: |
+        1. serendipd started with ...
+        2. POST /v1/...
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - core (resource model, reconciliation, policy)
+        - api (HTTP API)
+        - agent (serendip-agent, node bootstrap)
+        - providers (OpenChoreo, OpenBao, ThunderID, kgateway, storage, packages)
+        - ui (console)
+        - cli / mcp
+        - bench / profiles
+        - docs
+        - not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Topology profile
+      options: [edge-1, small-3, standard-5, not sure]
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: "`serendipd --version`, or the commit you built."
+  - type: dropdown
+    id: severity
+    attributes:
+      label: How bad is it
+      options:
+        - "P0: data loss, security, or the platform is down"
+        - "P1: a feature is broken, no workaround"
+        - "P2: broken, but there's a workaround"
+        - "P3: minor or cosmetic"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and output
+      description: Remove tokens, passwords and keys first.
+      render: text

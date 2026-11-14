@@ -1,0 +1,15 @@
+# How GitHub groups a release's generated notes, by the PRs' labels.
+changelog:
+  exclude:
+    labels: [skip-changelog]
+  categories:
+    - title: Specs delivered
+      labels: [epic]
+    - title: Features
+      labels: [enhancement]
+    - title: Fixes
+      labels: [bug]
+    - title: Documentation
+      labels: [documentation]
+    - title: Other changes
+      labels: ["*"]

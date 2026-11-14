@@ -1,0 +1,32 @@
+name: Task (or sub-task)
+description: One T### from a spec's tasks.md, or a piece of one. Add it as a sub-issue of its epic (or of its task).
+title: "Spec NNN T###: "
+type: Task
+labels: [task]
+body:
+  - type: input
+    id: parent
+    attributes:
+      label: Epic or parent task
+      description: Then add this issue as a sub-issue there ("Add sub-issue" on the parent).
+      placeholder: "#123"
+    validations:
+      required: true
+  - type: textarea
+    id: do
+    attributes:
+      label: Do
+      description: From tasks.md.
+    validations:
+      required: true
+  - type: textarea
+    id: verify
+    attributes:
+      label: Verify
+      description: The task's Verify line. A task isn't done until it has run.
+    validations:
+      required: true
+  - type: input
+    id: files
+    attributes:
+      label: Files
