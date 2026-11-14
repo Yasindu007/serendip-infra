@@ -55,3 +55,23 @@ costs nothing.
   are found, not only in a spec's plan.md or a benchmark summary.
 - What Serendip builds itself, adopts, or considered and rejected goes in
   `docs/build-vs-adopt.md` whenever a spec makes such a choice.
+
+## GitHub tracking (board: Serendip-Infra project 2, "Serendip Infra Roadmap")
+
+GitHub flagged this account once for bulk API writes. Track everything,
+but with few, paced writes:
+
+- **One epic issue per spec** (label `epic`), opened when its spec is
+  approved, with the tasks as a checklist. No task-level issues. Update
+  the ticks at PROGRESS.md checkpoints, as one edit.
+- **One PR per spec** when it closes: branch `spec-NNN` on the Yasindu007
+  fork, opened by Yasindu007, merged by `serendipinfra` with a merge
+  commit, its body saying `Closes #<epic>` so the merge closes the epic.
+- **Bugs:** a `bug` issue only for what isn't fixed on the spot (upstream
+  defects, flaky tests, user reports).
+- **Roadmap:** planned specs are epics in the "v1 GA" milestone. The
+  board's own workflows add and move items, and its Insights chart is
+  the dashboard. Neither needs API calls.
+- **Pacing:** at most about one write a minute. Anything over ~10 writes
+  runs as a background script that stops at the first 403, 429 or
+  rate-limit answer. Never two such runs at once.
