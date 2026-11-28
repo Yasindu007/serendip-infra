@@ -53,6 +53,27 @@ RP-108, because the ADR cites them. contract-guardian: PASS.
   criterion 13 failure, each naming its field; `bash
   .claude/scripts/check-imports.sh`.
 
+**Done as** (2026-11-28): `core/resource/template.go`, with
+`TemplateSpec`, `TemplateVersionSpec` (parameters as raw JSON Schema,
+body Components as raw JSON until rendered), `TemplateOrigin`,
+`FieldErrors` (every problem, each naming its field, an
+`ErrValidation`), `TemplateParams`, `ParamPlaceholder`, `StringParams`,
+`ValidateTemplate` and `ValidateTemplateVersion`. The store's unique key
+sees only the spec, so a version's spec carries `template` and
+`version` (set by the server from the owner and the name, checked to
+agree), and `TemplateVersionKey` is `<template>/<label>`. Duplicate
+JSON keys are refused (`encoding/json` would keep the last silently),
+which is criterion 13's "duplicate parameter". A Secret-reference
+parameter has no default. `createdFrom` is on `ApplicationSpec` and
+`ComponentSpec`, and `unmapped_test.go` has its Component and
+Application rows. `go test ./core/... ./api/... ./providers/...` and
+`check-imports.sh` pass. contract-guardian: PASS. Its findings fixed
+here: a refused parameter or a duplicated Component name no longer
+causes knock-on errors, and the non-list `required` and non-object
+`properties` cases are tested. Number parameters also take `enum` (plan
+decision 2 updated). Refusing a client-set `createdFrom` is T006's, and
+rendering at publish is T003's.
+
 ## T003: Rendering and the built-ins (core) [P]
 
 - **Do:**

@@ -61,7 +61,7 @@ needed.
   is a parameter, and `required` lists the required ones.
 - **Types:**
   - `string` (with `pattern`, `minLength`, `maxLength`, `enum`);
-  - `integer` and `number` (`minimum`, `maximum`);
+  - `integer` and `number` (`minimum`, `maximum`, `enum`);
   - `boolean`.
 
   Nested objects and arrays are refused at publish (400), because the

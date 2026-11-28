@@ -7,10 +7,14 @@ const (
 	KindComponent   Kind = "Component"
 )
 
-// ApplicationSpec has no fields yet -- Application is the grouping a
-// developer thinks in terms of (resource-model.md); its Components (owned
-// via OwnerRefs) carry the actual deployable detail.
-type ApplicationSpec struct{}
+// ApplicationSpec is the grouping a developer thinks in terms of
+// (resource-model.md); its Components (owned via OwnerRefs) carry the
+// actual deployable detail.
+type ApplicationSpec struct {
+	// CreatedFrom is set by the server when the Application was made from
+	// a template (spec 027); clients can't set or change it.
+	CreatedFrom *TemplateOrigin `json:"createdFrom,omitempty"`
+}
 
 type ApplicationStatus struct {
 	Status
@@ -39,6 +43,10 @@ type ComponentSpec struct {
 	// Secret becomes a depends-on edge. Unlike Env, it isn't part of a
 	// release: every Deployment uses the current list.
 	SecretEnv []ComponentSecretEnv `json:"secretEnv,omitempty"`
+	// CreatedFrom is set by the server when the Component was made from a
+	// template (spec 027); clients can't set or change it. The provider
+	// doesn't map it, so it never changes a release.
+	CreatedFrom *TemplateOrigin `json:"createdFrom,omitempty"`
 }
 
 // ComponentDependency is one call to another Component's port: Env names
