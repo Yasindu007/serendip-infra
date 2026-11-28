@@ -12,7 +12,7 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-11-28 (the L480 node is up with the whole platform; steps 3–10 of the plan below next)
+Last updated: 2026-11-28 evening (L480: steps 9 and 10 done, benchmark run 1 done, run 2 running; spec 027 just started on branch `spec-027`)
 
 ## Current phase
 
@@ -36,7 +36,114 @@ with `gh auth switch -u Yasindu007` to open a PR, then switch back.
   2026-11-28 (checked in each issue's timeline). The milestone
   description says 024–036.
 
-**The plan agreed 2026-11-28 (in order):**
+**Resume here (after the `/clear` of 2026-11-28 evening):**
+1. **Benchmark run 2 is running on the L480**, detached (`setsid nohup`).
+   It started 12:39 node time on a fresh cluster.
+   - Check it with `ssh serendip@192.168.1.22 'pgrep -x bench-edge1;
+     tail -3 ~/bench/2026-11-28-l480/run2.console.log'`.
+   - When it has exited, copy `run2/{result.json,summary.md}` into
+     `profiles/edge-1/bench/results/2026-11-28-l480/run2/` (run1 is
+     already there, untracked), then run `bench-edge1 compare run1/result.json
+     run2/result.json`.
+2. **Optional package run** (observability and tracing) with `bench-edge1
+   --package …`. Each run needs a fresh cluster first: the user runs
+   `sudo /usr/local/bin/k3s-uninstall.sh && sudo rm -f
+   /etc/cni/net.d/05-cilium.conflist /opt/cni/bin/cilium-cni
+   /opt/cni/bin/loopback && sudo reboot`, then `sudo ./serendip-agent
+   bootstrap --cni cilium --confirm`, then copies the kubeconfig to
+   `~/.kube/config`.
+3. **Step 6, record everything** on branch `spec-027` or a small branch:
+   - the L480 results;
+   - RP-089 (Cilium's cost is measured now);
+   - RP-083, closed with its clean-up;
+   - RP-096, its bug below;
+   - the harness disk bug;
+   - `operations.md`'s encryption steps, corrected;
+   - `002-edge1-footprint.md`.
+4. **Step 7, `bug` issues:**
+   - the console can't create Projects or Environments;
+   - RP-095 (a Component delete leaves an orphaned Deployment) was hit
+     on real hardware;
+   - Serendip reports encryption `on` while K3s has it disabled
+     (below);
+   - the harness's disk probe measures the whole filesystem on K3s.
+5. **Reinstall for daily use:** a fresh cluster, `sudo systemctl enable
+   --now serendipd` (move the old `~/.serendip/serendipd.db` and
+   `openbao-init.json` aside first, because they belong to a cluster
+   that's gone), then recreate Project `demo`, Environment `development`,
+   Application `web` and nginx with the CLI.
+   - The JSON files are in `~/.serendip-l480/` on the desktop. The IDs in
+     them are stale, so refill them.
+   - The new `admin` password is in the Secret
+     `serendip-identity/serendip-identity-admin`.
+6. **Spec 027 (Templates and a scaffolder, #68):** `/new-spec` was
+   started. Read the constitution and docs, research OpenChoreo 1.3.1's
+   portal templates and Azure's equivalents (the `oss-researcher`, redo
+   it), write `specs/027-templates-and-scaffolder/spec.md`, then **stop for
+   the user's review** before `plan.md`. Spec 020 put the scaffolder out
+   of scope (`specs/020-openchoreo-console-features/spec.md:185`).
+
+**Results on the L480 today (evidence in `~/.serendip-l480/rp096/` and
+`rp083-after-uninstall.txt` on the desktop):**
+- **Step 9, the encryption off/on check (RP-096): a real bug.**
+  - The node annotation `k3s.io/encryption-config-hash` (`start-<hash>`)
+    is set once and **never changes**: not on `secrets-encrypt disable`,
+    not on a reencrypt, and not even its hash.
+  - So `/v1/secrets/status` said `on` while K3s reported `Encryption
+    Status: Disabled`.
+  - **A fix signal that works read-only:** the API server's `/metrics`
+    `apiserver_storage_transformation_operations_total{resource="secrets",
+    transformation_type="to_storage", transformer_prefix=…}`.
+    `k8s:enc:aescbc:v1:` means encrypted writes and `identity` means
+    plain. There is also
+    `apiserver_encryption_config_controller_last_config_info{hash}`.
+    Decide what to report when there have been no writes since a restart.
+  - **The K3s procedure that worked:** `disable` or `enable`, restart, wait
+    for `/readyz`, then `reencrypt --force --skip` (37 Secrets each time).
+    `status` fails with "runtime core not ready" right after a restart.
+    The stage stayed `start`, never `reencrypt_finished`.
+  - A backup of the datastore and key before the check is in
+    `~/k3s-backup-before-rp096.tgz` on the node (0600).
+- **Step 10, what `k3s-uninstall.sh` leaves of Cilium (RP-083):**
+  - the links `cilium_host`, `cilium_net` and `cilium_vxlan`;
+  - the route `10.42.0.0/24 via cilium_host`;
+  - `/run/cilium` with its cgroup2 mount;
+  - BPF maps pinned in `/sys/fs/bpf`;
+  - 44 iptables rules (no ip6tables rules);
+  - `/etc/cni/net.d/05-cilium.conflist`, `/opt/cni/bin/{cilium-cni,loopback}`.
+  - **The clean-up that worked:** delete those three files, then reboot.
+    The host was then clean. The uninstall's closing "Failed to reset
+    failed state of unit k3s.service" is harmless.
+- **Benchmark run 1** (fresh cluster, `bench-edge1` with no `--sim-*` flags):
+
+  | Measure | Result |
+  |---|---|
+  | Cold start | **148 s** |
+  | Warm restart | 36 s |
+  | Node at idle | **1965 MiB**, 527 mcores |
+  | With 3 Components | 2045 MiB |
+  | Component to serving | 52, 34, 34 s |
+  | `serendipd` | **28.2 MiB**, 0.01% CPU |
+  | Rule 4 | PASS (and with 3 console tabs) |
+  | 16 GB verdict | fits comfortably, 15% |
+
+  - Cilium is 252 MiB, inside the simulated 236–302. Node overhead
+    outside the pods is 1427 MiB: K3s's server process, containerd and
+    cache.
+  - **The harness disk bug:** on K3s, local-path volumes are on `/`, and
+    the du probe reported the whole filesystem (about 11.9 GB) as each
+    volume's use. That gave "5 GB a day" of growth. Memory and CPU are
+    unaffected.
+- **Node notes:**
+  - The link is now **1000 Mb/s**, after a reboot.
+  - The battery threshold files read inconsistently: 75/75 and 80/75 after
+    the last writes, and they swapped after a reboot. Judge by behaviour
+    (whether it charges below ~75%); it isn't charging at 91%.
+  - The `serendipd` service is **disabled** during the benchmarks.
+  - The desktop tunnel `ssh.exe` may still hold 8088 and 30080, but
+    nothing answers on the node's 8088 until the service is back.
+
+**The plan agreed 2026-11-28 (in order; steps 1–4, 9 and 10 are done; the user reordered so the benchmark runs on fresh clusters after step 10):**
 1. ~~Save the state here~~ (this update).
 2. `/clear`.
 3. The user deletes the old project-less `nginx` Application in the
