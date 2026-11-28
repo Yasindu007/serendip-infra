@@ -12,7 +12,7 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-11-28 (spec 026 merged; spec 027 next; the L480 node being set up)
+Last updated: 2026-11-28 (the L480 node is up with the whole platform; steps 3–10 of the plan below next)
 
 ## Current phase
 
@@ -36,30 +36,86 @@ with `gh auth switch -u Yasindu007` to open a PR, then switch back.
   2026-11-28 (checked in each issue's timeline). The milestone
   description says 024–036.
 
-**Next: spec 027, Templates and a scaffolder (#68).** Start it with
-spec → plan → tasks on a `spec-027` branch, the plan approved before code.
-The order after it: 028 Incidents, 029 AI diagnosis, 030 Cost and
-delivery insights, 031 small-3, 036 Workload identity, 032 Longhorn, 033
-Setup wizard, 034 HTTPS, 035 Hardening and console gaps.
+**The plan agreed 2026-11-28 (in order):**
+1. ~~Save the state here~~ (this update).
+2. `/clear`.
+3. The user deletes the old project-less `nginx` Application in the
+   console (it needs an Approval).
+4. The user installs the tracing package; I measure.
+5. `bench-edge1` twice on the L480 (labelled L480).
+6. Record the numbers (RP-089, the packages' measured costs) and decide
+   whether 8 GB is enough.
+7. A `bug` issue for the console gap: **no screen creates a Project or an
+   Environment**, so the first Application was made outside any Project
+   and couldn't deploy. The CLI does it. Fix it in spec 035, or sooner if
+   the user asks.
+8. **Spec 027, Templates and a scaffolder (#68),** on the desktop: spec →
+   plan → tasks on a `spec-027` branch, with the plan approved before code.
+   After it: 028, 029, 030, 031, 036 Workload identity, 032, 033, 034,
+   035.
+9. With the user's OK: the secrets-encryption off/on check (RP-096; it
+   restarts K3s).
+10. With the user's OK, last: `k3s-uninstall.sh` and what Cilium leaves
+    (RP-083; it wipes the cluster), then reinstall.
 
-**The first real node: a ThinkPad L480** (arrived 2026-11-28, not the
-planned L470).
-- i5 8th gen (i5-8250U or 8350U, 4c/8t, so more CPU than a T470's 2c/4t),
-  8 GB DDR4 (two SO-DIMM slots, so 16 GB is one stick away), 128 GB disk,
-  and Ethernet.
-- Windows is being replaced by **Ubuntu Server 24.04.5 LTS**
-  (`ubuntu-24.04.5-live-server-amd64.iso`): the whole disk, OpenSSH on,
-  no snaps. 24.04 was chosen over 26.04 for maturity; upgrade in place
-  later. The user was writing the USB stick with Rufus on 2026-11-28.
-- **When the user sends its IP and `ssh` works:** run `serendip-agent
-  bootstrap --cni cilium`, then `bench-edge1` twice without `--sim-*`,
-  then the checks waiting for real hardware:
-  - Cilium's cost (RP-089) and the tracing package's requirements;
-  - what `k3s-uninstall.sh` leaves of Cilium (RP-083);
-  - the K3s secrets-encryption enable steps, and the annotation after a
-    disable (RP-096).
-- Label results **L480**, never T470. Counting it for the reference
-  gate needs the user's call (an ADR).
+Any time: a better Ethernet cable (the link is 100 Mb/s), optionally a
+second 8 GB stick, and a check that the battery limit survives a reboot.
+
+**The first real node: a ThinkPad L480, set up 2026-11-28.**
+- **Hardware:**
+  - CPU: i5-8250U, 4c/8t, more than a T470's 2c/4t.
+  - Memory: 7.5 GiB usable, with two SO-DIMM slots, so 16 GB is one
+    stick away.
+  - Disk: Samsung PM971 128 GB NVMe.
+  - Battery: 1005 cycles, 79% health. Its charge limit is 75–80%; the
+    `charge_control_*` files read swapped, while
+    `charge_start/stop_threshold` read 75/80.
+  - Ethernet: Intel I219-V, at only 100 Mb/s (the cable or the port).
+- **OS:** Ubuntu Server 24.04.5 at **192.168.1.22**, reserved for it on the
+  home router (DHCP binding by its Ethernet MAC).
+  - User `serendip`. Key login works from the desktop's
+    `~/.ssh/id_ed25519`; password login over SSH is still allowed.
+  - Lid and sleep are disabled; there's a 4 GB swap file.
+  - `sudo` needs the user's password, so the user runs every root step.
+- **K3s:** `serendip-agent bootstrap --cni cilium --confirm` installed
+  K3s v1.36.4+k3s1 with Cilium 1.20.5.
+  - Secrets encryption is on: the node carries
+    `k3s.io/encryption-config-hash`.
+  - The swap file didn't stop K3s.
+  - The user's kubeconfig is `~/.kube/config` (`KUBECONFIG` is set in
+    `~/.bashrc`).
+- **`serendipd`:** a systemd service, `/etc/systemd/system/serendipd.service`,
+  running as `serendip`.
+  - Its state is in `~/.serendip/` (the store and `openbao-init.json`,
+    both 0600). The binary is `~/.serendip/bin/serendipd`, built from
+    `main` `ae70292`, and `helm` v3.16.4 is in `~/bin`.
+  - It listens on 127.0.0.1:8088 only. Logs: `journalctl -u serendipd`.
+  - Every capability was ready **3 min 12 s** after the start. The
+    observability package installed in ~3.5 min; its logs adapter
+    restarted 3 times while OpenObserve started.
+- **Reaching it from the desktop:** `ssh -N -L 8088:localhost:8088 -L
+  30080:localhost:30080 serendip@192.168.1.22`, then
+  http://localhost:8088.
+  - The desktop's kind `serendip-t018` must be stopped, because it holds
+    30080. It was stopped 2026-11-28; `docker start
+    serendip-t018-control-plane` brings it back.
+  - Sign in as `admin`. The password is in the Secret
+    `serendip-identity/serendip-identity-admin`, read on the node.
+  - The CLI is `~/.serendip-l480/serendip.exe --server
+    http://localhost:8088` on the desktop, signed in as `admin`.
+- **What's on it:**
+  - the observability package;
+  - Project `demo` with Environment `development`, Application `web`,
+    and Component and Deployment `nginx` (`nginx:1.27`). nginx answered
+    200 through its endpoint;
+  - the first, project-less Application `nginx` (to delete, step 3).
+- **Spot readings, not settled numbers:**
+
+  | Phase | Node working set | Host used (`free`) | Notes |
+  |---|---|---|---|
+  | Bare K3s and Cilium | 1096 MiB | — | Cilium's pods 233 MiB (the simulation said 236–302) |
+  | The whole platform | 1783–1801 MiB | 2313 MiB | `serendipd` ~16 MiB |
+  | Plus observability and nginx | 3121 MiB | 2744 MiB | Observability's pods 264 MiB (the simulation said ~275). The working set includes cache from new images; `free` shows +431 MiB |
 
 **Spec 026, for reference** (tasks.md's "Done as" entries have the
 detail):
@@ -105,11 +161,12 @@ detail):
   - Decision 12 was confirmed: on the upgrade, Deployments following the
     latest release rolled once, and a pinned one didn't.
 
-**State left after spec 026 (2026-11-28):**
-- No `serendipd` is running. The T009 test one (`~/.serendip-t018/t026/`,
-  `t026.db`) and a stale T010 log watcher were stopped on 2026-11-24.
-  The user's dev one (`dev-up.ps1`, `t023.db`) is stopped too. Start it
-  with `.\scripts\dev-up.ps1 -Restart`.
+**State left (2026-11-28):**
+- **On the desktop, no `serendipd` runs.** The user's dev one
+  (`dev-up.ps1`, `t023.db`) is stopped. Start it with
+  `.\scripts\dev-up.ps1 -Restart`, after `docker start
+  serendip-t018-control-plane`; that clashes with the L480 tunnel's port
+  30080. The kind clusters `t025` and `serendip-t025` were still running.
 - In the t026 store, `verifier` has Secrets Officer at Project
   `t014-builds`.
 - Five ReleaseBindings from older test stores (`t020-web`, `t020-api`,
@@ -179,8 +236,8 @@ detail):
 
 ### Test beds
 
-- **`serendip-t018`** (kindnet) is up, with no `serendipd` on it (see
-  "State left after spec 026" above).
+- **`serendip-t018`** (kindnet) is **stopped** (since 2026-11-28, for
+  the L480 tunnel's port 30080), with no `serendipd` on it.
   - The kubectl default context is `kind-serendip-t018`. The repo's
     kube-context guard reads the default context, so mutations need it.
   - CPU requests were at 96% before T009 undeployed the five older
