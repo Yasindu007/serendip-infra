@@ -12,7 +12,7 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-11-28 (spec 027 T001 and T002 done; T003 next)
+Last updated: 2026-11-28 (spec 027 T001 to T003 done; T004 next)
 
 ## Current phase
 
@@ -85,16 +85,21 @@ with `gh auth switch -u Yasindu007` to open a PR, then switch back.
    - **T002 done** (`46dad0d`): `core/resource/template.go` (the kinds,
      `TemplateOrigin`, `FieldErrors`, `ValidateTemplateVersion`), and
      `createdFrom` on Applications and Components.
-   - **Next: T003** (`core/template`: `Render`, publish-time rendering,
-     the three built-ins). Then T004 (the store's multi-kind
-     transaction).
-   - **Task issues #385 to #398** are opened by a paced background
-     script (`open027.py` in the session scratchpad, state in
-     `open027-state.json` beside it; resumable, so rerun it if it
-     stopped). After it finishes: add the `## Tasks` checklist to epic
-     #68 (rewrite its body in epic #1's layout, "Status: IN PROGRESS"),
-     and close #385 and #386 by hand (their commits say `Closes`, but
-     that acts only at the merge).
+   - **T003 done** (`747a430`): `core/template` (`Render`,
+     `ValidatePublish`, the three built-ins with fixed IDs
+     `0190d1c0-0027-…`). Parameters may give `examples` (the publish
+     stand-in; plan decision 3 updated). The reconciler's port checks are
+     now `resource.ValidateComponentPorts`, beside a new
+     `ValidateComponentImage` (RP-109: the API checks it at write from
+     T005/T006).
+   - **Next: T004** (the store's multi-kind transaction, `Atomically`
+     and `CreateIn`, plus the 20-Component benchmark for RP-108).
+   - **GitHub:** task issues #385 to #398 are all open and linked under
+     #68. Epic #68's body is in epic #1's layout with the `## Tasks`
+     checklist (T001–T003 ticked), and #385–#387 are closed, by a paced
+     script (`gh027.sh`, log `gh027.log` in this session's scratchpad).
+     If its log doesn't end in `DONE`, check each issue before
+     re-running it.
 
 **Results on the L480 today (evidence in `~/.serendip-l480/rp096/` and
 `rp083-after-uninstall.txt` on the desktop):**
