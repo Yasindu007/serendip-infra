@@ -12,7 +12,7 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-11-28 evening (L480: steps 9 and 10 done, benchmark run 1 done, run 2 running; spec 027 just started on branch `spec-027`)
+Last updated: 2026-11-28 (spec 027 T001 and T002 done; T003 next)
 
 ## Current phase
 
@@ -37,14 +37,15 @@ with `gh auth switch -u Yasindu007` to open a PR, then switch back.
   description says 024–036.
 
 **Resume here (after the `/clear` of 2026-11-28 evening):**
-1. **Benchmark run 2 is running on the L480**, detached (`setsid nohup`).
-   It started 12:39 node time on a fresh cluster.
-   - Check it with `ssh serendip@192.168.1.22 'pgrep -x bench-edge1;
-     tail -3 ~/bench/2026-11-28-l480/run2.console.log'`.
-   - When it has exited, copy `run2/{result.json,summary.md}` into
-     `profiles/edge-1/bench/results/2026-11-28-l480/run2/` (run1 is
-     already there, untracked), then run `bench-edge1 compare run1/result.json
-     run2/result.json`.
+1. ~~Benchmark run 2~~: **done 12:55, compare PASS against run 1.**
+   `run2/{result.json,summary.md}` are copied into
+   `profiles/edge-1/bench/results/2026-11-28-l480/run2/` (run1 and run2
+   still untracked).
+   - Cold start 158 s, warm restart 37 s, node at idle 1972 MiB / 524
+     mcores, Cilium 246 MiB, `serendipd` 27.8 MiB, Components to
+     serving 34, 34, 40 s, 16 GB verdict 15%.
+   - The volume table shows the harness disk bug again (every volume
+     "12 GB", "+469 MiB a day").
 2. **Optional package run** (observability and tracing) with `bench-edge1
    --package …`. Each run needs a fresh cluster first: the user runs
    `sudo /usr/local/bin/k3s-uninstall.sh && sudo rm -f
@@ -76,16 +77,24 @@ with `gh auth switch -u Yasindu007` to open a PR, then switch back.
      them are stale, so refill them.
    - The new `admin` password is in the Secret
      `serendip-identity/serendip-identity-admin`.
-6. **Spec 027 (Templates and a scaffolder, #68):** `/new-spec` was
-   started. The research is done: see
-   `specs/027-templates-and-scaffolder/research.md`. Its main point is
-   that OpenChoreo's portal has **no application scaffolder**: its
-   scaffolder templates are admin tools, and Components come from a
-   wizard driven by ComponentType schemas. Azure's models are Template
-   Specs and Deployment Environments. Next, write `spec.md` in that
-   folder (constitution and docs read; spec 020 put the scaffolder out of
-   scope at `specs/020-openchoreo-console-features/spec.md:185`), then
-   **stop for the user's review** before `plan.md`.
+6. **Spec 027 (Templates and a scaffolder, #68): IN PROGRESS on
+   `spec-027` (pushed).** Spec, plan and tasks approved 2026-11-28 and
+   committed (`3575691`).
+   - **T001 done** (`1a5b569`): spec rewording, ADR 0025, the
+     provider's unmapped-field test, RP-104 to RP-108.
+   - **T002 done** (`46dad0d`): `core/resource/template.go` (the kinds,
+     `TemplateOrigin`, `FieldErrors`, `ValidateTemplateVersion`), and
+     `createdFrom` on Applications and Components.
+   - **Next: T003** (`core/template`: `Render`, publish-time rendering,
+     the three built-ins). Then T004 (the store's multi-kind
+     transaction).
+   - **Task issues #385 to #398** are opened by a paced background
+     script (`open027.py` in the session scratchpad, state in
+     `open027-state.json` beside it; resumable, so rerun it if it
+     stopped). After it finishes: add the `## Tasks` checklist to epic
+     #68 (rewrite its body in epic #1's layout, "Status: IN PROGRESS"),
+     and close #385 and #386 by hand (their commits say `Closes`, but
+     that acts only at the merge).
 
 **Results on the L480 today (evidence in `~/.serendip-l480/rp096/` and
 `rp083-after-uninstall.txt` on the desktop):**
