@@ -1,6 +1,9 @@
 package resource
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+)
 
 const (
 	KindApplication Kind = "Application"
@@ -145,3 +148,41 @@ type ComponentEndpointStatus struct {
 }
 
 type Component = Resource[ComponentSpec, ComponentStatus]
+
+// imageRE is an image reference's character set (registry, with a
+// bracketed IPv6 host, path, tag and digest, whose algorithm may use
+// '+'): no spaces, quotes or control characters.
+var imageRE = regexp.MustCompile(`^[A-Za-z0-9\[][A-Za-z0-9._/:@+\[\]-]*$`)
+
+const maxImageLen = 512
+
+// ValidateComponentImage checks an image reference's form; whether it
+// can be pulled is the platform's to find out. An empty image is
+// ValidateComponentSource's concern.
+func ValidateComponentImage(s ComponentSpec) error {
+	if s.Image == "" {
+		return nil
+	}
+	if len(s.Image) > maxImageLen || !imageRE.MatchString(s.Image) {
+		return fmt.Errorf("%w: image: %q isn't an image reference (letters, digits and . _ / : @ + - [ ], at most %d)", ErrValidation, s.Image, maxImageLen)
+	}
+	return nil
+}
+
+// ValidateComponentPorts checks a Component's ports on their own: each
+// name a DNS label used once, each number 1 to 65535.
+func ValidateComponentPorts(s ComponentSpec) error {
+	seen := make(map[string]bool, len(s.Ports))
+	for i, p := range s.Ports {
+		switch {
+		case len(p.Name) > 63 || !dnsLabelRE.MatchString(p.Name):
+			return fmt.Errorf("%w: ports[%d].name %q must be a DNS label (lower-case letters, digits and '-', at most 63)", ErrValidation, i, p.Name)
+		case p.Port < 1 || p.Port > 65535:
+			return fmt.Errorf("%w: ports[%d].port %d must be between 1 and 65535", ErrValidation, i, p.Port)
+		case seen[p.Name]:
+			return fmt.Errorf("%w: ports[%d].name %q is used twice", ErrValidation, i, p.Name)
+		}
+		seen[p.Name] = true
+	}
+	return nil
+}

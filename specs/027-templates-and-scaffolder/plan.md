@@ -116,11 +116,20 @@ plus a template-local `name`:
   the Components' resource names, prefixed with
   `prefix` when the request gives one (decision 4).
 - **At publish, the body is rendered with every default** (and a
-  placeholder value for required parameters without one: the
-  property's first `enum` value, or a type-appropriate dummy). Every
-  rendered Component must pass the same pure validators as a hand-made
-  one. A template that couldn't ever be valid is refused when it's
-  published, not when it's first used.
+  stand-in for required parameters without one: the property's first
+  `examples` value, else its first `enum` value, else a
+  type-appropriate dummy). It's rendered twice: once with the other
+  optional parameters left out, and once with them filled by stand-ins
+  too, so the fields they fill are checked. Every rendered Component
+  must pass the same pure validators as a hand-made one (source,
+  image, ports, dependencies, secret variables), and each dependency
+  must name a port of its target. A template that couldn't ever be
+  valid is refused when it's published, not when it's first used.
+  (T003: `examples`, a JSON Schema annotation, was added for this, so
+  `service-from-source`'s `repository` can be checked with a real URL.)
+- **A string using `${name}` whose parameter has no value** is left out
+  like a whole-value placeholder, rather than filled with "". Object
+  keys are always literal.
 - **Limits:** at most 20 Components per template.
 
 ### 4. Using a template: preview and create (spec scope items 6 and 7)

@@ -165,6 +165,12 @@ type TemplateParam struct {
 	Default any
 	// Ref is ParamRefKey's value ("Secret"), or "".
 	Ref string
+	// Examples are the schema's examples; the first stands in for a
+	// required parameter without a default when a version is checked at
+	// publish (core/template).
+	Examples []any
+	// Schema is the parameter's own JSON Schema property.
+	Schema map[string]any
 }
 
 // TemplateParams reads a version's parameters schema in name order,
@@ -238,13 +244,13 @@ func TemplateParams(raw json.RawMessage) ([]TemplateParam, FieldErrors) {
 		}
 		for k := range prop {
 			switch {
-			case k == "type", k == "default", k == "title", k == "description":
+			case k == "type", k == "default", k == "title", k == "description", k == "examples":
 			case slices.Contains(allowed, k):
 			default:
 				add(field+"."+k, "not allowed for a %s parameter", typ)
 			}
 		}
-		p := TemplateParam{Name: name, Type: typ, Required: required[name], Default: prop["default"]}
+		p := TemplateParam{Name: name, Type: typ, Required: required[name], Default: prop["default"], Schema: prop}
 		if ref, has := prop[ParamRefKey]; has {
 			if ref != "Secret" {
 				add(field+"."+ParamRefKey, `only "Secret" is allowed`)
@@ -257,6 +263,22 @@ func TemplateParams(raw json.RawMessage) ([]TemplateParam, FieldErrors) {
 			}
 			if p.Ref != "" {
 				add(field+".default", "a reference parameter has no default")
+			}
+		}
+		if ex, has := prop["examples"]; has {
+			list, isList := ex.([]any)
+			switch {
+			case !isList || len(list) == 0:
+				add(field+".examples", "a non-empty list")
+			case p.Ref != "":
+				add(field+".examples", "a reference parameter has no examples")
+			default:
+				for i, e := range list {
+					if problems := validateAgainst(prop, e); len(problems) > 0 {
+						add(fmt.Sprintf("%s.examples[%d]", field, i), "doesn't fit its own schema: %s", problems[0].String())
+					}
+				}
+				p.Examples = list
 			}
 		}
 		out = append(out, p)

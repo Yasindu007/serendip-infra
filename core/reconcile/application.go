@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/serendip-infra/serendip-infra/core/graph"
@@ -412,28 +411,17 @@ func exposesAny(spec resource.ComponentSpec) bool {
 	return false
 }
 
-var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
-
 // validateComponentSpec rejects specs no provider could run, so they
-// surface as InvalidSpec rather than as a provider-side failure.
+// surface as InvalidSpec rather than as a provider-side failure. The
+// checks are core/resource's, shared with templates (spec 027).
 func validateComponentSpec(spec resource.ComponentSpec) error {
 	if err := resource.ValidateComponentSource(spec); err != nil {
 		return err
 	}
-	seen := make(map[string]bool, len(spec.Ports))
-	for i, p := range spec.Ports {
-		if !dnsLabel.MatchString(p.Name) {
-			return fmt.Errorf("spec.ports[%d].name %q must be a DNS label (lowercase alphanumerics and '-', at most 63 chars)", i, p.Name)
-		}
-		if p.Port < 1 || p.Port > 65535 {
-			return fmt.Errorf("spec.ports[%d].port %d must be between 1 and 65535", i, p.Port)
-		}
-		if seen[p.Name] {
-			return fmt.Errorf("spec.ports[%d].name %q is duplicated", i, p.Name)
-		}
-		seen[p.Name] = true
+	if err := resource.ValidateComponentImage(spec); err != nil {
+		return err
 	}
-	return nil
+	return resource.ValidateComponentPorts(spec)
 }
 
 // owningApplicationID returns the ID of comp's single Application owner.

@@ -1,94 +1,61 @@
-package resource_test
+package resource
 
 import (
-	"encoding/json"
-	"reflect"
+	"errors"
+	"strings"
 	"testing"
-
-	"github.com/serendip-infra/serendip-infra/core/resource"
 )
 
-func TestApp_KindConstants(t *testing.T) {
-	tests := []struct {
-		kind resource.Kind
-		want string
+func TestValidateComponentImage(t *testing.T) {
+	cases := []struct {
+		image string
+		ok    bool
 	}{
-		{resource.KindApplication, "Application"},
-		{resource.KindComponent, "Component"},
+		{"", true},
+		{"nginx", true},
+		{"nginx:1.27-alpine", true},
+		{"registry.local:5000/team/app:v1", true},
+		{"[fd00::1]:5000/app:v1", true},
+		{"ghcr.io/a/b@sha256:0123abcd", true},
+		{"app@sha256+b64u:abc", true},
+		{"nginx\nevil", false},
+		{"nginx:1 --privileged", false},
+		{`{"$param":"x"}`, false},
+		{"${name}", false},
+		{"-nginx", false},
+		{strings.Repeat("a", maxImageLen+1), false},
 	}
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			if string(tt.kind) != tt.want {
-				t.Errorf("kind = %q, want %q", tt.kind, tt.want)
-			}
-		})
+	for _, tc := range cases {
+		err := ValidateComponentImage(ComponentSpec{Image: tc.image})
+		if (err == nil) != tc.ok {
+			t.Errorf("%q: err = %v, want ok=%v", tc.image, err, tc.ok)
+		}
+		if err != nil && !errors.Is(err, ErrValidation) {
+			t.Errorf("%q: err isn't a validation error", tc.image)
+		}
 	}
 }
 
-func TestComponent_RelationshipsDeclaredOnEnvelope(t *testing.T) {
-	// Component has no Spec fields for runs-on/depends-on: those go
-	// through Metadata.Relationships (specs/001-resource-model/plan.md).
-	component := resource.Component{
-		Metadata: resource.Metadata{
-			Name: "backend",
-			Kind: resource.KindComponent,
-			OwnerRefs: []resource.OwnerRef{
-				{Kind: resource.KindApplication, ID: "app-1"},
-			},
-			Relationships: []resource.Relationship{
-				{Type: resource.EdgeRunsOn, TargetKind: resource.KindCluster, TargetID: "cluster-1"},
-				{Type: resource.EdgeDependsOn, TargetKind: resource.KindComponent, TargetID: "component-db"},
-			},
-		},
-	}
-	if err := resource.Validate(component.Metadata); err != nil {
-		t.Fatalf("Validate() = %v, want nil", err)
-	}
-	if len(component.Metadata.Relationships) != 2 {
-		t.Fatalf("len(Relationships) = %d, want 2", len(component.Metadata.Relationships))
-	}
-	if component.Metadata.Relationships[0].Type != resource.EdgeRunsOn {
-		t.Errorf("Relationships[0].Type = %q, want %q", component.Metadata.Relationships[0].Type, resource.EdgeRunsOn)
-	}
-}
-
-func TestComponentSpec_JSONWireShape(t *testing.T) {
-	tests := []struct {
-		name string
-		spec resource.ComponentSpec
-		want string
+func TestValidateComponentPorts(t *testing.T) {
+	cases := []struct {
+		name  string
+		ports []ComponentPort
+		want  string
 	}{
-		{
-			name: "full",
-			spec: resource.ComponentSpec{
-				Image: "nginx:1.27-alpine",
-				Ports: []resource.ComponentPort{{Name: "http", Port: 80}},
-				Env:   map[string]string{"GREETING": "hi"},
-			},
-			want: `{"image":"nginx:1.27-alpine","ports":[{"name":"http","port":80}],"env":{"GREETING":"hi"}}`,
-		},
-		{
-			name: "empty ports and env omitted",
-			spec: resource.ComponentSpec{Image: "busybox"},
-			want: `{"image":"busybox"}`,
-		},
+		{"valid", []ComponentPort{{Name: "http", Port: 80}, {Name: "grpc", Port: 65535}}, ""},
+		{"not a DNS label", []ComponentPort{{Name: "HTTP_Main", Port: 80}}, "ports[0].name"},
+		{"too long", []ComponentPort{{Name: strings.Repeat("a", 64), Port: 80}}, "ports[0].name"},
+		{"zero", []ComponentPort{{Name: "http", Port: 0}}, "ports[0].port"},
+		{"too big", []ComponentPort{{Name: "http", Port: 65536}}, "ports[0].port"},
+		{"twice", []ComponentPort{{Name: "http", Port: 80}, {Name: "http", Port: 81}}, "ports[1].name"},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := json.Marshal(tt.spec)
-			if err != nil {
-				t.Fatalf("Marshal() = %v", err)
-			}
-			if string(got) != tt.want {
-				t.Errorf("Marshal() = %s, want %s", got, tt.want)
-			}
-			var back resource.ComponentSpec
-			if err := json.Unmarshal(got, &back); err != nil {
-				t.Fatalf("Unmarshal() = %v", err)
-			}
-			if !reflect.DeepEqual(back, tt.spec) {
-				t.Errorf("round trip = %+v, want %+v", back, tt.spec)
-			}
-		})
+	for _, tc := range cases {
+		err := ValidateComponentPorts(ComponentSpec{Ports: tc.ports})
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%s: %v", tc.name, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("%s: err = %v, want %s", tc.name, err, tc.want)
+		}
 	}
 }

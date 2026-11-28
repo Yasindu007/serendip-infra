@@ -91,6 +91,42 @@ rendering at publish is T003's.
   a string, and a newline in an image. Each built-in renders and passes
   `ValidateTemplateVersion`.
 
+**Done as** (2026-11-28): `core/template`. `Render` round-trips the
+parameters through JSON, applies the defaults, checks them against the
+version's schema (every problem, as `parameters.<name>`), substitutes on
+the decoded tree (whole-value and `${}`; the template's own text is the
+only text scanned, so a value is copied and never read again), decodes
+each Component with unknown fields refused (a `createdFrom` in a body is
+refused by name), runs the pure validators, and checks that each
+dependency names a port of its target. Components come back in
+dependency order with their local names, plus the parameters used.
+`ValidatePublish` runs `ValidateTemplateVersion`, then renders twice
+(optional parameters left out, then filled with stand-ins); a refusal
+names the parameters that were stood in for. Parameters may give
+`examples` (the first is the stand-in; each must fit its schema), so
+plan decision 3 is updated. The port checks moved from
+`core/reconcile` to `resource.ValidateComponentPorts`, and a new
+`resource.ValidateComponentImage` (letters, digits and `._/:@-`, at most
+512, later with `+[]`) refuses a newline or a space in an image. The reconciler uses both,
+so a hand-made Component with such an image is now `InvalidSpec` rather
+than a platform failure. The API applying them on create is T005/T006.
+The built-ins (`web-server`, `service-from-source`, `web-and-api`, each
+version `1.0`) have fixed IDs `0190d1c0-0027-7000-8000-0000000000NN`
+(templates 01 to 03, versions 101 to 103), and `BuiltIns` returns fresh
+copies. Each passes `ValidatePublish` and renders with only its required
+parameters. The hostile-value tests cover `${x}`, `$${`, a `$param`
+object as text, YAML, JSON objects as strings, a quote breakout and
+newlines: all land literally in the field they fill, and as an image
+they're refused naming `components[web]`. contract-guardian: PASS. Its
+findings fixed here: the image set also takes `+` and a bracketed IPv6
+registry host (`resource/app_test.go`); a required parameter whose
+stand-in breaks its own schema (say `maxLength: 3`, no example) is
+refused at publish asking for `examples`; and a placeholder error stops
+that Component's other checks, so one mistake gives one error. By
+design: the ports' `InvalidSpec` message now has the same
+`resource: validation failed:` prefix as the source errors. The API not
+yet checking images at write is RP-109 (T005/T006).
+
 ## T004: One transaction across kinds (store)
 
 - **Do:**

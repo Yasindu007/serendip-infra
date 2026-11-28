@@ -2693,3 +2693,18 @@ The text below is the T013 record.
   batch.
 - **Revisit:** if T004's benchmark is over 50 ms on the L480, lower the
   20-Component limit.
+
+## RP-109 — An image's form is checked by the reconciler, not yet at write
+
+- **Kind:** risk. **Status:** Open, 2026-11-28. **Found:** spec 027 T003
+  (contract-guardian).
+- **What:** `resource.ValidateComponentImage` (letters, digits and
+  `._/:@+-[]`, at most 512) runs in the Component reconciler and in
+  template rendering, but the API's Component create and update don't
+  call it yet. A hand-made Component with a malformed image is accepted
+  and then shows `InvalidSpec`. A stored Component whose image is outside
+  that set (none expected: it covers the OCI reference grammar's
+  characters) turns `InvalidSpec` on its next reconcile instead of
+  failing on the platform.
+- **Revisit:** spec 027 T005/T006, which reuse the pure validators at
+  write; close this then.
