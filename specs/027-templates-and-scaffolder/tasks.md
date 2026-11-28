@@ -208,6 +208,35 @@ unchanged.
   - a version can't be changed, and a newer one is "latest";
   - deleting a Template cascades with one Approval.
 
+**Done as** (2026-11-28): `api/template_handler.go`. Templates use the
+generic handler (server status, `Ready=True` on write, a built-in's ID
+refused, a client's ID dropped on create, `ValidateTemplate`, which
+now requires a name), with list, get
+and delete of its own: the list puts the built-ins first (left out under
+an owner or label filter), and a built-in answers get, and 400 to PUT,
+DELETE or a publish. Versions (`nestedPaths`, `serendip/templates/versions/*`)
+are listed oldest first with the newest marked `latest` (`LatestVersion`
+for T007), read by label, published through `ValidatePublish` with the
+owner, template, version, ID and status set by the server (409 on a
+label taken), and deleted by label. Their DELETE uses a new
+`targetTemplateVersion`, so the Approval names the version itself, and
+`approvableNested` lets an approval request name one. A rule's
+`builtInPublic` lets anyone signed in read a built-in and its versions.
+By design: a version `PUT` answers 404 (no route), as every unserved
+method does through the catch-all, not 405 (plan decision 1 corrected).
+Pulled forward from T008, because the parity tests need them: the
+`templates` kind and the four `template_versions_*` operations in the
+catalogue, and their rows in `docs/cli-and-mcp.md`. T008 keeps preview
+and create, the help text, and the CLI, MCP and live checks.
+`approvals_routes_test` learned the new target. Tests:
+`template_handler_test.go` (scope, built-ins, publish once and latest,
+the cascade under one Approval). `authorization.md` has a Templates section. contract-guardian: PASS.
+Its findings: a client-chosen Template ID is now dropped (fixed here); a
+version published while its Template is deleted can be orphaned
+(RP-110, accepted, as for every kind's owner); and the version delete's
+second lookup is safe, because the store refuses an Approval whose
+target isn't the deleted ID (`sqlite/approval.go`).
+
 ## T007: Preview and create (api)
 
 - **Do:**

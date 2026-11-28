@@ -20,6 +20,7 @@ import (
 	"github.com/serendip-infra/serendip-infra/core/resource"
 	"github.com/serendip-infra/serendip-infra/core/store"
 	"github.com/serendip-infra/serendip-infra/core/store/sqlite"
+	"github.com/serendip-infra/serendip-infra/core/template"
 )
 
 // Mux is where a handler registers its routes: a plain *http.ServeMux in
@@ -67,6 +68,11 @@ const (
 	// names the singleton's ID as it stands. With none, it's decided at
 	// "/" and the handler answers 404.
 	targetSingleton
+	// targetTemplateVersion is the version named by {id} (its Template)
+	// and {version} (its label), so a delete's Approval names the version.
+	// With none, it's decided at the Template, and the handler answers
+	// 404 (or 400 for a built-in).
+	targetTemplateVersion
 )
 
 // rule is one route's authorization requirement.
@@ -86,6 +92,10 @@ type rule struct {
 	// the context (needsApprovalFrom): an approval request is how such an
 	// action is asked for. Everywhere else it is refused.
 	allowNeedsApproval bool
+	// builtInPublic lets anyone signed in through when {id} is a built-in
+	// template's (spec 027 plan decision 5): they're starters, readable
+	// like the built-in role definitions. Only on reads.
+	builtInPublic bool
 }
 
 // resourcePaths maps each resource kind served under /v1 to its path
@@ -111,6 +121,7 @@ var resourcePaths = map[resource.Kind]string{
 	resource.KindVolume:              "volumes",
 	resource.KindSecret:              "secrets",
 	resource.KindDeployment:          "deployments",
+	resource.KindTemplate:            "templates",
 }
 
 // nestedPaths are kinds served only beneath their owner's routes, with no
@@ -125,6 +136,15 @@ var nestedPaths = map[resource.Kind]string{
 	resource.KindBuild:     "builds",
 	resource.KindAlert:     "alerts",
 	resource.KindHeartbeat: "heartbeat",
+	// A template's versions are published and deleted beneath it, and
+	// never updated (spec 027 plan decision 1).
+	resource.KindTemplateVersion: "templates/versions",
+}
+
+// approvableNested are the nestedPaths kinds an approval request may name:
+// they have a DELETE route of their own.
+var approvableNested = map[resource.Kind]bool{
+	resource.KindTemplateVersion: true,
 }
 
 // singletonKinds are the kinds with one resource per install, served by
@@ -259,6 +279,7 @@ func routeTable() map[string]rule {
 		"GET /v1/secrets/status": {action: action(resource.KindSecret, "read"), target: targetRoot},
 	}
 	maps.Copy(t, alertingRoutes())
+	maps.Copy(t, templateRoutes())
 	for kind, path := range resourcePaths {
 		t["POST /v1/"+path] = rule{action: action(kind, "write"), target: targetParent, kind: kind}
 		t["GET /v1/"+path] = rule{list: true, action: action(kind, "read"), kind: kind}
@@ -283,7 +304,24 @@ func routeTable() map[string]rule {
 	for _, route := range []string{"POST /v1/" + smtp, "PUT /v1/" + smtp + "/{id}"} {
 		t[route] = rule{action: action(resource.KindSMTPServer, "write"), target: targetRoot, kind: resource.KindSMTPServer}
 	}
+	// Built-in templates are readable by anyone signed in (spec 027 plan
+	// decision 5); a stored one is read at its scope as usual.
+	tp := resourcePaths[resource.KindTemplate]
+	t["GET /v1/"+tp+"/{id}"] = rule{action: action(resource.KindTemplate, "read"), target: targetResource, kind: resource.KindTemplate, builtInPublic: true}
 	return t
+}
+
+// templateRoutes are spec 027's version routes (plan decisions 1 and 5),
+// decided at the Template, which a version inherits from; a delete is
+// decided at the version itself, so its Approval names it.
+func templateRoutes() map[string]rule {
+	tmpl, ver := resource.KindTemplate, resource.KindTemplateVersion
+	return map[string]rule{
+		"GET /v1/templates/{id}/versions":              {action: action(ver, "read"), target: targetResource, kind: tmpl, builtInPublic: true},
+		"GET /v1/templates/{id}/versions/{version}":    {action: action(ver, "read"), target: targetResource, kind: tmpl, builtInPublic: true},
+		"POST /v1/templates/{id}/versions":             {action: action(ver, "write"), target: targetResource, kind: tmpl},
+		"DELETE /v1/templates/{id}/versions/{version}": {action: action(ver, "delete"), target: targetTemplateVersion, kind: ver},
+	}
 }
 
 // alertingRoutes are spec 024's routes beyond the generic CRUD on
@@ -332,6 +370,9 @@ type authorizer struct {
 	exists    func(ctx context.Context, kind resource.Kind, id string) (bool, error)
 	// singleton finds a singleton kind's one resource (targetSingleton).
 	singleton func(ctx context.Context, kind resource.Kind) (id string, ok bool, err error)
+	// templateVersion finds a stored version by Template and label
+	// (targetTemplateVersion).
+	templateVersion func(ctx context.Context, templateID, label string) (id string, ok bool, err error)
 }
 
 // approvalReader reads one approval.
@@ -352,8 +393,10 @@ type dbForAudit func(ctx context.Context, kind resource.Kind, resourceID, decisi
 
 func newAuthorizer(engine *policy.Engine, tree ownership, recordDenied dbForAudit, approvals approvalReader,
 	exists func(ctx context.Context, kind resource.Kind, id string) (bool, error),
-	singleton func(ctx context.Context, kind resource.Kind) (string, bool, error)) *authorizer {
-	return &authorizer{engine: engine, tree: tree, db: recordDenied, table: routeTable(), approvals: approvals, exists: exists, singleton: singleton}
+	singleton func(ctx context.Context, kind resource.Kind) (string, bool, error),
+	templateVersion func(ctx context.Context, templateID, label string) (string, bool, error)) *authorizer {
+	return &authorizer{engine: engine, tree: tree, db: recordDenied, table: routeTable(), approvals: approvals, exists: exists,
+		singleton: singleton, templateVersion: templateVersion}
 }
 
 // authzMux registers routes on mux wrapped in their authorization check.
@@ -429,7 +472,7 @@ func (a *authorizer) wrap(ru rule, h http.HandlerFunc) http.HandlerFunc {
 		}
 		ctx := a.withDecider(r.Context(), caller)
 		switch {
-		case ru.authOnly:
+		case ru.authOnly, ru.builtInPublic && template.IsBuiltIn(r.PathValue("id")):
 			h(w, r.WithContext(ctx))
 			return
 		case ru.list:
@@ -582,6 +625,20 @@ func (a *authorizer) checks(ctx context.Context, r *http.Request, ru rule) ([]ch
 		}
 		out[0].action = ru.action
 		return out, sid, nil
+	case targetTemplateVersion:
+		vid, ok, err := a.templateVersion(ctx, id, r.PathValue("version"))
+		if err != nil {
+			return nil, "", err
+		}
+		if !ok {
+			return []check{{ru.action, resource.Scope{Kind: resource.KindTemplate, ID: id}}}, "", nil
+		}
+		out, err := a.deleteChecks(ctx, resource.Scope{Kind: ru.kind, ID: vid}, false)
+		if err != nil {
+			return nil, "", err
+		}
+		out[0].action = ru.action
+		return out, vid, nil
 	case targetGraph:
 		kind := resource.Kind(r.PathValue("kind"))
 		if _, ok := actionPath(kind); !ok {
@@ -768,7 +825,7 @@ func approvalBodyAction(r *http.Request) (resource.ApprovalAction, error) {
 	if err := resource.ValidateApprovalSpec(spec); err != nil {
 		return resource.ApprovalAction{}, &badBody{err}
 	}
-	if _, ok := resourcePaths[spec.Action.Target.Kind]; !ok && !singletonKinds[spec.Action.Target.Kind] {
+	if _, ok := resourcePaths[spec.Action.Target.Kind]; !ok && !singletonKinds[spec.Action.Target.Kind] && !approvableNested[spec.Action.Target.Kind] {
 		return resource.ApprovalAction{}, &badBody{fmt.Errorf("%w: action.target.kind: %q can't be requested; only the kinds the API serves can",
 			resource.ErrValidation, spec.Action.Target.Kind)}
 	}

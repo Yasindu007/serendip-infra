@@ -21,6 +21,12 @@ func TestEveryDeleteRouteCanNameItsApprovalTarget(t *testing.T) {
 				t.Errorf("%s: kind %q isn't a singleton kind", pattern, ru.kind)
 			}
 			continue
+		case targetTemplateVersion:
+			// The version's ID is found by its Template and label.
+			if ru.kind == "" || !approvableNested[ru.kind] || !strings.HasSuffix(pattern, "/{id}/versions/{version}") {
+				t.Errorf("%s: kind %q and path don't name a template version", pattern, ru.kind)
+			}
+			continue
 		default:
 			t.Errorf("%s: target %d isn't one policyApproval names", pattern, ru.target)
 		}

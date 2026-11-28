@@ -138,6 +138,9 @@ const ParamRefKey = "x-serendip-ref"
 // ValidateTemplate checks a Template's own fields.
 func ValidateTemplate(m Metadata, s TemplateSpec) error {
 	var errs FieldErrors
+	if m.Name == "" || len(m.Name) > 100 {
+		errs = append(errs, FieldError{"metadata.name", "required, at most 100 characters"})
+	}
 	switch {
 	case len(m.OwnerRefs) == 0:
 	case len(m.OwnerRefs) == 1 && m.OwnerRefs[0].Kind == KindProject && validRefID(m.OwnerRefs[0].ID):

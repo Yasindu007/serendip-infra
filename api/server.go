@@ -76,7 +76,7 @@ func NewServer(db *sql.DB, bus event.Bus, apiKeys map[string]string, authn ident
 	engine, stopPolicy := newPolicyEngine(db, bus)
 	migrateAPIKeys(engine, db, bus, apiKeys)
 	approvals := sqlite.NewStore[resource.ApprovalSpec, resource.ApprovalStatus](db, resource.KindApproval).SetBus(bus)
-	apiMux := &authzMux{mux: http.NewServeMux(), a: newAuthorizer(engine, graph.NewSQLiteGraph(db), recordDeniedIn(db), approvals, resourceExistsIn(db), singletonIn(db))}
+	apiMux := &authzMux{mux: http.NewServeMux(), a: newAuthorizer(engine, graph.NewSQLiteGraph(db), recordDeniedIn(db), approvals, resourceExistsIn(db), singletonIn(db), versionIDIn(templateVersionStore(db, nil)))}
 	registerAPI(apiMux, db, bus, engine, approvals, secretReconciler, providers, console, o)
 
 	topMux := http.NewServeMux()
@@ -391,6 +391,9 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 		mu:           workloadWrites,
 	}).Register(apiMux)
 	(&SchemaHandler{comps: compStore, schemas: opts.schemas}).Register(apiMux)
+	// Templates and their versions (spec 027).
+	NewTemplateHandler(sqlite.NewStore[resource.TemplateSpec, resource.TemplateStatus](db, resource.KindTemplate).SetBus(bus),
+		templateVersionStore(db, bus)).Register(apiMux)
 	runtime := NewRuntimeHandler(deployStore, envStore, opts.runtime)
 	runtime.Register(apiMux)
 	// Builds (spec 022): triggered and cancelled through the store; logs
@@ -530,6 +533,16 @@ func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 func mountResource[S, St any](mux Mux, db *sql.DB, bus event.Bus, kind resource.Kind, path string) {
 	s := sqlite.NewStore[S, St](db, kind).SetBus(bus)
 	NewResourceHandler[S, St](s, path).Register(mux)
+}
+
+// templateVersionStore is the versions' store, a label unique within its
+// Template. bus may be nil for a store that only reads.
+func templateVersionStore(db *sql.DB, bus event.Bus) *sqlite.Store[resource.TemplateVersionSpec, resource.TemplateVersionStatus] {
+	s := sqlite.NewStore[resource.TemplateVersionSpec, resource.TemplateVersionStatus](db, resource.KindTemplateVersion).SetUniqueKey(resource.TemplateVersionKey)
+	if bus != nil {
+		s.SetBus(bus)
+	}
+	return s
 }
 
 func healthzHandler(w http.ResponseWriter, r *http.Request) {

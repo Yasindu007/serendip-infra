@@ -215,6 +215,8 @@ func TestValidateTemplate(t *testing.T) {
 		{"owned by an Application", Metadata{Name: "web", OwnerRefs: []OwnerRef{{Kind: KindApplication, ID: projID}}}, TemplateSpec{}, false},
 		{"two owners", Metadata{Name: "web", OwnerRefs: []OwnerRef{{Kind: KindProject, ID: projID}, {Kind: KindProject, ID: tmplID}}}, TemplateSpec{}, false},
 		{"long description", Metadata{Name: "web"}, TemplateSpec{Description: strings.Repeat("x", 4001)}, false},
+		{"no name", Metadata{}, TemplateSpec{}, false},
+		{"long name", Metadata{Name: strings.Repeat("x", 101)}, TemplateSpec{}, false},
 	}
 	for _, tc := range cases {
 		if err := ValidateTemplate(tc.m, tc.s); (err == nil) != tc.ok {

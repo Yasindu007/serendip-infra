@@ -246,6 +246,35 @@ Checks beyond the route's own action:
 - **Status is the server's:** a body's `status` is ignored, so a silence
   can't be set through the generic `PUT`.
 
+## Templates (spec 027)
+
+`api/authz.go`'s `templateRoutes()`; plan decisions 1, 5 and 10. Like
+Azure's `templateSpecs` and `templateSpecs/versions`, a Template is a
+resource at its scope (its Project, or `/`), and its versions inherit
+from it. No built-in role changes: Reader's `*/read` includes both
+reads, and Contributor and Owner have `*`.
+
+| Route | Action, scope |
+|---|---|
+| `/v1/templates` CRUD | `serendip/templates/{read,write,delete}` at the Template (its Project, or `/`); one at `/` needs write at `/` |
+| `GET /v1/templates/{id}/versions`, `…/versions/{version}` | `serendip/templates/versions/read` at the Template |
+| `POST /v1/templates/{id}/versions` | `serendip/templates/versions/write` at the Template |
+| `DELETE /v1/templates/{id}/versions/{version}` | `serendip/templates/versions/delete` at the version, through an Approval that names it |
+
+- **Built-in templates** (fixed IDs, `core/template`) are readable by
+  anyone signed in, like built-in role definitions: `GET` on one, its
+  versions, or the list, which merges them in first. Changing,
+  deleting or publishing to one is 400 (after the route's own check,
+  so 403 without a role).
+- **Deleting a Template** with `cascade=true` takes its versions under
+  one Approval, which needs `serendip/templates/versions/delete` for
+  each. Without it, a Template with versions is 409.
+- **An approval request** may name a `TemplateVersion`
+  (`approvableNested`), so an agent's version delete can be asked for.
+- **Using a template** (preview and create, T007) needs
+  `serendip/templates/versions/read` at it; every resource it creates is
+  then admitted as on its own route.
+
 ## The evaluation (`core/policy`)
 
 `Engine.Decide(principal, action, scope)`:

@@ -2714,3 +2714,17 @@ The text below is the T013 record.
   failing on the platform.
 - **Revisit:** spec 027 T005/T006, which reuse the pure validators at
   write; close this then.
+
+## RP-110 — A version published while its Template is deleted can be orphaned
+
+- **Kind:** risk. **Status:** Accepted, 2026-11-28. **Found:** spec 027
+  T006 (contract-guardian).
+- **What:** publishing a version reads its Template, then creates the
+  version in a separate write. The store doesn't check that an owner
+  exists on create, as for every kind. A Template deleted in the
+  milliseconds between the two leaves a version whose owner is gone. It
+  can't be read through the API (its Template answers 404), and nothing
+  renders it. The other order is safe: a cascade delete refuses a
+  version added after its check (`ErrStale`, 409).
+- **Revisit:** if the store gains owner-existence checks on create, or a
+  read inside `Atomically`, publish in one transaction.

@@ -38,8 +38,10 @@ This mirrors Azure's `templateSpecs` and `templateSpecs/versions`.
     every DELETE has (spec acceptance criterion 10).
 
   **There's no update route,** so a published version can't change
-  (criterion 5). A `PUT` answers 405, and the generic `PUT` doesn't
-  exist because the kind isn't in `resourcePaths`. Version actions are
+  (criterion 5). A `PUT` answers 404 (no route), as any method a path
+  isn't served with does through the API's catch-all, and the generic
+  `PUT` doesn't exist because the kind isn't in `resourcePaths`. (This
+  said 405 until T006.) Version actions are
   `serendip/templates/versions/{read,write,delete}`, so a role can let
   someone publish versions without letting them rename or delete the
   Template.

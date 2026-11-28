@@ -43,6 +43,7 @@ var kinds = []kind{
 	{"Volume", "volumes", false, ""},
 	{"Secret", "secrets", true, ""},
 	{"Deployment", "deployments", true, ""},
+	{"Template", "templates", true, ""},
 }
 
 // KindPaths maps each kind's name to its collection path, for the parity
@@ -80,6 +81,7 @@ func id(what string) Param {
 var (
 	ownerParam   = Param{Name: "ownerId", In: InQuery, Description: "Only resources owned by this resource ID"}
 	labelsParam  = Param{Name: "labels", In: InLabels, Type: Object, Description: "Only resources with all of these labels (name to value)"}
+	versionParam = Param{Name: "version", In: InPath, Required: true, Description: "Version label, such as 1.0"}
 	cascadeParam = Param{Name: "cascade", In: InQuery, Type: Boolean,
 		Description: "Also delete everything the resource owns. Answered with the blast radius, decided like the delete itself"}
 	resourceBody = Param{Name: "resource", In: InBody, Type: Object, Required: true,
@@ -296,6 +298,25 @@ var operations = func() []Operation {
 			Method:  "POST", Path: "/v1/deployments/{id}/promote",
 			Params: []Param{id("Deployment"), {Name: "to", In: InField, Required: true, Description: "ID of the Environment to promote to"}},
 			Hints:  Hints{Destructive: true, Idempotent: true}},
+
+		// Template versions (spec 027 plan decision 1): published, read and
+		// deleted beneath their Template; a version never changes.
+		Operation{Name: "template_versions_list", CLI: []string{"template-versions", "list"}, MCP: true,
+			Summary: "A template's versions, oldest first; the one published most recently is marked latest",
+			Method:  "GET", Path: "/v1/templates/{id}/versions",
+			Params: []Param{id("Template")}, Hints: Hints{ReadOnly: true}},
+		Operation{Name: "template_versions_get", CLI: []string{"template-versions", "get"}, MCP: true,
+			Summary: "One version of a template, by its label: its parameters (a JSON Schema object) and its body",
+			Method:  "GET", Path: "/v1/templates/{id}/versions/{version}",
+			Params: []Param{id("Template"), versionParam}, Hints: Hints{ReadOnly: true}},
+		Operation{Name: "template_versions_create", CLI: []string{"template-versions", "create"}, MCP: true,
+			Summary: "Publish a new version of a template. metadata.name is its label (such as 1.0); spec has parameters and body. It's checked by rendering it, and can't be changed afterwards",
+			Method:  "POST", Path: "/v1/templates/{id}/versions",
+			Params: []Param{id("Template"), resourceBody}},
+		Operation{Name: "template_versions_delete", CLI: []string{"template-versions", "delete"}, MCP: true,
+			Summary: "Delete one version of a template. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request",
+			Method:  "DELETE", Path: "/v1/templates/{id}/versions/{version}",
+			Params: []Param{id("Template"), versionParam}, Hints: Hints{Destructive: true, Idempotent: true}},
 
 		// Builds (spec 022).
 		Operation{Name: "builds_trigger", CLI: []string{"builds", "trigger"}, MCP: true,

@@ -38,6 +38,12 @@
     handlers pass `storedView`, and a template's create a `pendingView`
     over its unstored batch. Decide a permission at `v.scope(at)`, so a
     pending resource is decided at its nearest stored owner.
+  - Templates (spec 027, `template_handler.go`): built-in templates have
+    fixed IDs and aren't stored. Reads of one are let through for anyone
+    signed in by the rule's `builtInPublic`; changing one is 400. A
+    version is addressed by its Template and label, so its DELETE uses
+    `targetTemplateVersion` (the Approval names the version's ID), and
+    `approvableNested` lets an approval request name it.
   - Server-set spec fields (`createdFrom`) are refused on a client's
     create and kept or refused on update (`keepCreatedFrom`;
     `WithServerFields` on a generic handler).

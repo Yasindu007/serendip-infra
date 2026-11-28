@@ -463,6 +463,15 @@ tools.
 | `serendip teams get <id>` | — | `GET /v1/teams/{id}` | Get one Team |
 | `serendip teams list` | — | `GET /v1/teams` | List teams the caller may read |
 | `serendip teams update <id>` | — | `PUT /v1/teams/{id}` | Replace a Team's spec (send the version read, for a conflict check) |
+| `serendip template-versions create <id>` | `template_versions_create` | `POST /v1/templates/{id}/versions` | Publish a new version of a template. metadata.name is its label (such as 1.0); spec has parameters and body. It's checked by rendering it, and can't be changed afterwards |
+| `serendip template-versions delete <id> <version>` | `template_versions_delete` | `DELETE /v1/templates/{id}/versions/{version}` | Delete one version of a template. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
+| `serendip template-versions get <id> <version>` | `template_versions_get` | `GET /v1/templates/{id}/versions/{version}` | One version of a template, by its label: its parameters (a JSON Schema object) and its body |
+| `serendip template-versions list <id>` | `template_versions_list` | `GET /v1/templates/{id}/versions` | A template's versions, oldest first; the one published most recently is marked latest |
+| `serendip templates create` | `templates_create` | `POST /v1/templates` | Create a Template |
+| `serendip templates delete <id>` | `templates_delete` | `DELETE /v1/templates/{id}` | Delete a Template. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
+| `serendip templates get <id>` | `templates_get` | `GET /v1/templates/{id}` | Get one Template |
+| `serendip templates list` | `templates_list` | `GET /v1/templates` | List templates the caller may read |
+| `serendip templates update <id>` | `templates_update` | `PUT /v1/templates/{id}` | Replace a Template's spec (send the version read, for a conflict check) |
 | `serendip volumes create` | — | `POST /v1/volumes` | Create a Volume |
 | `serendip volumes delete <id>` | — | `DELETE /v1/volumes/{id}` | Delete a Volume. Recorded as an Approval; when it needs a person's decision, ask for one with approvals_request |
 | `serendip volumes get <id>` | — | `GET /v1/volumes/{id}` | Get one Volume |
