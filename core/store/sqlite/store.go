@@ -158,13 +158,56 @@ func matchesListOptions(m resource.Metadata, opts store.ListOptions) bool {
 }
 
 func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (resource.Resource[S, St], error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s: begin: %w", s.kind, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	r, e, err := s.createTx(ctx, tx, r)
+	if err != nil {
+		return resource.Resource[S, St]{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: commit: %w", s.kind, r.Metadata.ID, err)
+	}
+	if s.bus != nil {
+		s.bus.Publish(e)
+	}
+	return r, nil
+}
+
+// CreateIn is Create inside a transaction DB.Atomically opened on this
+// Store's database (specs/027 plan decision 8). Its event is published
+// when that transaction commits, not before.
+func (s *Store[S, St]) CreateIn(ctx context.Context, t store.Tx, r resource.Resource[S, St]) (resource.Resource[S, St], error) {
+	tx, err := sqliteTx(t, s.db)
+	if err != nil {
+		return resource.Resource[S, St]{}, err
+	}
+	r, e, err := s.createTx(ctx, tx.tx, r)
+	if err != nil {
+		return resource.Resource[S, St]{}, err
+	}
+	tx.pending = append(tx.pending, pendingEvent{bus: s.bus, e: e})
+	return r, nil
+}
+
+var _ store.TxCreator[resource.OrganizationSpec, resource.OrganizationStatus] = (*Store[resource.OrganizationSpec, resource.OrganizationStatus])(nil)
+
+// createTx is Create's body inside tx: the insert, the edges and the
+// audit row. It returns the event to publish once tx commits.
+func (s *Store[S, St]) createTx(ctx context.Context, tx *sql.Tx, r resource.Resource[S, St]) (resource.Resource[S, St], event.Event, error) {
+	fail := func(err error) (resource.Resource[S, St], event.Event, error) {
+		return resource.Resource[S, St]{}, event.Event{}, err
+	}
 	if r.Metadata.ID == "" {
 		r.Metadata.ID = id.New()
 	}
 	r.Metadata.Kind = s.kind
 
 	if err := resource.Validate(r.Metadata); err != nil {
-		return resource.Resource[S, St]{}, err
+		return fail(err)
 	}
 
 	now := time.Now().UTC()
@@ -174,14 +217,8 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 
 	cols, err := marshalColumns(r)
 	if err != nil {
-		return resource.Resource[S, St]{}, err
+		return fail(err)
 	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: begin: %w", s.kind, r.Metadata.ID, err)
-	}
-	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
 	key := s.keyOf(r.Spec)
 	if _, err := tx.ExecContext(ctx, `
@@ -194,19 +231,19 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 		r.Metadata.ResourceVersion,
 		now.Format(timeLayout), now.Format(timeLayout), key); err != nil {
 		if duplicateKey(err) {
-			return resource.Resource[S, St]{}, store.ErrDuplicate
+			return fail(store.ErrDuplicate)
 		}
-		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: %w", s.kind, r.Metadata.ID, err)
+		return fail(fmt.Errorf("sqlite: create %s %s: %w", s.kind, r.Metadata.ID, err))
 	}
 
 	ref := graph.ResourceRef{Kind: s.kind, ID: r.Metadata.ID}
 	if err := graph.SyncEdges(ctx, tx, ref, r.Metadata.OwnerRefs, r.Metadata.Relationships); err != nil {
-		return resource.Resource[S, St]{}, err
+		return fail(err)
 	}
 
 	afterJSON, err := json.Marshal(r)
 	if err != nil {
-		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: marshal audit after: %w", err)
+		return fail(fmt.Errorf("sqlite: marshal audit after: %w", err))
 	}
 	actor := audit.ActorFrom(ctx)
 	if err := writeAudit(ctx, tx, audit.Record{
@@ -223,14 +260,9 @@ func (s *Store[S, St]) Create(ctx context.Context, r resource.Resource[S, St]) (
 		ActorSponsor:   audit.SponsorFrom(ctx),
 		PolicyDecision: audit.PolicyDecisionFrom(ctx),
 	}); err != nil {
-		return resource.Resource[S, St]{}, err
+		return fail(err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return resource.Resource[S, St]{}, fmt.Errorf("sqlite: create %s %s: commit: %w", s.kind, r.Metadata.ID, err)
-	}
-	s.publish(event.EventCreated, r.Metadata.ID, actor, now)
-	return r, nil
+	return r, event.Event{Type: event.EventCreated, Kind: s.kind, ID: r.Metadata.ID, Actor: actor, At: now}, nil
 }
 
 func (s *Store[S, St]) Update(ctx context.Context, r resource.Resource[S, St]) (resource.Resource[S, St], error) {

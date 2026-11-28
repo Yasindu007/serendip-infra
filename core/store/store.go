@@ -109,3 +109,35 @@ func ApprovalFrom(ctx context.Context) (ApprovalIntent, bool) {
 	in, ok := ctx.Value(approvalKey{}).(ApprovalIntent)
 	return in, ok
 }
+
+// Tx is an open transaction that spans resource kinds (specs/027 plan
+// decision 8). It is opaque: only the implementation that opened it can
+// write through it, and a TxCreator handed another implementation's Tx
+// refuses it.
+type Tx interface {
+	// StoreTx marks the type; it does nothing.
+	StoreTx()
+}
+
+// Atomic opens multi-kind transactions. Atomically runs fn inside one
+// transaction and commits if fn returns nil; any error from fn, or a
+// panic, rolls back every row, edge and audit record fn wrote, and no
+// event is published. Events for what fn created are published only
+// after commit, in creation order.
+//
+// Inside fn, write only through tx: a read or write that opens its own
+// transaction on the same database waits for this one to finish, and
+// the default implementation has one connection, so it would wait until
+// ctx ends. tx is not safe for concurrent use, and is refused once fn
+// has returned.
+type Atomic interface {
+	Atomically(ctx context.Context, fn func(tx Tx) error) error
+}
+
+// TxCreator creates a resource inside a transaction Atomic opened, with
+// Create's checks, edges and audit record. A unique-key clash returns
+// ErrDuplicate; the caller returns it from fn so the whole batch rolls
+// back.
+type TxCreator[S, St any] interface {
+	CreateIn(ctx context.Context, tx Tx, r resource.Resource[S, St]) (resource.Resource[S, St], error)
+}

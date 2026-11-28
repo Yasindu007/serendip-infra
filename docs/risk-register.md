@@ -2686,13 +2686,18 @@ The text below is the T013 record.
 
 ## RP-108 — A template create holds SQLite's write lock for the whole batch
 
-- **Kind:** performance. **Status:** Open, 2026-11-28 (measured in spec
-  027 T004). **Found:** spec 027 plan (decision 8).
+- **Kind:** performance. **Status:** Accepted, 2026-11-28 (measured in
+  spec 027 T004). **Found:** spec 027 plan (decision 8).
 - **What:** up to 20 Components plus their Deployments go in one
   transaction, holding the write lock and the workload lock for the
   batch.
-- **Revisit:** if T004's benchmark is over 50 ms on the L480, lower the
-  20-Component limit.
+- **Measured:** `BenchmarkAtomically_20Components` (an Application, 20
+  Components and 20 Deployments, 41 creates with their edges and audit
+  rows) takes **13–14 ms** on the L480 (i5-8250U) and 6 ms on the
+  desktop (Ryzen 7 7840HS). That's under the 50 ms limit, so the
+  20-Component limit stays.
+- **Revisit:** if a template may create more than 20 Components, or the
+  benchmark goes over 50 ms on the lowest-spec node.
 
 ## RP-109 — An image's form is checked by the reconciler, not yet at write
 

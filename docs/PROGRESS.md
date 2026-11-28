@@ -12,7 +12,7 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-11-28 (spec 027 T001 to T003 done; T004 next)
+Last updated: 2026-11-28 (spec 027 T001 to T004 done; T005 next)
 
 ## Current phase
 
@@ -92,11 +92,17 @@ with `gh auth switch -u Yasindu007` to open a PR, then switch back.
      now `resource.ValidateComponentPorts`, beside a new
      `ValidateComponentImage` (RP-109: the API checks it at write from
      T005/T006).
-   - **Next: T004** (the store's multi-kind transaction, `Atomically`
-     and `CreateIn`, plus the 20-Component benchmark for RP-108).
+   - **T004 done:** `store.Tx`, `store.Atomic` and `store.TxCreator`;
+     `sqlite.NewDB(db).Atomically` and `Store.CreateIn` (events after
+     commit, in order; a foreign or finished Tx gives `ErrForeignTx`).
+     `Create` now shares `createTx`. Inside `fn`, write only through the
+     Tx: one connection, so an own-transaction read would wait for ctx.
+     RP-108 accepted: 41 creates take 13–14 ms on the L480.
+   - **Next: T005** (reusable admission in `api/`, the pending-batch
+     overlay, the `createdFrom` guards).
    - **GitHub:** task issues #385 to #398 are all open and linked under
      #68. Epic #68's body is in epic #1's layout with the `## Tasks`
-     checklist (T001–T003 ticked), and #385–#387 are closed, by a paced
+     checklist (T001–T004 ticked), and #385–#388 are closed, by a paced
      script (`gh027.sh`, log `gh027.log` in this session's scratchpad).
      If its log doesn't end in `DONE`, check each issue before
      re-running it.

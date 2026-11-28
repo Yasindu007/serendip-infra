@@ -250,13 +250,16 @@ So:
 `core/store/sqlite` gains a multi-kind transaction:
 
 ```go
-func (db *DB) Atomically(ctx context.Context, fn func(tx *Tx) error) error
-func (s *Store[S, St]) CreateIn(ctx context.Context, tx *Tx, r resource.Resource[S, St]) (resource.Resource[S, St], error)
+func (db *DB) Atomically(ctx context.Context, fn func(tx store.Tx) error) error
+func (s *Store[S, St]) CreateIn(ctx context.Context, tx store.Tx, r resource.Resource[S, St]) (resource.Resource[S, St], error)
 ```
 
 - **`Create`'s body moves into a `createTx` helper** that both use: the
   insert, `graph.SyncEdges`, and the audit row. `Create` keeps its
   behaviour.
+- **`store.Tx` is opaque** (T004): `CreateIn` refuses a Tx from another
+  implementation, another database, or one that has finished
+  (`sqlite.ErrForeignTx`).
 - **`Tx` collects the events,** and `Atomically` publishes them only
   after commit, in creation order, so the reconciler never sees an
   Application before the transaction that made it has committed.
