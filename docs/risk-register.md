@@ -2701,8 +2701,9 @@ The text below is the T013 record.
 
 ## RP-109 — An image's form is checked by the reconciler, not yet at write
 
-- **Kind:** risk. **Status:** Open, 2026-11-28. **Found:** spec 027 T003
-  (contract-guardian).
+- **Kind:** risk. **Status:** Closed, 2026-11-28 (spec 027 T005: the
+  Component handler's `admit` checks the image on create and update).
+  **Found:** spec 027 T003 (contract-guardian).
 - **What:** `resource.ValidateComponentImage` (letters, digits and
   `._/:@+-[]`, at most 512) runs in the Component reconciler and in
   template rendering, but the API's Component create and update don't

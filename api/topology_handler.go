@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
@@ -39,6 +41,9 @@ type ComponentHandler struct {
 	// deployments are checked for clashes with them (spec 026).
 	secretEnv   secretEnvChecker
 	deployments store.Store[resource.DeploymentSpec, resource.DeploymentStatus]
+	// view is what admission reads (storedView); a template's create
+	// admits through a pendingView instead (spec 027).
+	view workloadView
 	// dependents lists what depends on a resource (the graph): a
 	// Component's Deployments.
 	dependents func(ctx context.Context, ref graph.ResourceRef) ([]graph.ResourceRef, error)
@@ -72,10 +77,27 @@ func (h *ComponentHandler) fail(w http.ResponseWriter, r *http.Request, err erro
 	h.writeStoreError(w, r, err)
 }
 
+// admit runs every check a Component write passes, reading v: its
+// image, dependencies, source and secret variables. On update, current is
+// c as stored. It returns the context with the checks' policy evidence.
+func (h *ComponentHandler) admit(ctx context.Context, v workloadView, c resource.Component, current *resource.Component) (context.Context, error) {
+	if err := resource.ValidateComponentImage(c.Spec); err != nil {
+		return ctx, err
+	}
+	ctx, err := h.checkDependencies(ctx, v, c, current)
+	if err != nil {
+		return ctx, err
+	}
+	if ctx, err = h.source.check(ctx, v, c, current); err != nil {
+		return ctx, err
+	}
+	return h.checkSecretEnv(ctx, v, c, current)
+}
+
 // checkDependencies checks c's dependencies against the Components they
 // name, and returns the context with the reads it checked in its policy
 // evidence. On update, current is c as stored.
-func (h *ComponentHandler) checkDependencies(ctx context.Context, c resource.Component, current *resource.Component) (context.Context, error) {
+func (h *ComponentHandler) checkDependencies(ctx context.Context, v workloadView, c resource.Component, current *resource.Component) (context.Context, error) {
 	if err := resource.ValidateComponentDependencies(c.Metadata.ID, c.Spec); err != nil {
 		return ctx, err
 	}
@@ -87,14 +109,14 @@ func (h *ComponentHandler) checkDependencies(ctx context.Context, c resource.Com
 	for i, d := range c.Spec.Dependencies {
 		var ok bool
 		var err error
-		ctx, ok, err = allowedNoted(ctx, read, resource.Scope{Kind: resource.KindComponent, ID: d.Component})
+		ctx, ok, err = allowedNoted(ctx, read, v.scope(resource.Scope{Kind: resource.KindComponent, ID: d.Component}))
 		if err != nil {
 			return ctx, err
 		}
 		if !ok {
 			return ctx, deployRefuse(http.StatusForbidden, "forbidden", "missing %s at Component/%s: depending on a Component needs reading it", read.Name, d.Component)
 		}
-		target, err := h.comps.Get(ctx, d.Component)
+		target, err := v.component(ctx, d.Component)
 		if errors.Is(err, store.ErrNotFound) {
 			return ctx, deployRefuse(http.StatusBadRequest, "validation failed", "dependencies[%d].component: Component %s not found", i, d.Component)
 		}
@@ -135,7 +157,7 @@ func (h *ComponentHandler) checkDependencies(ctx context.Context, c resource.Com
 // clashes within the Component (400), the Secrets newly named
 // (secretEnvChecker), and, on update, that no Deployment's overrides now
 // clash with the Component's variables (409 naming it).
-func (h *ComponentHandler) checkSecretEnv(ctx context.Context, c resource.Component, current *resource.Component) (context.Context, error) {
+func (h *ComponentHandler) checkSecretEnv(ctx context.Context, v workloadView, c resource.Component, current *resource.Component) (context.Context, error) {
 	if err := resource.ValidateComponentSecretEnv(c.Spec); err != nil {
 		return ctx, err
 	}
@@ -143,7 +165,7 @@ func (h *ComponentHandler) checkSecretEnv(ctx context.Context, c resource.Compon
 	if current != nil {
 		was = current.Spec.SecretEnv
 	}
-	ctx, err := h.secretEnv.check(ctx, "secretEnv", c.Spec.SecretEnv, was, func(ctx context.Context) (string, error) { return h.projectOf(ctx, c) })
+	ctx, err := h.secretEnv.check(ctx, v, "secretEnv", c.Spec.SecretEnv, was, func(ctx context.Context) (string, error) { return projectOf(ctx, v, c) })
 	if err != nil || current == nil || h.deployments == nil || h.dependents == nil {
 		return ctx, err
 	}
@@ -179,13 +201,13 @@ func (h *ComponentHandler) checkSecretEnv(ctx context.Context, c resource.Compon
 	return ctx, nil
 }
 
-// projectOf is the Project c's Application belongs to.
-func (h *ComponentHandler) projectOf(ctx context.Context, c resource.Component) (string, error) {
+// projectOf is the Project c's Application belongs to, read from v.
+func projectOf(ctx context.Context, v workloadView, c resource.Component) (string, error) {
 	appID, err := applicationOf(c)
 	if err != nil {
 		return "", err
 	}
-	app, err := h.apps.Get(ctx, appID)
+	app, err := v.application(ctx, appID)
 	if errors.Is(err, store.ErrNotFound) {
 		return "", deployRefuse(http.StatusBadRequest, "validation failed", "Application %s not found", appID)
 	}
@@ -212,6 +234,48 @@ func applicationOf(c resource.Component) (string, error) {
 		return "", deployRefuse(http.StatusBadRequest, "validation failed", "a Component is owned by exactly one Application")
 	}
 	return apps[0], nil
+}
+
+// errCreatedFromSet refuses a client's createdFrom on create: provenance is
+// the server's (specs/027-templates-and-scaffolder plan decision 9).
+var errCreatedFromSet = fmt.Errorf("%w: createdFrom: only the server sets it, when a template creates the resource; leave it out", resource.ErrValidation)
+
+// keepCreatedFrom is the createdFrom an update stores: the stored one
+// when the body leaves it out or repeats it, and a 400 when it sets or
+// changes one.
+func keepCreatedFrom(next, stored *resource.TemplateOrigin) (*resource.TemplateOrigin, error) {
+	if next == nil {
+		return stored, nil
+	}
+	if stored == nil {
+		return nil, errCreatedFromSet
+	}
+	a, err := json.Marshal(next)
+	if err != nil {
+		return nil, fmt.Errorf("encode createdFrom: %w", err)
+	}
+	b, err := json.Marshal(stored)
+	if err != nil {
+		return nil, fmt.Errorf("encode the stored createdFrom: %w", err)
+	}
+	if string(a) != string(b) {
+		return nil, fmt.Errorf("%w: createdFrom: it can't change; leave it out to keep it", resource.ErrValidation)
+	}
+	return stored, nil
+}
+
+// applicationCreatedFrom guards an Application's createdFrom
+// (ResourceHandler.WithServerFields).
+func applicationCreatedFrom(res, current *resource.Application) error {
+	if current == nil {
+		if res.Spec.CreatedFrom != nil {
+			return errCreatedFromSet
+		}
+		return nil
+	}
+	var err error
+	res.Spec.CreatedFrom, err = keepCreatedFrom(res.Spec.CreatedFrom, current.Spec.CreatedFrom)
+	return err
 }
 
 // callers lists the Components of c's Application that depend on c.
@@ -263,16 +327,12 @@ func (h *ComponentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	c.Metadata.ID = ""
-	ctx, err := h.checkDependencies(r.Context(), c, nil)
+	if c.Spec.CreatedFrom != nil {
+		h.fail(w, r, errCreatedFromSet)
+		return
+	}
+	ctx, err := h.admit(r.Context(), h.view, c, nil)
 	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	if ctx, err = h.source.check(ctx, c, nil); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	if ctx, err = h.checkSecretEnv(ctx, c, nil); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -298,16 +358,12 @@ func (h *ComponentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	ctx, err := h.checkDependencies(r.Context(), c, &current)
+	if c.Spec.CreatedFrom, err = keepCreatedFrom(c.Spec.CreatedFrom, current.Spec.CreatedFrom); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	ctx, err := h.admit(r.Context(), h.view, c, &current)
 	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	if ctx, err = h.source.check(ctx, c, &current); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	if ctx, err = h.checkSecretEnv(ctx, c, &current); err != nil {
 		h.fail(w, r, err)
 		return
 	}

@@ -164,6 +164,31 @@ yet checking images at write is RP-109 (T005/T006).
   Component, ancestry of a pending Application) and `createdFrom` guard
   tests.
 
+**Done as** (2026-11-28): `api/workload_view.go`. `workloadView` has the
+Component and Application getters, the Deployment list, existence,
+ancestry, and `scope`: where a permission at a resource is decided. The
+handlers share one `storedView` (wired in `server.go`); `pendingView`
+answers from a batch first. A pending resource's `scope` is its nearest
+stored owner, following its first owner ref, because the engine resolves
+a scope through the graph and a resource not stored has no ancestors
+there (it would otherwise be decided at `/` only). That is exactly what
+it inherits once stored, and no assignment can name it yet, so no rule
+changes. `ComponentHandler.admit` (image, dependencies, source, secret
+variables) and `DeploymentHandler.admit`/`coherent`/`checkConfig` take a
+view; `secretEnvChecker` and `sourceChecker` read existence and ancestry
+from it, and `projectOf` is a function of the view. `createdFrom`: a
+client's create is 400 on Components and Applications, and an update
+keeps the stored one when it's left out or repeated, and is 400 when it
+sets or changes one (compared as JSON). Applications get it through a
+new `ResourceHandler.WithServerFields` hook. The image is now checked at
+write (RP-109 closed). Tests: `workload_view_internal_test.go` (a
+dependency on a pending Component decided at the Project, refused
+without a role there and through the stores; a pending Component's
+ancestry and Secret reachability; a pending Deployment against the
+one-per-Environment rule) and `createdfrom_test.go` (the guards on both
+kinds, and bad images on create and update). Every existing test passes
+unchanged.
+
 ## T006: Template and version routes (api)
 
 - **Do:**

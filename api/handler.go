@@ -53,6 +53,11 @@ type ResourceHandler[S, St any] struct {
 	// stored one kept on update, whatever the body says (spec 024: a
 	// rule's silence is changed only through its own action).
 	serverStatus bool
+	// serverFields, when set, guards the spec fields only the server sets
+	// (spec 027: createdFrom), on create (current nil) and on update
+	// against the stored resource: it may refuse (wrap
+	// resource.ErrValidation for a 400) or copy the stored values in.
+	serverFields func(res, current *resource.Resource[S, St]) error
 	// view, when set, is what a response shows of a resource (spec 024:
 	// a channel's Secrets as secretSet).
 	view func(ctx context.Context, r resource.Resource[S, St]) (any, error)
@@ -62,6 +67,13 @@ type ResourceHandler[S, St any] struct {
 // create, the stored one on update.
 func (h *ResourceHandler[S, St]) WithServerStatus() *ResourceHandler[S, St] {
 	h.serverStatus = true
+	return h
+}
+
+// WithServerFields makes the handler guard server-set spec fields with f
+// on each create and update.
+func (h *ResourceHandler[S, St]) WithServerFields(f func(res, current *resource.Resource[S, St]) error) *ResourceHandler[S, St] {
+	h.serverFields = f
 	return h
 }
 
@@ -179,6 +191,12 @@ func (h *ResourceHandler[S, St]) Create(w http.ResponseWriter, r *http.Request) 
 		var zero St
 		res.Status = zero
 	}
+	if h.serverFields != nil {
+		if err := h.serverFields(&res, nil); err != nil {
+			h.writeStoreError(w, r, err)
+			return
+		}
+	}
 	if h.checkMeta != nil {
 		if err := h.checkMeta(res.Metadata); err != nil {
 			h.writeStoreError(w, r, err)
@@ -292,13 +310,21 @@ func (h *ResourceHandler[S, St]) Update(w http.ResponseWriter, r *http.Request) 
 	}
 	var ctx context.Context
 	var ok bool
-	if h.serverStatus {
+	if h.serverStatus || h.serverFields != nil {
 		current, err := h.store.Get(r.Context(), res.Metadata.ID)
 		if err != nil {
 			h.writeStoreError(w, r, err)
 			return
 		}
-		res.Status = current.Status
+		if h.serverStatus {
+			res.Status = current.Status
+		}
+		if h.serverFields != nil {
+			if err := h.serverFields(&res, &current); err != nil {
+				h.writeStoreError(w, r, err)
+				return
+			}
+		}
 		ctx, ok = h.authorizeWith(w, r, res, &current)
 	} else {
 		ctx, ok = h.authorized(w, r, res, true)

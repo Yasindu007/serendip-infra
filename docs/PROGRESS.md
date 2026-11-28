@@ -12,7 +12,7 @@ Companion docs: `docs/PRD.md` (why/what/roadmap, changes rarely),
 with when to revisit each), `docs/build-vs-adopt.md` (what Serendip
 builds, adopts or rejected, and why).
 
-Last updated: 2026-11-28 (spec 027 T001 to T004 done; T005 next)
+Last updated: 2026-11-28 (spec 027 T001 to T005 done; T006 next)
 
 ## Current phase
 
@@ -98,14 +98,21 @@ with `gh auth switch -u Yasindu007` to open a PR, then switch back.
      `Create` now shares `createTx`. Inside `fn`, write only through the
      Tx: one connection, so an own-transaction read would wait for ctx.
      RP-108 accepted: 41 creates take 13–14 ms on the L480.
-   - **Next: T005** (reusable admission in `api/`, the pending-batch
-     overlay, the `createdFrom` guards).
+   - **T005 done:** `api/workload_view.go` (`workloadView`,
+     `storedView`, `pendingView`). Component and Deployment admission
+     (`ComponentHandler.admit`, `DeploymentHandler.admit`) read a view;
+     a pending resource's permission is decided at its nearest stored
+     owner (`v.scope`), since the engine can't see unstored ones.
+     `createdFrom` is refused on create and kept or refused on update
+     (Applications through `WithServerFields`). Images are checked at
+     write: RP-109 closed. No existing test changed.
+   - **Next: T006** (`/v1/templates` and the versions routes, the
+     built-ins merged into list and get, `routeTable()` rules). T007's
+     create will build a `pendingView` and call the two `admit`s.
    - **GitHub:** task issues #385 to #398 are all open and linked under
      #68. Epic #68's body is in epic #1's layout with the `## Tasks`
-     checklist (T001–T004 ticked), and #385–#388 are closed, by a paced
-     script (`gh027.sh`, log `gh027.log` in this session's scratchpad).
-     If its log doesn't end in `DONE`, check each issue before
-     re-running it.
+     checklist (T001–T004 ticked), and #385–#388 are closed. T005 is
+     #389 (closed by its commit; tick it in #68's checklist).
 
 **Results on the L480 today (evidence in `~/.serendip-l480/rp096/` and
 `rp083-after-uninstall.txt` on the desktop):**

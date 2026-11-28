@@ -367,15 +367,14 @@ var secretValueRead = policy.Action{Name: "serendip/secrets/value/read", Data: t
 // its own validation: the build capability is ready, and the credential
 // Secret exists and may be read by the caller.
 type sourceChecker struct {
-	ready  func() error
-	exists func(ctx context.Context, kind resource.Kind, id string) (bool, error)
+	ready func() error
 }
 
 // check checks c's source, on update against current as stored, and
 // returns the context with the credential's check in its policy evidence.
 // A source left exactly as it was isn't checked again, so a Component's
 // other fields can be edited while the package is down.
-func (s sourceChecker) check(ctx context.Context, c resource.Component, current *resource.Component) (context.Context, error) {
+func (s sourceChecker) check(ctx context.Context, v workloadView, c resource.Component, current *resource.Component) (context.Context, error) {
 	src := c.Spec.Source
 	if src == nil {
 		return ctx, nil
@@ -401,17 +400,14 @@ func (s sourceChecker) check(ctx context.Context, c resource.Component, current 
 		return ctx, nil
 	}
 	at := resource.Scope{Kind: resource.KindSecret, ID: src.CredentialSecret}
-	ctx, ok, err := allowedNoted(ctx, secretValueRead, at)
+	ctx, ok, err := allowedNoted(ctx, secretValueRead, v.scope(at))
 	if err != nil {
 		return ctx, err
 	}
 	if !ok {
 		return ctx, deployRefuse(http.StatusForbidden, "forbidden", "missing %s at Secret/%s: a build reads its credential's value, so naming it needs reading that value", secretValueRead.Name, src.CredentialSecret)
 	}
-	if s.exists == nil {
-		return ctx, nil
-	}
-	found, err := s.exists(ctx, resource.KindSecret, src.CredentialSecret)
+	found, err := v.exists(ctx, resource.KindSecret, src.CredentialSecret)
 	if err != nil {
 		return ctx, err
 	}

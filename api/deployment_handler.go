@@ -53,6 +53,9 @@ type DeploymentHandler struct {
 	// secretEnv checks the Secrets the overrides' secret variables name
 	// (spec 026).
 	secretEnv secretEnvChecker
+	// view is what admission reads (storedView); a template's create
+	// admits through a pendingView instead (spec 027).
+	view workloadView
 	// mu serialises Deployment writes, so two requests can't both pass
 	// the one-per-Environment check and both create (requests run
 	// concurrently; one control plane, so a mutex is enough). It's
@@ -145,12 +148,12 @@ const schemaCheckTimeout = 10 * time.Second
 // releases work while the platform is away (RP-032). current is the
 // Deployment as read before the lock (nil on create); if it changes
 // meanwhile, the store's version check refuses the write.
-func (h *DeploymentHandler) checkConfig(ctx context.Context, d resource.Deployment, current *resource.Deployment) error {
+func (h *DeploymentHandler) checkConfig(ctx context.Context, v workloadView, d resource.Deployment, current *resource.Deployment) error {
 	same, err := overridesEqual(current, d.Spec.Overrides)
 	if err != nil || same {
 		return err
 	}
-	comp, err := h.comps.Get(ctx, d.Spec.Component)
+	comp, err := v.component(ctx, d.Spec.Component)
 	if errors.Is(err, store.ErrNotFound) {
 		return deployRefuse(http.StatusBadRequest, "validation failed", "Component %s not found", d.Spec.Component)
 	} else if err != nil {
@@ -166,25 +169,25 @@ func (h *DeploymentHandler) checkConfig(ctx context.Context, d resource.Deployme
 // editing overrides further along the pipeline mustn't depend on what
 // earlier Environments run now. The context it returns carries the
 // Component read check in its policy evidence.
-func (h *DeploymentHandler) admit(ctx context.Context, d resource.Deployment, envID string, current *resource.Deployment) (context.Context, error) {
+func (h *DeploymentHandler) admit(ctx context.Context, v workloadView, d resource.Deployment, envID string, current *resource.Deployment) (context.Context, error) {
 	if err := resource.ValidateDeploymentSpec(d.Spec); err != nil {
 		return ctx, err
 	}
 	compRead := policy.Action{Name: "serendip/components/read"}
-	ctx, ok, err := allowedNoted(ctx, compRead, resource.Scope{Kind: resource.KindComponent, ID: d.Spec.Component})
+	ctx, ok, err := allowedNoted(ctx, compRead, v.scope(resource.Scope{Kind: resource.KindComponent, ID: d.Spec.Component}))
 	if err != nil {
 		return ctx, err
 	}
 	if !ok {
 		return ctx, deployRefuse(http.StatusForbidden, "forbidden", "missing %s at Component/%s: deploying a Component needs reading it", compRead.Name, d.Spec.Component)
 	}
-	return h.coherent(ctx, d, envID, current)
+	return h.coherent(ctx, v, d, envID, current)
 }
 
 // coherent checks d's Environment, Component, Project, secret variables
 // and pipeline, and returns the context with the secret variables' checks
 // in its policy evidence.
-func (h *DeploymentHandler) coherent(ctx context.Context, d resource.Deployment, envID string, current *resource.Deployment) (context.Context, error) {
+func (h *DeploymentHandler) coherent(ctx context.Context, v workloadView, d resource.Deployment, envID string, current *resource.Deployment) (context.Context, error) {
 	var selfID string
 	var history []string
 	if current != nil {
@@ -197,13 +200,13 @@ func (h *DeploymentHandler) coherent(ctx context.Context, d resource.Deployment,
 	} else if err != nil {
 		return ctx, err
 	}
-	comp, err := h.comps.Get(ctx, d.Spec.Component)
+	comp, err := v.component(ctx, d.Spec.Component)
 	if errors.Is(err, store.ErrNotFound) {
 		return ctx, deployRefuse(http.StatusBadRequest, "validation failed", "Component %s not found", d.Spec.Component)
 	} else if err != nil {
 		return ctx, err
 	}
-	app, err := h.apps.Get(ctx, owner(comp.Metadata, resource.KindApplication))
+	app, err := v.application(ctx, owner(comp.Metadata, resource.KindApplication))
 	if err != nil {
 		return ctx, deployRefuse(http.StatusBadRequest, "validation failed", "the Component's Application can't be read: %v", err)
 	}
@@ -222,11 +225,11 @@ func (h *DeploymentHandler) coherent(ctx context.Context, d resource.Deployment,
 	if current != nil {
 		was = current.Spec.Overrides.SecretEnv
 	}
-	ctx, err = h.secretEnv.check(ctx, "overrides.secretEnv", d.Spec.Overrides.SecretEnv, was, func(context.Context) (string, error) { return projectID, nil })
+	ctx, err = h.secretEnv.check(ctx, v, "overrides.secretEnv", d.Spec.Overrides.SecretEnv, was, func(context.Context) (string, error) { return projectID, nil })
 	if err != nil {
 		return ctx, err
 	}
-	all, err := h.deployments.List(ctx, store.ListOptions{})
+	all, err := v.deployments(ctx)
 	if err != nil {
 		return ctx, err
 	}
@@ -355,7 +358,7 @@ func (h *DeploymentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := h.checkConfig(ctx, d, nil); err != nil {
+	if err := h.checkConfig(ctx, h.view, d, nil); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -363,7 +366,7 @@ func (h *DeploymentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer h.mu.Unlock()
 	envID, err := environmentOf(d)
 	if err == nil {
-		ctx, err = h.admit(ctx, d, envID, nil)
+		ctx, err = h.admit(ctx, h.view, d, envID, nil)
 	}
 	if err != nil {
 		h.fail(w, r, err)
@@ -389,7 +392,7 @@ func (h *DeploymentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	d.Metadata.ID = r.PathValue("id")
 	before, err := h.deployments.Get(ctx, d.Metadata.ID)
 	if err == nil && d.Spec.Component == before.Spec.Component {
-		err = h.checkConfig(ctx, d, &before)
+		err = h.checkConfig(ctx, h.view, d, &before)
 	}
 	if err != nil {
 		h.fail(w, r, err)
@@ -410,7 +413,7 @@ func (h *DeploymentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	case d.Spec.Component != current.Spec.Component:
 		err = deployRefuse(http.StatusBadRequest, "validation failed", "a Deployment's Component can't change: create another Deployment")
 	default:
-		ctx, err = h.admit(ctx, d, envID, &current)
+		ctx, err = h.admit(ctx, h.view, d, envID, &current)
 	}
 	if err != nil {
 		h.fail(w, r, err)
@@ -486,7 +489,7 @@ func (h *DeploymentHandler) Promote(w http.ResponseWriter, r *http.Request) {
 			Metadata: resource.Metadata{Name: src.Metadata.Name, OwnerRefs: []resource.OwnerRef{{Kind: resource.KindEnvironment, ID: body.To}}},
 			Spec:     resource.DeploymentSpec{Component: src.Spec.Component, Release: release},
 		}
-		ctx, err := h.admit(ctx, d, body.To, nil)
+		ctx, err := h.admit(ctx, h.view, d, body.To, nil)
 		if err != nil {
 			h.fail(w, r, err)
 			return
@@ -507,7 +510,7 @@ func (h *DeploymentHandler) Promote(w http.ResponseWriter, r *http.Request) {
 	}
 	current := *target
 	target.Spec.Release = release
-	ctx, err = h.admit(ctx, *target, body.To, &current)
+	ctx, err = h.admit(ctx, h.view, *target, body.To, &current)
 	if err != nil {
 		h.fail(w, r, err)
 		return

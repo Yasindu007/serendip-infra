@@ -32,6 +32,15 @@
   - Naming a Secret that the system will read for the caller (a build's
     `source.credentialSecret`) needs the value's data action at that
     Secret, checked by the handler (`sourceChecker`).
+  - Component and Deployment admission (`ComponentHandler.admit`,
+    `DeploymentHandler.admit`) reads a `workloadView`
+    (`workload_view.go`, spec 027), never the stores directly: the
+    handlers pass `storedView`, and a template's create a `pendingView`
+    over its unstored batch. Decide a permission at `v.scope(at)`, so a
+    pending resource is decided at its nearest stored owner.
+  - Server-set spec fields (`createdFrom`) are refused on a client's
+    create and kept or refused on update (`keepCreatedFrom`;
+    `WithServerFields` on a generic handler).
   - Body-dependent checks on a generic `ResourceHandler` go in
     `WithAuthorize` (spec 024, `alerting_authz.go`): a rule's newly named
     channels need read on each, and a channel's allowances need the

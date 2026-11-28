@@ -345,7 +345,9 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 	mountResource[resource.SiteSpec, resource.SiteStatus](apiMux, db, bus, resource.KindSite, "sites")
 	mountResource[resource.ClusterSpec, resource.ClusterStatus](apiMux, db, bus, resource.KindCluster, "clusters")
 	mountResource[resource.NodeSpec, resource.NodeStatus](apiMux, db, bus, resource.KindNode, "nodes")
-	NewResourceHandler[resource.ApplicationSpec, resource.ApplicationStatus](appStore, "applications").Register(apiMux)
+	// An Application's createdFrom is the server's (spec 027).
+	NewResourceHandler[resource.ApplicationSpec, resource.ApplicationStatus](appStore, "applications").
+		WithServerFields(applicationCreatedFrom).Register(apiMux)
 	compStore := sqlite.NewStore[resource.ComponentSpec, resource.ComponentStatus](db, resource.KindComponent).SetBus(bus)
 	// Components (spec 020 T009): their own Create and Update keep declared
 	// dependencies coherent; plus dependencies and an Application's topology.
@@ -353,19 +355,24 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 	// Secret variables (spec 026) are checked on Components and
 	// Deployments alike.
 	workloadGraph := graph.NewSQLiteGraph(db)
-	secretEnv := secretEnvChecker{exists: resourceExistsIn(db), ancestors: workloadGraph.Ancestors}
+	secretEnv := secretEnvChecker{}
 	// One lock for Component and Deployment writes: each checks the
 	// other's variables.
 	workloadWrites := &sync.Mutex{}
 	deployStore := sqlite.NewStore[resource.DeploymentSpec, resource.DeploymentStatus](db, resource.KindDeployment).SetBus(bus)
+	// What Component and Deployment admission reads (spec 027 plan
+	// decision 7); a template's create layers its pending batch on it.
+	workloads := storedView{comps: compStore, apps: appStore, deploys: deployStore,
+		existsIn: resourceExistsIn(db), ancestorsOf: workloadGraph.Ancestors}
 	(&ComponentHandler{
 		ResourceHandler:  NewResourceHandler[resource.ComponentSpec, resource.ComponentStatus](compStore, "components"),
 		comps:            compStore,
 		apps:             appStore,
 		recordDenied:     recordDeniedIn(db),
-		source:           sourceChecker{ready: buildReady, exists: resourceExistsIn(db)},
+		source:           sourceChecker{ready: buildReady},
 		secretEnv:        secretEnv,
 		deployments:      deployStore,
+		view:             workloads,
 		dependents:       workloadGraph.Dependents,
 		secretEnvChanged: opts.secretEnvChanged,
 		mu:               workloadWrites,
@@ -380,6 +387,7 @@ func registerAPI(apiMux Mux, db *sql.DB, bus event.Bus, engine *policy.Engine, a
 		schemas:      opts.schemas,
 		recordDenied: recordDeniedIn(db),
 		secretEnv:    secretEnv,
+		view:         workloads,
 		mu:           workloadWrites,
 	}).Register(apiMux)
 	(&SchemaHandler{comps: compStore, schemas: opts.schemas}).Register(apiMux)
