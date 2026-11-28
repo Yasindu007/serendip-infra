@@ -24,6 +24,17 @@ review first. Each task commit says `Closes #N` for its issue.
 - **Verify:** `go test ./providers/application/openchoreo/...` passes
   with the new test; the ADR and the spec changes are read back.
 
+**Done as** (2026-11-28): `spec.md` scope items 5 and 8 and criteria 8
+and 9 reworded (built-ins readable by anyone signed in; one request ID
+ties the creation's audit rows). ADR 0025, "Templates". The provider
+test is `unmapped_test.go`, table-driven: a change to a field the
+provider doesn't put on the Workload (today `secretEnv`) leaves the
+Workload's generation, the writes and the releases (compared whole)
+unchanged. `secretEnv` is a stand-in, since `EnsureComponent` never
+reads it; T002 adds the `createdFrom` rows (Component and Application)
+once the field exists. The plan's risks are registered as RP-104 to
+RP-108, because the ADR cites them. contract-guardian: PASS.
+
 ## T002: The kinds and their validation (core)
 
 - **Do:**

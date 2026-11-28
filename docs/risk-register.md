@@ -2640,3 +2640,56 @@ The text below is the T013 record.
   encryption banner.
 - **Revisit:** if Project-only users need it. The answer holds no
   Project data, so it could be open to any signed-in user.
+
+## RP-104 — A template's "latest" version is the newest created, not the highest
+
+- **Kind:** usability. **Status:** Accepted, 2026-11-28. **Found:** spec
+  027 plan (decision 1).
+- **What:** version labels are free text and aren't sorted as semver, so
+  publishing `1.1` after `2.0` makes `1.1` the latest. Azure has no
+  latest at all and makes you name a version.
+- **Mitigation:** the console shows each label's creation date.
+- **Revisit:** if people publish fixes to old lines, with an explicit
+  "latest" pointer on the Template.
+
+## RP-105 — `createdFrom` sits in the spec of user-writable kinds
+
+- **Kind:** security. **Status:** Accepted, 2026-11-28. **Found:** spec
+  027 plan (decision 9).
+- **What:** provenance is a field on `ApplicationSpec` and
+  `ComponentSpec`, set only by the template path. The Application and
+  Component handlers refuse it on create and refuse a change on update.
+  A future generic write path that skipped them could forge it.
+- **Revisit:** if a new write path for these kinds appears; a
+  store-level check is the backstop.
+
+## RP-106 — Built-in templates are readable by anyone signed in
+
+- **Kind:** security. **Status:** Accepted, 2026-11-28. **Found:** spec
+  027 plan (decision 5).
+- **What:** like built-in role definitions, the built-ins are
+  `authOnly`, so an agent or user with no role assignment can read them.
+  They hold no data, and using one still needs every permission the
+  created resources need.
+- **Revisit:** if a built-in ever carries install-specific data.
+
+## RP-107 — Resources made from a template don't follow it
+
+- **Kind:** usability. **Status:** Accepted, 2026-11-28. **Found:** spec
+  027 plan (spec Out).
+- **What:** creation copies the rendered body; a later version or fix
+  doesn't reach Applications made earlier, though users may expect it
+  to.
+- **Mitigation:** the console says so on the create screen, and
+  `createdFrom` names the version used.
+- **Revisit:** with a re-apply and drift report, if asked for.
+
+## RP-108 — A template create holds SQLite's write lock for the whole batch
+
+- **Kind:** performance. **Status:** Open, 2026-11-28 (measured in spec
+  027 T004). **Found:** spec 027 plan (decision 8).
+- **What:** up to 20 Components plus their Deployments go in one
+  transaction, holding the write lock and the workload lock for the
+  batch.
+- **Revisit:** if T004's benchmark is over 50 ms on the L480, lower the
+  20-Component limit.

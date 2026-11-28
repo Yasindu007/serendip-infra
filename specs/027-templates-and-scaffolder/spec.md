@@ -63,8 +63,9 @@ model, for the catalog idea.
    Spec in a resource group). Platform-wide templates are kept at the
    root scope `/` and need write there.
 5. **Built-in starter templates** shipped with Serendip, read-only, the
-   same on every install (as built-in roles are), and visible to anyone
-   who may create an Application somewhere. They work on edge-1 as
+   same on every install (as built-in roles are), and readable by anyone
+   signed in, as built-in role definitions are (plan decision 5; using
+   one still needs every permission in item 9). They work on edge-1 as
    installed. The plan settles the list; at least:
    - a web server from a container image;
    - a service built from a Git repository (needs the builds package,
@@ -84,9 +85,10 @@ model, for the catalog idea.
    at once. The console form uses it.
 8. **Provenance.** Each resource made from a template records the
    template, the version and who used it. The Application's page shows
-   it. The audit log records the creation as one action with its
-   parameters (a Secret parameter is recorded as the Secret's ID, never
-   a value).
+   it. The audit log records the creation as one request: each created
+   resource has its own audit row, all carrying the request's ID, and the
+   parameters are in the Application's row (plan decision 9). A Secret
+   parameter is recorded as the Secret's ID, never a value.
 9. **Authorization.** New actions `serendip/templates/{read,write,delete}`
    in the built-in roles the usual way (Reader reads, Contributor and
    Owner write and delete). Creating from a template needs
@@ -188,11 +190,12 @@ Run on a real cluster (kind, then the L480) unless a unit test is named.
    Unit-tested and checked live.
 8. **Scopes.** A Project's template is invisible to someone with no role
    in that Project; a `/` template needs write at `/` to create or
-   change; built-ins can't be changed or deleted (400) and are visible to
-   anyone who may create an Application.
+   change; built-ins can't be changed or deleted (400) and are readable
+   by anyone signed in.
 9. **Provenance and audit.** An Application made from a template shows the
    template and version in the API and on its console page, and the audit
-   log has one creation record with the parameters; no Secret value
+   log has one record set for the request (every row with its request ID,
+   the parameters in the Application's row); no Secret value
    appears in it, the response, events or `serendipd`'s log.
 10. **Deletes.** Deleting a template leaves an Approval (ADR 0016) and
     doesn't touch what was made from it; that Application's provenance
