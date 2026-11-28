@@ -123,9 +123,8 @@ with `gh auth switch -u Yasindu007` to open a PR, then switch back.
      extension.
    - **GitHub:** task issues #385 to #398 are all open and linked under
      #68. Epic #68's body is in epic #1's layout with the `## Tasks`
-     checklist (T001–T004 ticked), and #385–#388 are closed. T005 is
-     #389 (closed by its commit; tick it in #68's checklist). T006 is #390,
-     also closed by its commit; tick T005 and T006 in #68's checklist.
+     checklist (T001–T006 ticked, status line says so), and #385–#390
+     are closed. T007 is #391.
 
 **Results on the L480 today (evidence in `~/.serendip-l480/rp096/` and
 `rp083-after-uninstall.txt` on the desktop):**
