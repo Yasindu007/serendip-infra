@@ -77,11 +77,15 @@ with `gh auth switch -u Yasindu007` to open a PR, then switch back.
    - The new `admin` password is in the Secret
      `serendip-identity/serendip-identity-admin`.
 6. **Spec 027 (Templates and a scaffolder, #68):** `/new-spec` was
-   started. Read the constitution and docs, research OpenChoreo 1.3.1's
-   portal templates and Azure's equivalents (the `oss-researcher`, redo
-   it), write `specs/027-templates-and-scaffolder/spec.md`, then **stop for
-   the user's review** before `plan.md`. Spec 020 put the scaffolder out
-   of scope (`specs/020-openchoreo-console-features/spec.md:185`).
+   started. The research is done: see
+   `specs/027-templates-and-scaffolder/research.md`. Its main point is
+   that OpenChoreo's portal has **no application scaffolder**: its
+   scaffolder templates are admin tools, and Components come from a
+   wizard driven by ComponentType schemas. Azure's models are Template
+   Specs and Deployment Environments. Next, write `spec.md` in that
+   folder (constitution and docs read; spec 020 put the scaffolder out of
+   scope at `specs/020-openchoreo-console-features/spec.md:185`), then
+   **stop for the user's review** before `plan.md`.
 
 **Results on the L480 today (evidence in `~/.serendip-l480/rp096/` and
 `rp083-after-uninstall.txt` on the desktop):**
